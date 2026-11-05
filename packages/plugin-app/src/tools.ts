@@ -1,5 +1,5 @@
 /**
- * app 插件对模型暴露的工具。
+ * Outils exposés au modèle par le plugin app.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ToolPrincipal } from '../../platform-core/src/index.ts'
@@ -11,7 +11,7 @@ export const inject = ['tools', 'appRegistry', 'resourceCore', 'iam', 'audit']
 export function apply(ctx: Context) {
   const t = ctx.tools
 
-  /** 登记类工具的调用方投影（fail-closed）：owner 取令牌身份，禁止从 args 组装。 */
+  /** Projection de l'appelant pour les outils d'enregistrement (fail-closed) : owner pris de l'identité du jeton, interdiction de l'assembler depuis args. */
   const registrarOf = (principal?: ToolPrincipal): { id: string; name: string } => {
     if (!principal) throw new Error(translate('工具执行缺少身份上下文（fail-closed）'))
     return { id: principal.userId ?? principal.principalId, name: principal.name }
@@ -144,7 +144,7 @@ export function apply(ctx: Context) {
     async execute(args, exec) {
       const registrar = registrarOf(exec.principal)
       const attrs = { ...(args.attrs && typeof args.attrs === 'object' ? args.attrs as Record<string, unknown> : {}) }
-      // 与 REST POST /api/apps 同口径：developerId 须为在编平台用户（校验失败即拒绝登记）
+      // Même périmètre que le REST POST /api/apps : developerId doit être un utilisateur plateforme en poste (échec de validation = enregistrement refusé)
       const developerId = typeof attrs['developerId'] === 'string' ? attrs['developerId'].trim() : ''
       if (developerId) {
         const developer = ctx.iam.users().get(developerId)

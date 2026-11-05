@@ -1,10 +1,10 @@
 /**
- * 审批负载卫生与规则源自证（OPT-P2-02 配套测试，2026-09-12）。
- * 运行：node --test packages/plugin-audit/src/approval.test.mjs
+ * Hygiène des charges d'approbation et provenance des règles (tests d'accompagnement OPT-P2-02, 2026-09-12).
+ * Exécution : node --test packages/plugin-audit/src/approval.test.mjs
  *
- * 覆盖面：敏感键扫描/深度掩码/规则源口径/createApproval 掩码入库 + reject 类拒绝/
- * executor 失败 → 补偿编排并回写（registerCompensation 注册表 5 例）。
- * 补偿用例以实例级桩件驱动 AuditService（approvals/record/platformBus 以纯对象替身注入）。
+ * Couverture : scan des clés sensibles/masquage profond/périmètre de la source de règles/createApproval avec masque à l'entrée + refus de type reject/
+ * échec de l'exécuteur → orchestration de compensation et réécriture (5 cas au registre registerCompensation).
+ * Les cas de compensation pilotent AuditService avec des doublons au niveau instance (approvals/record/platformBus injectés comme objets de substitution purs).
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -37,12 +37,12 @@ test('规则源：admin 续调=reject，连接类=mask，未知 kind 缺省 mask
 function makeStubAudit({ executorError } = {}) {
   const ctx = new Context()
   const events = []
-  // 构造器会向总线订阅一批事件：注入桩总线（on 返回空注销函数）
+  // Le constructeur s'abonne à un lot d'événements sur le bus : injection du bus factice (on renvoie une fonction de désinscription vide)
   ctx.platformBus = {
     on: () => () => {},
     emit: (name, payload) => events.push({ name, payload }),
   }
-  // 构造器还会向 usage 消费管道注册计量订阅
+  // Le constructeur enregistre aussi un abonnement de mesure sur le pipeline de consommation usage
   ctx.usage = { consume: () => () => {} }
   const audit = new AuditService(ctx)
   const store = new Map()
@@ -125,11 +125,11 @@ test('补偿注册表⑥：mask 类 kind 携敏感入参 → 掩码入库且 mas
 })
 
 // ---------------------------------------------------------------------------
-// 同目标在途单收口（2026-11-02）：幂等复用 / 执行成功收口 / 失败不收口 / 启动期自愈 / SLA 口径
-// 背景：人工提交 Agent 上线单后治理 Agent 又对同一 agentId 另开一张并批掉，人工那张永久挂 pending。
+// Clôture des dossiers en cours sur un même objectif (2026-11-02) : réutilisation idempotente / clôture après exécution réussie / pas de clôture en échec / auto-réparation au démarrage / périmètre SLA
+// Contexte : après le dépôt humain d'un dossier de mise en ligne d'Agent, l'Agent de gouvernance en ouvrait un autre sur le même agentId et le validait ; le dossier humain restait pending à jamais.
 // ---------------------------------------------------------------------------
 
-/** 带谓词的集合替身（基础桩的 find 忽略谓词，收口逻辑依赖谓词过滤，故另起一套）。 */
+/** Doublon de collection avec prédicat (le find du socle factice ignore le prédicat ; la logique de clôture en dépend, d'où un jeu séparé). */
 function makeTargetStubAudit() {
   const ctx = new Context()
   const events = []

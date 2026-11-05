@@ -1,74 +1,74 @@
 /**
- * 表现层汉化覆盖清点（R11，REFACTOR-2026-10-13，2026-10-13）。
+ * Recensement de la couverture de sinisation de la couche présentation (R11, REFACTOR-2026-10-13, 2026-10-13).
  *
- * 目标：量化「用户可见面」的英文残留，建立汉化工作底册（阶段 2 逐项消灭，
- * 出口为命中数 0——白名单豁免项须登记销账条件）。
+ * Objectif : quantifier les résidus anglais de la « face visible utilisateur », établir le registre de travail de sinisation (élimination point par point en phase 2,
+ * sortie à zéro correspondance — les exemptions de liste blanche doivent être enregistrées avec leur condition de radiation).
  *
- * 扫描面（阶段 0 口径）：
- *   - packages 下各插件的 public 目录内 .js 与 .html（console / panel-core / rq-card 前端）；
- *   - cli/dshctl.mjs（CLI 输出面）；
- *   - 通知/审批/邮件模板散布于各插件 TS 源码，全量扫误报率高，留待阶段 2
- *     按 R1 清单定向清点（取舍记录于 docs/internal/重构基线-阶段0-20261013.md）。
+ * Surface scannée (périmètre phase 0) :
+ *   - .js et .html des répertoires public des plugins sous packages (frontends console / panel-core / rq-card) ;
+ *   - cli/dshctl.mjs (face de sortie CLI) ;
+ *   - les gabarits de notification/approbation/e-mail sont dispersés dans les sources TS des plugins ; un scan intégral aurait un taux de faux positifs élevé, reporté en phase 2
+ *     à un recensement dirigé selon la liste R1 (choix consignés dans docs/internal/重构基线-阶段0-20261013.md).
  *
- * 判定模型（三层过滤，只留「疑似用户可见英文」）：
- *   1. 字符串字面量（'…"…`…`）且所在行非注释；模板插值 ${…} 剥离后判定；
- *   2. 含中文 → 合格；纯标识符形态（无空格的 kebab/snake/camel、路径、
- *      URL、文件名、MIME 等）→ 按词白名单判定；
- *   3. 句式形态（含空格的英文短语）或白名单外 ≥4 字母英文词 → 命中。
- *   HTML 文件只扫标签间文本节点与 title/alt/placeholder/aria-label 属性。
+ * Modèle de jugement (trois filtres, ne garder que « l'anglais vraisemblablement visible par l'utilisateur ») :
+ *   1. littéraux de chaîne ('…"…`…`) dont la ligne n'est pas un commentaire ; jugé après retrait des interpolations ${…} de gabarits ;
+ *   2. contenant du chinois → conforme ; forme pure d'identifiant (kebab/snake/camel sans espaces, chemins,
+ *      URL, noms de fichiers, MIME etc.) → jugé par la liste blanche de mots ;
+ *   3. forme de phrase (phrase anglaise avec espaces) ou mot anglais ≥4 lettres hors liste blanche → correspondance.
+ *   Les fichiers HTML ne scannent que les nœuds de texte entre balises et les attributs title/alt/placeholder/aria-label.
  *
- * 白名单分两层：
- *   - 内置词表（本文件 TOKEN_WHITELIST）：协议词/品牌词/单位词/技术缩写/
- *     状态枚举（协议层保留 ASCII，阶段 2 补 labelZh 中文伴随字段）；
- *   - 豁免登记 scripts/lint-cjk-coverage.exemptions.json（kind::key 机制，
- *     key = 「文件::字面量」；每条必须写明销账条件，阶段 2 消灭后移除）。
+ * La liste blanche a deux niveaux :
+ *   - lexique intégré (TOKEN_WHITELIST de ce fichier) : mots de protocole/marques/unités/abbréviations techniques/
+     énumérations d'état (l'ASCII est conservé à la couche protocole, phase 2 ajoute un champ compagnon labelZh) ;
+ *   - registre d'exemptions scripts/lint-cjk-coverage.exemptions.json (mécanisme kind::key,
+     key = « fichier::littéral » ; chaque entrée doit indiquer sa condition de radiation, retirée une fois éliminée en phase 2).
  *
- * 用法：
- *   node scripts/lint-cjk-coverage.mjs            # 报告模式（exit 0，产出底册）
- *   node scripts/lint-cjk-coverage.mjs --strict   # 门禁模式（存在未豁免命中即 exit 1）
+ * Usage :
+ *   node scripts/lint-cjk-coverage.mjs            # mode rapport (exit 0, produit le registre)
+ *   node scripts/lint-cjk-coverage.mjs --strict   # mode porte (toute correspondance non exemptée = exit 1)
  */
 import { readdir, readFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 
 /**
- * 内置词白名单：这些英文词允许出现在用户可见面（协议/品牌/单位/技术缩写/枚举）。
- * 阶段 2 收紧口径时从本表移除并改造为中文伴随字段。
+ * Lexique blanc intégré : ces mots anglais sont admis sur la face visible utilisateur (protocole/marques/unités/abbréviations techniques/énumérations).
+ * Au resserrement de phase 2, les retirer de cette table et les transformer en champs compagnons chinois.
  */
 const TOKEN_WHITELIST = new Set([
-  // HTTP / 协议
+  // HTTP / protocole
   'HTTP', 'HTTPS', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS',
   'content', 'type', 'application', 'json', 'text', 'plain', 'Bearer', 'Authorization',
   'token', 'Token', 'refresh', 'session', 'cookie', 'multipart', 'form', 'data',
   'charset', 'utf', 'localhost', 'origin', 'referer', 'scheme', 'query', 'fragment',
-  // 格式 / 缩写
+  // Formats / abréviations
   'API', 'URL', 'URI', 'JSON', 'CSV', 'HTML', 'CSS', 'DOM', 'SDK', 'CLI', 'UI', 'UX',
   'MIME', 'BASE64', 'HMAC', 'SHA', 'MD5', 'UUID', 'QPS', 'SLA', 'CSV', 'YAML',
   'OpenAPI', 'OAuth', 'OIDC', 'SAML', 'SSO', 'JWT', 'JWKS', 'SSE', 'WebSocket',
-  // 品牌与生态专名
+  // Marques et noms propres de l'écosystème
   'MCP', 'NAS', 'dsh', 'DSH', 'RQ', 'ACL', 'OK', 'OKTA', 'Keycloak', 'DingTalk',
   'WeChat', 'GitHub', 'GitLab', 'Google', 'Microsoft', 'Apple', 'Linux', 'Windows',
   'macOS', 'Node', 'npm', 'pnpm', 'Ed25519', 'SQLite', 'Cordis', 'cordis',
   'YUANBINGKE', 'Ybk',
-  // 领域名词（产品口径保留英文的品牌化称呼；阶段 2 复核）
+  // Noms de domaine (appellations brandées conservées en anglais dans le périmètre produit ; revue en phase 2)
   'Agent', 'Agents', 'Skill', 'Skills', 'Tool', 'Tools', 'Model', 'Models',
   'Connector', 'Connectors', 'Webhook', 'Webhooks', 'Dashboard', 'Marketplace',
   'Client', 'Clients', 'Secret', 'Scope', 'Scopes', 'Issuer', 'Endpoint', 'Endpoints',
   'Owner', 'Admin', 'Reader', 'Writer', ' Upstream', 'Downstream', 'Fallback',
-  // 状态枚举（协议层保留 ASCII，UI 展示需配中文伴随——阶段 2 消化）
+  // Énumérations d'état (ASCII conservé à la couche protocole, l'affichage UI doit être accompagné de chinois — à digérer en phase 2)
   'Active', 'Inactive', 'Pending', 'Running', 'Failed', 'Success', 'Cancelled',
   'Canceled', 'Enabled', 'Disabled', 'Draft', 'Published', 'Offline', 'Online',
   'Degraded', 'Unknown', 'Ready', 'Bound', 'Expired', 'Frozen', 'Approved',
   'Rejected', 'Reviewing', 'Processing', 'Completed', 'Skipped', 'Error',
-  // 布尔 / 空 / 单位
+  // Booléens / vide / unités
   'true', 'false', 'null', 'undefined', 'none', 'None', 'NaN', 'ms', 'qps',
   'KB', 'MB', 'GB', 'TB', 'KiB', 'MiB', 'GiB', 'TiB', 'bytes', 'min', 'hour',
-  // 编码/密钥格式（协议层）
+  // Formats d'encodage/clés (couche protocole)
   'base64', 'base64url', 'pkcs8', 'spki', 'pem', 'hex', 'utf8',
-  // 前端技术标识符常见词（类名/键名拼料）
+  // Mots courants des identifiants techniques frontend (matière des noms de classes/clés)
   'grid', 'flex', 'auto', 'none', 'hidden', 'block', 'inline', 'wrap', 'items',
   'center', 'start', 'dark', 'light', 'primary', 'danger', 'warning', 'info',
   'badge', 'card', 'panel', 'modal', 'toast', 'table', 'page', 'size', 'small',
-  // UI 语义 tone / 类名 token（CSS 语义色与样式族，协议层保留 ASCII）
+  // tone / tokens de classes à sémantique UI (couleurs sémantiques CSS et familles de styles, ASCII conservé à la couche protocole)
   'success', 'warning', 'danger', 'info', 'primary', 'default', 'secondary', 'ghost',
   'btn', 'icon', 'tab', 'tabs', 'nav', 'row', 'col', 'wrap', 'gap', 'pill', 'dot',
   'kbd', 'chart', 'terminal', 'ticket', 'globe', 'file', 'files', 'download', 'link',
@@ -82,36 +82,36 @@ const TOKEN_WHITELIST = new Set([
 
 const IDENTIFIER_RE = /^[A-Za-z0-9_$./:#&?=,-]+$/
 
-/** 剥离模板插值 ${…}，返回静态部分 */
+/** Retire les interpolations ${…} des gabarits, renvoie la partie statique */
 export function stripInterpolation(literal) {
   return literal.replace(/\$\{[^}]*\}/g, ' ')
 }
 
-/** 提取字符串中全部英文词（≥minLen 字母），camelCase 不拆（保持协议字段词形） */
+/** Extrait tous les mots anglais d'une chaîne (≥minLen lettres), camelCase non décomposé (préserve la forme des champs de protocole) */
 export function extractWords(text, minLen) {
   return text.match(new RegExp(`[A-Za-z]{${minLen},}`, 'g')) ?? []
 }
 
-/** 判定一个字符串字面量是否疑似英文残留；返回 true=命中 */
+/** Juge si un littéral de chaîne est un résidu anglais vraisemblable ; renvoie true = correspondance */
 export function isSuspectLiteral(raw) {
   const s = stripInterpolation(raw).trim()
   if (!s || /[\u4e00-\u9fff]/.test(s)) return false
   if (!/\s/.test(s)) {
-    // 无空格（单词/标识符形态）：
-    // 路径 / URL / 文件名 / MIME（含 / . : 之一）→ 协议面，合格
+    // Sans espace (mot/identifiant) :
+    // chemin / URL / nom de fichier / MIME (contient l'un de / . :) → facette protocole, conforme
     if (/[/./:]/.test(s)) return false
-    // snake_case / kebab-case 协议键（多词连接）→ 协议面，合格
+    // clés de protocole snake_case / kebab-case (mots liés) → facette protocole, conforme
     if (/^[a-z0-9]+(?:[-_][a-z0-9]+)+$/i.test(s)) return false
-    // 其余单词（如 deactivated）：白名单外 ≥4 字母 → 命中（展示残留）
+    // autres mots (comme deactivated) : ≥4 lettres hors liste blanche → correspondance (résidu d'affichage)
     const words = extractWords(s, 4)
     return words.length > 0 && words.some((w) => !TOKEN_WHITELIST.has(w))
   }
-  // 句式形态（含空格的英文短语）→ 高置信用户可见文案：白名单外 ≥3 字母词命中
+  // Forme de phrase (phrase anglaise avec espaces) → libellé visible utilisateur à haute confiance : mots ≥3 lettres hors liste blanche = correspondance
   const words = extractWords(s, 3)
   return words.length > 0 && words.some((w) => !TOKEN_WHITELIST.has(w))
 }
 
-/** HTML → 待检文本数组：标签间文本节点 + title/alt/placeholder/aria-label 属性值 */
+/** HTML → tableau de textes à inspecter : nœuds de texte entre balises + valeurs des attributs title/alt/placeholder/aria-label */
 export function extractHtmlVisibleTexts(html) {
   const texts = []
   const noScripts = html.replace(/<(script|style)[\s\S]*?<\/(script|style)>/g, ' ')
@@ -125,13 +125,13 @@ export function extractHtmlVisibleTexts(html) {
   return texts
 }
 
-/** 值为代码料（非用户文案）的对象元数据键：这些键后的字符串值不判定 */
+/** Clés de métadonnées à valeur de matière de code (pas des libellés utilisateur) : les valeurs de chaîne qui suivent ces clés ne sont pas jugées */
 const METADATA_KEY_RE = /(?:icon|badge|perm|path|ext|landing|type|key|field|ref|view|tab|mode|size|tone|color|src|slot|align|shape|variant|scope|role|format|category|group|tags?|code|prop|attr|event|signal|channel|source|target|driver|adapter|strategy|slot)\s*:\s*$/
 
-/** DOM / 代码料调用上下文：字符串紧随这些调用形式出现 → 不判定 */
+/** Contextes d'appel DOM/matière de code : une chaîne apparaissant juste après ces formes d'appel → non jugée */
 const DOM_CALL_RE = /(?:\$|\bicon|\besc|\bcls|\bh|querySelectorAll|querySelector|getElementById|closest|createElement|addEventListener|removeEventListener|classList(?:\.[a-z]+)?|setAttribute|getAttribute|insertAdjacentHTML|dataset\.[a-zA-Z]+)\(\s*$/
 
-/** HTML 片段 → 标签间文本节点数组（类名/属性被自然剥除） */
+/** Fragment HTML → tableau des nœuds de texte entre balises (classes/attributs naturellement retirés) */
 export function extractTemplateTextNodes(fragment) {
   const texts = []
   for (const m of fragment.matchAll(/>([^<>]*\S[^<>]*)</g)) {
@@ -141,15 +141,15 @@ export function extractTemplateTextNodes(fragment) {
   return texts
 }
 
-/** 判定模板字面量内容（CLI 脚手架输出常为 YAML 结构，属协议内容不判定） */
+/** Juge le contenu d'un littéral de gabarit (les sorties d'échafaudage CLI sont souvent du YAML, contenu de protocole, non jugé) */
 export function isYamlStructureLine(line) {
   return /^\s*-?\s*[\w."'-]+\s*:(\s|$)/.test(line) || /^\s*- /.test(line)
 }
 
 /**
- * 全文字符级字面量提取：顺序消费字符——模板字面量整体吞掉（内部引号不外泄、
- * 跨行正确），插值 ${…} 内部跳过（代码料），行注释跳过。
- * 返回 [{ quote, value, index }]（模板字面量 quote='`'）。
+ * Extraction littérale à niveau caractère de tout le texte : consommation séquentielle des caractères — les gabarits sont avalés en entier (les guillemets internes ne s'échappent pas,
+ * multi-lignes corrects), l'intérieur des interpolations ${…} est sauté (matière de code), les commentaires de ligne sautés.
+ * Renvoie [{ quote, value, index }] (gabarits : quote='`').
  */
 export function parseLiterals(text) {
   const out = []
@@ -184,7 +184,7 @@ export function parseLiterals(text) {
         }
         j++
       }
-      // 插值已剥离的静态内容
+      // contenu statique après retrait des interpolations
       let value = ''
       let k = i + 1
       let d = 0
@@ -225,7 +225,7 @@ export function parseLiterals(text) {
   return out
 }
 
-/** index → 行号 */
+/** index → numéro de ligne */
 function makeLineLookup(text) {
   const starts = [0]
   for (let i = 0; i < text.length; i++) if (text[i] === '\n') starts.push(i + 1)
@@ -240,7 +240,7 @@ function makeLineLookup(text) {
   }
 }
 
-/** 扫描单个 JS 文件（含 .mjs CLI），返回命中数组 [{ file, line, literal }] */
+/** Scanne un fichier JS seul (.mjs CLI inclus), renvoie le tableau de correspondances [{ file, line, literal }] */
 export function scanJsFile(file, text) {
   const hits = []
   const lineOf = makeLineLookup(text)
@@ -251,20 +251,20 @@ export function scanJsFile(file, text) {
   }
   for (const lit of parseLiterals(text)) {
     const before = text.slice(lineStart(lit.index), lit.index)
-    // 对象键位置（字面量后紧跟冒号）→ 代码料
+    // position de clé d'objet (deux-points juste après le littéral) → matière de code
     const after = text.slice(lit.index + 1 + lit.value.length + 1, lit.index + 1 + lit.value.length + 3)
     if (/^\s*:/.test(after)) continue
-    // 元数据键值语义（icon: 'x' / badge: 'y' 等）→ 代码料
+    // sémantique clé-valeur de métadonnées (icon: 'x' / badge: 'y' etc.) → matière de code
     if (METADATA_KEY_RE.test(before)) continue
-    // DOM / 代码料调用上下文 → 代码料
+    // contexte d'appel DOM/matière de code → matière de code
     if (DOM_CALL_RE.test(before)) continue
-    // 比较操作右侧（e.key === 'Escape'、status === 'warn'）与默认值右侧（params.get('tab') ?? 'catalog'）→ 枚举判定，代码料
+    // côté droit d'une comparaison (e.key === 'Escape', status === 'warn') et des valeurs par défaut (params.get('tab') ?? 'catalog') → jugement d'énumération, matière de code
     if (/[=!]==?\s*$/.test(before) || /\?\?\s*$/.test(before) || /\|\|\s*$/.test(before)) continue
-    // CSS 值料（渐变/颜色函数）：样式非文案
+    // matière de valeurs CSS (dégradés/fonctions de couleur) : le style n'est pas du libellé
     if (lit.quote !== '`' && /(linear|radial)-gradient\(|rgba?\(|#[0-9a-fA-F]{3,8}\b/.test(lit.value) && !lit.value.includes(' ')) continue
-    // SVG 图形字符串（path/rect/circle 等绘图元素）：无用户可见文本，整串跳过
+    // chaînes graphiques SVG (path/rect/circle etc. éléments de dessin) : pas de texte visible utilisateur, chaîne entière sautée
     if (lit.quote !== '`' && /<(svg|path|rect|circle|line|polyline|polygon|g)[\s/>]/.test(lit.value)) continue
-    // 普通字符串内嵌 HTML / SVG 片段：走文本节点提取（需闭合标签；SVG 无文本节点自然零命中）
+    // fragments HTML/SVG incrustés dans des chaînes ordinaires : passage par l'extraction de nœuds de texte (balises fermantes requises ; SVG sans nœuds de texte = zéro correspondance naturelle)
     if (lit.quote !== '`' && lit.value.includes('<') && lit.value.includes('>') && /<\/[a-zA-Z]/.test(lit.value)) {
       for (const node of extractTemplateTextNodes(lit.value)) {
         if (isSuspectLiteral(node)) hits.push({ file, line: lineOf(lit.index), literal: node })
@@ -272,8 +272,8 @@ export function scanJsFile(file, text) {
       continue
     }
     if (lit.quote === '`') {
-      // 模板字面量：HTML 片段取文本节点；YAML 脚手架结构行跳过；其余按行判定。
-      // HTML 判定需存在闭合标签（CLI usage 的 <占位符> 无闭合，走按行判定）
+      // littéraux de gabarit : fragments HTML → nœuds de texte ; lignes de structure YAML d'échafaudage sautées ; le reste jugé par ligne.
+      // le jugement HTML exige une balise fermante (les <placeholders> du usage CLI n'en ont pas, jugement par ligne)
       if (lit.value.includes('<') && lit.value.includes('>') && /<\/[a-zA-Z]/.test(lit.value)) {
         for (const node of extractTemplateTextNodes(lit.value)) {
           if (isSuspectLiteral(node)) hits.push({ file, line: lineOf(lit.index), literal: node })
@@ -283,40 +283,40 @@ export function scanJsFile(file, text) {
       for (const line of lit.value.split(/\r?\n/)) {
         const trimmed = line.trim()
         if (!trimmed || isYamlStructureLine(trimmed)) continue
-        // CLI usage 语法行（含 ≥2 个 --flag 或含命令管道 |）：接口语法契约非文案；真实文案行含 CJK 早已放行
+        // lignes de syntaxe usage CLI (≥2 --flag ou contenant un pipe de commande |) : contrat de syntaxe d'interface, pas du libellé ; les vraies lignes de libellé contenant du CJK sont déjà passées
         if (isUsageSyntaxLine(trimmed)) continue
         if (isSuspectLiteral(trimmed)) hits.push({ file, line: lineOf(lit.index), literal: trimmed })
       }
       continue
     }
-    // CLI flag/option 语法 token（--user / --orgId= / -n）：接口语法契约，非文案
+    // tokens de syntaxe flag/option CLI (--user / --orgId= / -n) : contrat de syntaxe d'interface, pas du libellé
     if (isFlagToken(lit.value)) continue
-    // CLI 域纯标识符字面量（字段键/枚举值如 pluginId、createdAt、online）：协议层保留 ASCII，
-    // 用户可见表头/枚举经 HEADER_ZH / zhEnum 中文伴随映射展示；句式（含空格）不受此规则豁免
+    // littéraux purs d'identifiants du domaine CLI (clés de champs/valeurs d'énumération comme pluginId, createdAt, online) : ASCII conservé à la couche protocole,
+    // les en-têtes/énumérations visibles passent par les mappings compagnons HEADER_ZH / zhEnum ; les phrases (avec espaces) ne sont pas exemptées par cette règle
     if (/(^|[\\/])cli[\\/]/.test(file) && /^[a-z][a-zA-Z0-9_]{1,19}$/.test(lit.value)) continue
-    // YAML/JSON 结构行（脚手架模板、manifest 片段）：协议内容非文案（CLI 域放宽——脚手架为逐行字符串数组）
+    // lignes de structure YAML/JSON (gabarits d'échafaudage, fragments de manifeste) : contenu de protocole, pas du libellé (domaine CLI relâché — l'échafaudage est un tableau de chaînes ligne à ligne)
     if (isYamlStructureLine(lit.value) && (/[\[\]{}:|]/.test(lit.value) || /(^|[\\/])cli[\\/]/.test(file))) continue
-    // URL 查询串模板（?path= / ?q=&kind=）：协议内容非文案
+    // gabarits de chaîne de requête URL (?path= / ?q=&kind=) : contenu de protocole, pas du libellé
     if (/^\?[\w=&%-]*$/.test(lit.value.trim())) continue
     if (isSuspectLiteral(lit.value)) hits.push({ file, line: lineOf(lit.index), literal: lit.value })
   }
   return hits
 }
 
-/** CLI usage 语法行：≥2 个 --flag 记号，或含命令管道分隔（真实文案不会命中） */
+/** Ligne de syntaxe usage CLI : ≥2 tokens --flag, ou contenant un séparateur de commande par pipe (un vrai libellé ne correspond jamais) */
 export function isUsageSyntaxLine(line) {
   if (/[一-鿿]/.test(line)) return false
   const flagCount = (line.match(/--[\w-]+=?/g) ?? []).length
   return flagCount >= 2 || /^\|\s/.test(line) || / \| /.test(line)
 }
 
-/** CLI flag/option 语法 token：--flag / --flag= / -f / --flag=value 形态 */
+/** Tokens de syntaxe flag/option CLI : formes --flag / --flag= / -f / --flag=value */
 export function isFlagToken(token) {
   const t = token.trim()
   return /^--?[a-zA-Z][\w-]*(=.{0,40})?$/.test(t) && t.length <= 44
 }
 
-/** 扫描单个 HTML 文件（文本节点与可见属性） */
+/** Scanne un fichier HTML seul (nœuds de texte et attributs visibles) */
 export function scanHtmlFile(file, text) {
   const hits = []
   const lines = text.split(/\r?\n/)
@@ -360,8 +360,8 @@ export async function loadExemptions(root) {
 }
 
 /**
- * 主入口：扫描全部目标文件，返回 { hits, exempted, stats }。
- * hits 为未豁免命中；exempted 为已登记豁免的命中（透明展示）。
+ * Entrée principale : scanne tous les fichiers cibles, renvoie { hits, exempted, stats }.
+ * hits = correspondances non exemptées ; exempted = correspondances couvertes par une exemption enregistrée (affichage transparent).
  */
 export async function runCjkCoverageScan(root, options = {}) {
   const strict = options.strict ?? false
@@ -396,7 +396,7 @@ export async function runCjkCoverageScan(root, options = {}) {
   return { ok: !strict || hits.length === 0, hits, exempted, stats, exemptions }
 }
 
-// -- CLI 入口 --
+// -- Entrée CLI --
 if (process.argv[1]?.replace(/\\/g, '/').endsWith('scripts/lint-cjk-coverage.mjs')) {
   const strict = process.argv.includes('--strict')
   const root = process.cwd()

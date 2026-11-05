@@ -1,11 +1,11 @@
 /**
- * Agent 本体属性表与生命周期声明（方案 §5.1 / §5.6）。
- * schema 同时驱动：控制台注册表单（分「基本/技术/治理」三组）、属性校验、详情页展示。
+ * Table d'attributs et déclaration du cycle de vie du corps d'Agent (plan §5.1 / §5.6).
+ * Le schema pilote à la fois : le formulaire d'enregistrement de la console (trois groupes « base/technique/gouvernance »), la validation des attributs, l'affichage de la page de détail.
  */
 import type { ResourceTypeSpec } from '../../platform-core/src/index.ts'
 import { ASSET_CATEGORIES } from '../../platform-core/src/index.ts'
 
-/** 各资产板块统一业务分类选项（口径见 platform-core/src/taxonomy.ts）。 */
+/** Options de classification métier unifiées de tous les volets d'actifs (périmètre : voir platform-core/src/taxonomy.ts). */
 const CATEGORY_OPTIONS = ASSET_CATEGORIES.map((value) => ({ value, label: value }))
 
 export const AGENT_TYPE_SPEC: ResourceTypeSpec = {
@@ -25,13 +25,13 @@ export const AGENT_TYPE_SPEC: ResourceTypeSpec = {
       { key: 'avatar', label: '头像', type: 'string', group: 'basic', defaultValue: '🤖', hint: '一个 emoji 即可' },
       { key: 'category', label: '业务分类', type: 'enum', group: 'basic', defaultValue: '其他', options: CATEGORY_OPTIONS, hint: '各资产板块统一口径（财务/行政/人事/销售/运营/战略/生产/研发/质量/制造/其他）；列表页按此筛选' },
       { key: 'tags', label: '标签', type: 'tags', group: 'basic', defaultValue: [] },
-      // 模型目录单一事实源（issue #8）：不再维护静态枚举——可选值 = 模型网关目录（modelgw:models），
-      // 登记/编辑时校验存在性，上线门禁复核；控制台表单从目录动态取选项。目录中不存在的 slug 一律 400。
+      // Source de vérité unique du catalogue de modèles (issue #8) : plus d'énumération statique — valeurs possibles = catalogue de la passerelle de modèles (modelgw:models),
+      // validation d'existence à l'enregistrement/l'édition, revérification à la porte de mise en ligne ; le formulaire console tire dynamiquement ses options du catalogue. Tout slug absent du catalogue → 400.
       { key: 'model', label: '底层模型', type: 'string', group: 'tech', required: true, placeholder: '模型目录中的 slug，如 deepseek-chat', hint: '取值 = 模型网关目录（GET /api/modelgw/models）已登记的 slug；未登记的模型在保存时被拒绝' },
       { key: 'entryUrl', label: '交互界面地址', type: 'url', group: 'tech', placeholder: 'https://…', hint: 'Agent 面向用户的真实交互入口；接入后由 Agent 凭自身凭证提报（接入义务），控制台据此提供直达入口' },
-      // headless 第三纳管通道（2026-10-31）：Work Body 等纯后台执行体没有任何交互界面，
-      // 既签发不了带回调的 OIDC 客户端、也没有 entryUrl 可登记——显式声明后上线门禁凭
-      // 已颁发的机器身份凭证放行（见 AgentRegistryService.assertOnlineGate；AGENT_SSO_ENFORCE=oidc 不放行）。
+      // Troisième canal de gouvernance headless (2026-10-31) : les corps d'exécution purement backend comme Work Body n'ont aucune interface,
+      // ne peuvent émettre de client OIDC avec callbacks ni enregistrer d'entryUrl — après déclaration explicite, la porte de mise en ligne autorise
+      // sur la foi de l'identifiant machine déjà émis (voir AgentRegistryService.assertOnlineGate ; AGENT_SSO_ENFORCE=oidc ne passe pas).
       { key: 'headless', label: '无交互界面（纯后台）', type: 'boolean', group: 'tech', defaultValue: false, hint: '纯后台执行体声明（无任何面向用户的交互界面，如 Work Body / 定时任务型）：声明后上线门禁凭已颁发的机器身份凭证放行，免签发 OIDC 客户端与 entryUrl；AGENT_SSO_ENFORCE=oidc 严格模式不适用' },
       { key: 'skills', label: '关联 Skill', type: 'tags', group: 'tech', defaultValue: [], hint: '从市场安装后自动回填' },
       { key: 'mcpPermGroupIds', label: 'MCP 权限组', type: 'tags', group: 'tech', defaultValue: [], hint: '授予该 Agent 的工具访问范围' },
@@ -60,9 +60,9 @@ export const AGENT_TYPE_SPEC: ResourceTypeSpec = {
         { value: 'external', label: '外部运行时' },
       ], hint: 'A2A 跨运行时互调的登记维度（IAW 交接 7-1）' },
       { key: 'trialGroups', label: '试运行用户组', type: 'tags', group: 'governance', hint: '试运行阶段限定可用的用户组' },
-      // R7 组织化（Agent 组织架构）：汇报线与心跳调度参数。全部选填、不设 requiredForOnline——
-      // 既有 Agent 不带这些字段照常流转；managerId 填另一 Agent 的 ID，环校验见
-      // AgentRegistryService.assertOrgChartAcyclic（create/update 涉及 managerId 时强制校验）。
+      // R7 organigramme (organisation des Agents) : ligne de reporting et paramètres d'ordonnancement des heartbeats. Tout optionnel, sans requiredForOnline —
+      // les Agents existants sans ces champs continuent de circuler normalement ; managerId reçoit l'ID d'un autre Agent, validation de cycles voir
+      // AgentRegistryService.assertOrgChartAcyclic (validation forcée quand create/update touche managerId).
       { key: 'orgRole', label: '组织角色', type: 'enum', group: 'governance', options: [
         { value: 'ceo', label: 'CEO' },
         { value: 'cto', label: 'CTO' },
@@ -73,8 +73,8 @@ export const AGENT_TYPE_SPEC: ResourceTypeSpec = {
       { key: 'rank', label: '职级', type: 'string', group: 'governance', placeholder: '如 L4/P6', hint: '自由文本' },
       { key: 'managerId', label: '汇报上级 Agent', type: 'string', group: 'governance', placeholder: '另一 Agent 的 ID（agt-…）', hint: '汇报线（组织下达与上浮通道），填另一 Agent 的 ID' },
       { key: 'heartbeatIntervalMinutes', label: '心跳间隔（分钟）', type: 'number', group: 'governance', hint: '执行中枢按此间隔定时唤醒该 Agent 拉取待办（0 或留空=不参与心跳调度）' },
-      // C4 A2A/UHP 协作面（additive，红线 2 结构变更登记见 docs/contract-c3-agent-a2a-v2-release-notes.md）：
-      // 存量登记无这些字段按缺省口径处理（退化为 v1 点名调用行为），不设 requiredForOnline。
+      // Facette de collaboration A2A/UHP C4 (additif, enregistrement des changements structurels de la ligne rouge 2 : voir docs/contract-c3-agent-a2a-v2-release-notes.md) :
+      // les enregistrements existants sans ces champs sont traités au périmètre par défaut (repli sur le comportement v1 d'appel nominatif), sans requiredForOnline.
       { key: 'a2aDataClassCeiling', label: '协作密级天花板', type: 'enum', group: 'collab', defaultValue: 'internal', options: [
         { value: 'public', label: '公开', hint: '仅可承接公开级任务' },
         { value: 'internal', label: '内部', hint: '可承接内部级任务（默认）' },

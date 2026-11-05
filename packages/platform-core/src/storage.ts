@@ -1,11 +1,11 @@
 /**
- * 存储抽象：业务插件只面对 Collection API，不感知物理存储。
+ * Abstraction de stockage : les plugins métier ne voient que l'API Collection, sans connaître le stockage physique.
  *
- * 双后端（ADR-0001，PLATFORM_STORAGE 切换，默认 json 保证向后兼容）：
- *   - json  ：JSON 集合 + 内存索引 + 防抖原子落盘（CollectionImpl，原实现）；
- *   - sqlite：集合整体驻 SQLite（SqliteCollectionImpl，storage-sqlite.ts）——
- *             写入即事务、uniqueOn 落引擎级唯一索引、常驻内存不随记录数增长。
- * 两种后端严格同一 Collection<T> 契约，插件代码零改动。
+ * Deux backends (ADR-0001, bascule PLATFORM_STORAGE, json par défaut pour compatibilité ascendante) :
+ *   - json   : collections JSON + index en mémoire + écriture atomique anti-rebond (CollectionImpl, implémentation d'origine) ;
+ *   - sqlite : collections entièrement hébergées dans SQLite (SqliteCollectionImpl, storage-sqlite.ts) —
+ *             écriture = transaction, uniqueOn → index unique au niveau moteur, résident en mémoire sans croître avec le nombre d'enregistrements.
+ * Les deux backends respectent strictement le même contrat Collection<T>, zéro modification du code des plugins.
  */
 import { copyFile, mkdir, readdir, readFile, rename, open } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
@@ -41,28 +41,28 @@ export interface Collection<T extends RecordBase> {
   count(): number
   onChange(cb: (change: CollectionChange<T>) => void): () => void
   /**
-   * 声明业务唯一约束（模拟数据库部分唯一索引）。
-   * 之后 insert/update 违反约束将直接抛错——「先查后插」被引擎级兜底取代，
-   * 并发与竞态下不再可能产生重复数据（红线来自 auth-identity 模块设计）。
+   * Déclare une contrainte d'unicité métier (simule un index partiellement unique de base de données).
+   * Tout insert/update violant ensuite la contrainte lève directement — le « chercher puis insérer » est remplacé par un filet au niveau moteur,
+   * les doublons ne peuvent plus apparaître même en concurrence et conditions de course (ligne rouge issue de la conception du module auth-identity).
    */
   uniqueOn(label: string, keyOf: (record: T) => string): void
 }
 
 /**
- * sqlite 后端默认 JSON 豁免名单（ADR-0001 §五第 3 批「低频配置型集合」，与 ADR 同名可查）。
+ * Liste d'exemptions JSON par défaut du backend sqlite (ADR-0001 §5 lot 3 « collections de configuration à basse fréquence », cherchable sous le même nom que l'ADR).
  *
- * 名单依据（grep 全仓 opsStorage.collection 注册点核对的真实集合名；代码内集合名用 `:`，
- * 数据文件名由 fileNameOf 转义为 `~`）：
- *   - resource:dependencies · update:state · platform:bootstrap —— 低频配置型；
- *   - market:*（前缀通配）—— market:developers / market:installs / market:submissions；
- *   - 各插件 migrations / snapshot 集合：agent:migrations · app:migrations · iam:migrations
- *     · iam:groupSnapshots（写一次的数据演化标记，无 DB 化收益）；
- *   - oidc-keys —— 平台级 OIDC 签名密钥文件（plugin-authn 直读 dataDir 下 oidc-keys.json，
- *     并非集合；restoreAll 按文件名扫描会命中该名，入名单使其留在 JSON 路径按平台级文件跳过，
- *     不在 sqlite meta 里留下伪集合记录）。
+ * Fondement de la liste (noms de collections réels vérifiés par grep de tous les points d'enregistrement opsStorage.collection ; dans le code, les noms utilisent `:`,
+ * les noms de fichiers de données sont échappés en `~` par fileNameOf) :
+ *   - resource:dependencies · update:state · platform:bootstrap — configuration à basse fréquence ;
+ *   - market:* (joker de préfixe) — market:developers / market:installs / market:submissions ;
+ *   - collections migrations / snapshot de chaque plugin : agent:migrations · app:migrations · iam:migrations
+ *     · iam:groupSnapshots (marques d'évolution de données écrites une fois, aucun gain à les passer en DB) ;
+ *   - oidc-keys — fichier de clés de signature OIDC au niveau plateforme (plugin-authn lit directement oidc-keys.json sous dataDir,
+ *     ce n'est pas une collection ; le scan par nom de fichier de restoreAll la toucherait, son inscription dans la liste la laisse sur le chemin JSON et elle est sautée comme fichier plateforme,
+ *     sans laisser de fausse collection dans les meta sqlite).
  *
- * 语义：PLATFORM_STORAGE_JSON_KEEP **未设置**时应用本名单；显式设置时完全覆盖默认
- *（含「显式给空串 = 一个都不豁免」，见 parseKeepEnv）。
+ * Sémantique : la liste s'applique quand PLATFORM_STORAGE_JSON_KEEP **n'est pas défini** ; s'il est défini explicitement, il remplace intégralement le défaut
+ * (y compris « chaîne vide explicite = aucune exemption », voir parseKeepEnv).
  */
 export const DEFAULT_JSON_KEEP: readonly string[] = [
   'resource:dependencies',
@@ -79,9 +79,9 @@ export const DEFAULT_JSON_KEEP: readonly string[] = [
 
 export interface CollectionOptions {
   /**
-   * 持久化模式：
-   *   - debounced（默认）：250ms 防抖合并落盘；
-   *   - durable：每次变更立即落盘并 fsync（认证吊销等不容许崩溃丢失的集合）。
+   * Mode de persistance :
+   *   - debounced (défaut) : fusion anti-rebond de 250 ms avant écriture ;
+   *   - durable : écriture immédiate + fsync à chaque changement (collections comme les révocations d'authentification, qui ne tolèrent aucune perte sur crash).
    */
   durability?: 'debounced' | 'durable'
 }
@@ -89,14 +89,14 @@ export interface CollectionOptions {
 export type StorageBackendKind = 'json' | 'sqlite'
 
 export interface StorageConfig {
-  /** 数据目录，默认 `<cwd>/data`。 */
+  /** Répertoire de données, défaut `<cwd>/data`. */
   dataDir?: string
   /**
-   * 集合存储后端（默认 json，向后兼容）：
-   *   - json  ：JSON 文件落盘（防抖/durable 两档）；
-   *   - sqlite：data/collections.db，WAL + synchronous=FULL，写入即事务，
-   *             首启自动回填同名 JSON 集合文件（文件保留为回滚源）。
-   * 未显式配置时读 PLATFORM_STORAGE 环境变量（独立宿主与 dsh 宿主两种形态通用）。
+   * Backend de stockage des collections (json par défaut, compatibilité ascendante) :
+   *   - json   : écriture dans des fichiers JSON (deux modes : anti-rebond/durable) ;
+   *   - sqlite : data/collections.db, WAL + synchronous=FULL, écriture = transaction,
+   *             au premier démarrage, remplissage automatique depuis les fichiers de collections JSON homonymes (fichiers conservés comme source de retour arrière).
+   * Sans configuration explicite, lit la variable d'environnement PLATFORM_STORAGE (valable pour l'hôte autonome comme pour l'hôte dsh).
    */
   backend?: StorageBackendKind
 }
@@ -119,7 +119,7 @@ class CollectionImpl<T extends RecordBase> implements Collection<T> {
     this.uniques.push({ label, keyOf })
   }
 
-  /** 校验唯一约束：返回既有冲突记录（不含自身）。 */
+  /** Vérifie la contrainte d'unicité : renvoie l'enregistrement conflictuel existant (hors soi-même). */
   private conflictOf(record: T, selfId?: string): { label: string; existing: T } | undefined {
     for (const unique of this.uniques) {
       const key = unique.keyOf(record)
@@ -191,7 +191,7 @@ class CollectionImpl<T extends RecordBase> implements Collection<T> {
     this.emit({ kind: 'replace', record: {} as T })
   }
 
-  /** 恢复磁盘数据（仅启动期调用）。 */
+  /** Restaure les données du disque (appelé uniquement au démarrage). */
   loadFrom(records: T[]): void {
     this.records.clear()
     for (const record of records) this.records.set(record.id, record)
@@ -222,30 +222,30 @@ export class StorageService extends Service {
 
   private collections = new Map<string, Collection<RecordBase>>()
   private durableNames = new Set<string>()
-  /** sqlite 后端承载的集合名（json 例外名单内的集合不在此列）。 */
+  /** Noms des collections portées par le backend sqlite (les collections de la liste d'exemptions JSON n'y figurent pas). */
   private sqliteNames = new Set<string>()
   private sqliteBackend?: SqliteCollectionBackend
   private readonly jsonKeep: string[]
-  /** JSON 豁免名单是否来自显式环境变量（默认名单不触发「json 后端下无效」告警）。 */
+  /** La liste d'exemptions JSON vient-elle d'une variable d'environnement explicite (la liste par défaut ne déclenche pas l'alerte « inefficace sous backend json »). */
   private readonly jsonKeepExplicit: boolean
   private dirty = new Set<string>()
   private flushTimer: ReturnType<typeof setTimeout> | undefined
-  /** 落盘串行链（并发 flushNow 排队执行，避免同名 tmp 竞争）。 */
+  /** Chaîne de sérialisation des écritures (les flushNow concurrents se mettent en file, évite la compétition sur le tmp homonyme). */
   private flushChain: Promise<void> = Promise.resolve()
   private tmpSeq = 0
-  /** 恢复期发现的损坏文件（坏 JSON 已备份为 *.corrupt，启动日志有痕）。 */
+  /** Fichiers corrompus découverts pendant la restauration (le JSON abîmé est sauvegardé en *.corrupt, trace dans le log de démarrage). */
   readonly corruptFiles: string[] = []
-  /** 数据目录（密钥等平台级文件的存放处）。 */
+  /** Répertoire de données (emplacement des fichiers plateforme comme les clés). */
   readonly dataDirPath: string
-  /** 集合存储后端（config.backend ?? PLATFORM_STORAGE 环境变量，默认 json）。 */
+  /** Backend de stockage des collections (config.backend ?? variable d'environnement PLATFORM_STORAGE, json par défaut). */
   readonly backend: StorageBackendKind
 
   constructor(ctx: Context, config: StorageConfig = {}) {
     super(ctx, 'opsStorage')
     this.dataDirPath = config.dataDir ?? join(process.cwd(), "data")
     this.backend = config.backend ?? parseBackendEnv(process.env.PLATFORM_STORAGE)
-    // 豁免名单：环境变量未设置 → 内置默认名单（ADR-0001 §五第 3 批）；
-    // 显式设置 → 完全覆盖默认（parseKeepEnv('') 返回 []，即「一个都不豁免」）。
+    // Liste d'exemptions : variable non définie → liste par défaut intégrée (ADR-0001 §5 lot 3) ;
+    // définie explicitement → remplace intégralement le défaut (parseKeepEnv('') renvoie [], soit « aucune exemption »).
     const keepEnv = process.env.PLATFORM_STORAGE_JSON_KEEP
     this.jsonKeep = keepEnv === undefined ? [...DEFAULT_JSON_KEEP] : parseKeepEnv(keepEnv)
     this.jsonKeepExplicit = keepEnv !== undefined
@@ -261,11 +261,11 @@ export class StorageService extends Service {
   }
 
   /**
-   * 信号落盘钩子（form B 数据安全）：form A 的 main.ts 自带 SIGTERM/SIGINT → flushNow，
-   * 但挂载进 dsh 宿主后（loader 装配）没有等价钩子——防抖窗口内的写会在进程被
-   * SIGTERM（launchd kickstart / pkill）时丢失，且 SQLite（即时写）与 JSON 集合
-   * （防抖写）不同步会造成「半套数据」启动态。基础层自装一次（跨形态生效）；
-   * 双注册无害（form A main.ts 的处理器并存：flushChain 串行 + exit 幂等）。
+   * Crochet d'écriture sur signal (sécurité des données forme B) : le main.ts de la forme A embarque SIGTERM/SIGINT → flushNow,
+   * mais une fois monté dans l'hôte dsh (assemblage loader), il n'y a pas de crochet équivalent — les écritures de la fenêtre d'anti-rebond sont perdues si le processus est
+   * tué par SIGTERM (launchd kickstart / pkill) ; de plus, la désynchronisation de SQLite (écriture immédiate) et des collections JSON (écriture anti-rebond)
+   * produit un état de démarrage « à moitié chargé ». La couche de base s'installe elle-même une fois (effectif sur toutes les formes) ;
+   * la double inscription est inoffensive (les handlers du main.ts forme A coexistent : flushChain en série + exit idempotent).
    */
   private installSignalFlush(): void {
     const proc = process as unknown as NodeJS.Process & Record<string, unknown>
@@ -283,7 +283,7 @@ export class StorageService extends Service {
     await mkdir(this.dataDirPath, { recursive: true })
   }
 
-  /** 该集合是否由 sqlite 后端承载（sqlite 后端下 JSON 例外名单内的集合仍走 JSON）。 */
+  /** Cette collection est-elle portée par le backend sqlite (sous backend sqlite, les collections de la liste d'exemptions JSON restent en JSON). */
   private usesSqlite(name: string): boolean {
     if (this.backend !== 'sqlite') return false
     return !this.jsonKeep.some((pattern) =>
@@ -313,7 +313,7 @@ export class StorageService extends Service {
 
   private onPersist(name: string): void {
     if (this.durableNames.has(name)) {
-      // 关键集合：跳过防抖窗口立即落盘（评审 S 系列：吊销返回 200 后崩溃不得丢失）
+      // Collections critiques : écriture immédiate en sautant la fenêtre d'anti-rebond (revue série S : un crash après la réponse 200 de révocation ne doit rien perdre)
       this.dirty.add(name)
       void this.flushNow()
       return
@@ -321,7 +321,7 @@ export class StorageService extends Service {
     this.markDirty(name)
   }
 
-  /** 启动期从磁盘恢复指定集合（幂等）。坏 JSON 备份为 *.corrupt 后从空集合开始（不再静默清空）。 */
+  /** Restaure au démarrage une collection donnée depuis le disque (idempotent). Le JSON corrompu est sauvegardé en *.corrupt puis on repart d'une collection vide (plus de vidage silencieux). */
   async restore<T extends RecordBase>(name: string): Promise<Collection<T>> {
     await mkdir(this.dataDirPath, { recursive: true })
     if (this.usesSqlite(name)) return this.restoreSqlite<T>(name)
@@ -332,7 +332,7 @@ export class StorageService extends Service {
       const raw = await readFile(file, 'utf8')
       const parsed: unknown = JSON.parse(raw)
       if (!Array.isArray(parsed)) {
-        // 平台级文件（如 oidc-keys.json 密钥对象）不是集合：静默跳过，不算损坏
+        // Les fichiers plateforme (comme l'objet de clés oidc-keys.json) ne sont pas des collections : saut silencieux, pas compté comme corruption
         records = []
       } else {
         records = parsed as T[]
@@ -342,7 +342,7 @@ export class StorageService extends Service {
       if (code === 'ENOENT') {
         records = []
       } else {
-        // 文件存在但损坏：保留现场（*.corrupt 备份），显式告警，绝不无痕当空集合
+        // Fichier présent mais corrompu : préserve la scène (sauvegarde *.corrupt), alerte explicite, jamais traité en collection vide sans trace
         await this.backupCorrupt(name, file, error)
         records = []
       }
@@ -352,11 +352,11 @@ export class StorageService extends Service {
   }
 
   /**
-   * sqlite 后端恢复：DB 为准，首启自动回填同名 JSON 集合文件（文件保留为回滚源）。
-   * meta.backfilled_at=NULL 表示导入未完成（上次启动在导入事务提交前崩溃）——重试导入，
-   * 导入与标记在 storage-sqlite 的同一事务内原子生效，不会出现「半套数据」。
-   * 导入事务内回填后先行对账（条数 + 关键字段哈希，assertBackfillParity）：
-   * 不一致即抛错并整体回滚，标记不会落在坏数据上。
+   * Restauration du backend sqlite : la DB fait foi ; au premier démarrage, remplissage automatique depuis les fichiers de collections JSON homonymes (fichiers conservés comme source de retour arrière).
+   * meta.backfilled_at=NULL signifie que l'import n'est pas terminé (le démarrage précédent a crashé avant la validation de la transaction d'import) — on réessaie l'import,
+   * l'import et le marquage prennent effet atomiquement dans la même transaction de storage-sqlite, pas d'état « à moitié chargé » possible.
+   * Après remplissage dans la transaction d'import, réconciliation préalable (nombre d'entrées + hash des champs clés, assertBackfillParity) :
+   * toute divergence lève et annule l'ensemble ; la marque ne portera jamais sur des données abîmées.
    */
   private async restoreSqlite<T extends RecordBase>(name: string): Promise<Collection<T>> {
     const backend = this.ensureSqliteBackend()
@@ -379,22 +379,22 @@ export class StorageService extends Service {
     return collection
   }
 
-  /** 损坏 JSON 留痕：备份为 *.corrupt-<ts>，登记 corruptFiles，显式告警（不阻断启动）。 */
+  /** Trace des JSON corrompus : sauvegarde en *.corrupt-<ts>, inscription dans corruptFiles, alerte explicite (sans bloquer le démarrage). */
   private async backupCorrupt(name: string, file: string, error: unknown): Promise<void> {
     const backup = `${file}.corrupt-${Date.now()}`
     try {
       await copyFile(file, backup)
-    } catch { /* 备份失败不阻断启动，下方仍有错误日志 */
+    } catch { /* l'échec de sauvegarde ne bloque pas le démarrage, le log d'erreur suit plus bas */
     }
     console.error(`[storage] 集合 ${name} 文件损坏（${error instanceof Error ? error.message : String(error)}），已备份至 ${backup}，从空集合恢复`)
     this.corruptFiles.push(backup)
   }
 
-  /** 扫描数据目录并恢复全部集合（业务插件加载前调用一次）。 */
+  /** Scanne le répertoire de données et restaure toutes les collections (appelé une fois avant le chargement des plugins métier). */
   async restoreAll(): Promise<string[]> {
     await mkdir(this.dataDirPath, { recursive: true })
     const restored: string[] = []
-    // sqlite 后端：DB meta 已登记的集合同样是恢复对象（其 JSON 回滚源文件可能已被清理）
+    // Backend sqlite : les collections enregistrées dans les meta de la DB sont aussi à restaurer (leurs fichiers sources JSON de retour arrière peuvent déjà avoir été nettoyés)
     const names = new Set<string>(this.backend === 'sqlite' ? this.ensureSqliteBackend().names() : [])
     let files: string[] = []
     try {
@@ -416,7 +416,7 @@ export class StorageService extends Service {
     return restored
   }
 
-  /** 已恢复/创建的集合名列表（供平台信息展示）。 */
+  /** Liste des noms de collections restaurées/créées (pour l'affichage des informations plateforme). */
   names(): string[] {
     return [...this.collections.keys()]
   }
@@ -430,7 +430,7 @@ export class StorageService extends Service {
     }, 250)
   }
 
-  /** 立即将脏集合落盘（原子写：tmp + fsync + rename；全程串行防并发写同名 tmp）。 */
+  /** Écrit immédiatement les collections sales (écriture atomique : tmp + fsync + rename ; sérialisation complète pour éviter les écritures concurrentes du même tmp). */
   flushNow(): Promise<void> {
     this.flushChain = this.flushChain.then(() => this.doFlush())
     return this.flushChain
@@ -442,7 +442,7 @@ export class StorageService extends Service {
       this.dirty.clear()
       if (names.length === 0) return
       for (const name of names) {
-        // sqlite 集合写入即事务提交（WAL + synchronous=FULL），无防抖窗口、无 JSON 落盘面
+        // Les collections sqlite valident leur transaction à chaque écriture (WAL + synchronous=FULL) : pas de fenêtre d'anti-rebond, pas de surface d'écriture JSON
         if (this.sqliteNames.has(name)) continue
         const collection = this.collections.get(name)
         if (!collection) continue
@@ -459,8 +459,8 @@ export class StorageService extends Service {
           }
           await rename(tmp, file)
         } catch (error) {
-          // rename ENOENT（停机窗口目录/临时文件被外部回收的竞态）降噪：内存态未失，
-          // 下次落盘自然恢复；debug 级留痕即可，不重试不告警（防关停期日志风暴）
+          // Bruit de rename ENOENT (course où répertoire/fichier temporaire sont recyclés de l'extérieur pendant la fenêtre d'arrêt) : l'état mémoire est intact,
+          // la prochaine écriture rétablit naturellement ; une trace en niveau debug suffit, sans reprise ni alerte (évite la tempête de logs en période d'arrêt)
           if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
             console.debug(`[storage] 集合 ${name} 落盘 rename 竞态（ENOENT，内存态未失，下次落盘恢复）`)
           } else {
@@ -468,14 +468,14 @@ export class StorageService extends Service {
           }
         }
       }
-      // 落盘期间又有变更（durable 即时触发）：循环直至清空
+      // Nouvelles modifications pendant l'écriture (déclenchement immédiat en durable) : boucler jusqu'à vide
     }
   }
 
   /**
-   * 全量强持久化：把所有 JSON 集合写入并 fsync（HTTP 响应前调用，
-   * 确保「返回 200 后进程被杀」不丢变更——评审崩溃恢复实验的修复点）。
-   * sqlite 集合每次写入已事务提交，天然满足该保证，不在刷盘范围。
+   * Persistance forte complète : écrit toutes les collections JSON avec fsync (appelé avant la réponse HTTP,
+   * garantit qu'« un process tué après le 200 » ne perd aucune modification — point de correction de l'expérience de récupération sur crash de la revue).
+   * Les collections sqlite valident leur transaction à chaque écriture, la garantie est native, hors périmètre de ce flush.
    */
   async flushDurable(): Promise<void> {
     for (const name of this.collections.keys()) {
@@ -486,16 +486,16 @@ export class StorageService extends Service {
 }
 
 
-/** 集合名 → 文件名（Windows 保留字符转义）。 */
+/** Nom de collection → nom de fichier (échappement des caractères réservés Windows). */
 function fileNameOf(name: string): string {
   return name.replace(/[:*?"<>|]/g, '~')
 }
 
 /**
- * 回填对账（ADR-0001 缺口②）：JSON 源与 SQLite 落库逐条对账——条数一致 + 每条记录
- * 规范化序列化（键递归排序）SHA-256 哈希一致。不一致即抛错（响亮失败），错误消息
- * 含集合名与差异数；配合 backfill 单事务语义，抛错时导入与 meta 标记一并回滚，
- * 下次启动重试并再次失败——绝不带着静默不一致完成回填。
+ * Réconciliation du remplissage (lacune ② de l'ADR-0001) : réconciliation entrée à entrée entre la source JSON et la base SQLite — nombre d'entrées identique +
+ * hachage SHA-256 de la sérialisation normalisée (clés triées récursivement) identique pour chaque enregistrement. Toute divergence lève (échec bruyant), le message d'erreur
+ * contient le nom de la collection et le nombre de différences ; combiné à la sémantique de transaction unique du backfill, une levée annule ensemble l'import et la marque meta,
+ * le démarrage suivant réessaie et échoue de nouveau — jamais de remplissage achevé avec une incohérence silencieuse.
  */
 function assertBackfillParity(name: string, source: RecordBase[], rows: Array<{ id: string; doc: string }>): void {
   if (rows.length !== source.length) {
@@ -512,12 +512,12 @@ function assertBackfillParity(name: string, source: RecordBase[], rows: Array<{ 
   }
 }
 
-/** 稳定序列化哈希：键递归排序后 JSON 序列化再 SHA-256（对账专用，与存储写入格式无关）。 */
+/** Hachage de sérialisation stable : clés triées récursivement puis JSON sérialisé puis SHA-256 (réservé à la réconciliation, indépendant du format d'écriture du stockage). */
 function recordHash(record: RecordBase): string {
   return createHash('sha256').update(canonicalJson(record)).digest('hex')
 }
 
-/** 规范化 JSON：对象键逐层排序、剔除 undefined，保证同构数据序列化逐字节一致。 */
+/** JSON normalisé : clés d'objets triées couche par couche, undefined retirés, garantit une sérialisation identique octet par octet pour des données isomorphes. */
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null'
   if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(',')}]`
@@ -531,7 +531,7 @@ function decodeFileName(name: string): string {
   return name.replace(/~/g, ':')
 }
 
-/** PLATFORM_STORAGE 环境变量 → 后端（默认 json；未知值告警回退，不静默吞）。 */
+/** Variable d'environnement PLATFORM_STORAGE → backend (json par défaut ; valeur inconnue → alerte et repli, jamais avalé en silence). */
 function parseBackendEnv(value: string | undefined): StorageBackendKind {
   const normalized = (value ?? '').trim().toLowerCase()
   if (normalized === '' || normalized === 'json') return 'json'
@@ -541,9 +541,9 @@ function parseBackendEnv(value: string | undefined): StorageBackendKind {
 }
 
 /**
- * PLATFORM_STORAGE_JSON_KEEP：sqlite 后端下仍保留 JSON 落盘的集合名（逗号分隔，`前缀*` 通配）。
- * 语义：未设置 → 用 DEFAULT_JSON_KEEP；显式设置 → 完全覆盖默认名单——
- * 空串解析为空数组，即「显式给空串 = 一个都不豁免，全部集合走 sqlite」。
+ * PLATFORM_STORAGE_JSON_KEEP : noms des collections gardant leur écriture JSON même sous backend sqlite (séparés par virgules, joker `préfixe*`).
+ * Sémantique : non défini → DEFAULT_JSON_KEEP ; défini explicitement → remplace intégralement la liste par défaut —
+ * une chaîne vide se parse en tableau vide, soit « chaîne vide explicite = aucune exemption, toutes les collections passent en sqlite ».
  */
 function parseKeepEnv(value: string | undefined): string[] {
   if (!value) return []

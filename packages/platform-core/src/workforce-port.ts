@@ -1,29 +1,29 @@
 /**
- * 数字员工工作策略窄端口（施工蓝本：《数字员工与平台资源调用-技术关联与施工实施路径》2026-10-15 §10.2、附录 D.5）。
+ * Port étroit de stratégie de travail des employés numériques (plan d'exécution : « Employés numériques et appel des ressources plateforme — articulation technique et chemin de mise en œuvre » 2026-10-15 §10.2, annexe D.5).
  *
- * 依赖方向纪律（防循环装配，附录 A 决策 10）：
- *   - platform-core 只声明类型与登记器，不反向 import 任何业务插件；
- *   - plugin-workforce 装配完成后调用 register() 登记真实策略实现；
- *   - 资源网关（mcp/connector/modelgw/nas/skillhub）与 exec-hub 仅依赖本文件，
- *     经 ctx.workforcePolicy 消费。提供者未登记时 port() 返回 null：
- *     数字员工新工作路径一律不可用（拒绝），不得静默按无策略放行（验收 V29）。
+ * Discipline de direction des dépendances (anti-cycle d'assemblage, annexe A décision 10) :
+ *   - platform-core ne déclare que les types et l'enregistreur, n'importe aucun plugin métier en retour ;
+ *   - plugin-workforce, une fois assemblé, appelle register() pour enregistrer l'implémentation réelle de la stratégie ;
+ *   - les passerelles de ressources (mcp/connector/modelgw/nas/skillhub) et exec-hub ne dépendent que de ce fichier,
+ *     et consomment via ctx.workforcePolicy. Si le fournisseur n'est pas enregistré, port() renvoie null :
+ *     les nouveaux parcours de travail des employés numériques sont tous indisponibles (refus), jamais de passage silencieux sans stratégie (recette V29).
  *
- * 防绕行关键语义（D.5）：「是否受管数字员工」只能按已验证 caller 反查判定，
- * 与请求是否携带 work 上下文无关——员工删除上下文不得退回旧入口宽松分支。
- * 两层授权取交集：本端口只做工作级授权，资源网关原有授权链一项不少。
+ * Sémantique clé anti-contournement (D.5) : « est-ce un employé numérique géré » se juge uniquement par reconnexion à partir du caller vérifié,
+ * indépendamment de la présence d'un contexte work dans la requête — la suppression du contexte par l'employé ne doit pas ramener vers l'ancienne branche permissive.
+ * Autorisation à deux niveaux en intersection : ce port ne fait que l'autorisation de niveau travail, la chaîne d'autorisation existante des passerelles de ressources reste intégralement en place.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
 import { t } from '../../platform-i18n/src/index.ts'
 
 // ---------------------------------------------------------------------------
-// 统一业务密级（D14）：与 Agent schema / ModelGateway 的同名枚举语义不同，
-// 全平台工作面只用本口径；到旧协议的映射必须由适配器显式完成，禁止静默回落 internal。
-//   public      公开
-//   internal    内部
-//   secret      秘密（业务秘密级）
-//   confidential 机密（Agent 处理需审批）
-//   topsecret   绝密（禁止 Agent 直接处理：模型/资源调用前直接拒绝）
+// Niveaux de confidentialité métier unifiés (D14) : sémantique différente des énumérations homonymes du schéma Agent / ModelGateway,
+// toute la facette travail de la plateforme n'utilise que cette convention ; le mapping vers les anciens protocoles doit être fait explicitement par les adaptateurs, jamais de repli silencieux sur internal.
+//   public      public
+//   internal    interne
+//   secret      secret (niveau secret métier)
+//   confidential confidentiel (le traitement par Agent exige une approbation)
+//   topsecret   ultra-secret (traitement direct par Agent interdit : refus direct avant tout appel de modèle/ressource)
 // ---------------------------------------------------------------------------
 export type WorkDataClass = 'public' | 'internal' | 'secret' | 'confidential' | 'topsecret'
 
@@ -35,7 +35,7 @@ export const WORK_DATA_CLASS_ORDER: Record<WorkDataClass, number> = {
   topsecret: 4,
 }
 
-/** 领域拒绝码（实施路径 §13.3；错误要能指导「停止、申请、等待、核验或重试」）。 */
+/** Codes de refus du domaine (chemin de mise en œuvre §13.3 ; l'erreur doit guider « arrêter, demander, attendre, vérifier ou réessayer »). */
 export type WorkDenyCode =
   | 'WORKFORCE_NOT_READY'
   | 'EMPLOYEE_NOT_ACTIVE'
@@ -79,45 +79,45 @@ export const WORK_DENY_CODE_LABELS: Record<WorkDenyCode, string> = {
   POLICY_INTERNAL_ERROR: '工作策略执行异常（fail-closed）',
 }
 
-/** 已验证调用者：由各入口从令牌/会话解析（结构对齐 rest-gate CallerInfo），禁止来自请求参数。 */
+/** Appelant vérifié : résolu par chaque point d'entrée depuis jeton/session (structure alignée sur rest-gate CallerInfo), jamais depuis les paramètres de la requête. */
 export interface WorkCallerRef {
   kind: 'human' | 'machine'
   principalId: string
   userId?: string
-  /** machine 专属：凭证关联资源（refType=agent 时可反查数字员工绑定）。 */
+  /** Spécifique machine : ressource liée à l'identifiant (refType=agent permet de reconnaître l'employé numérique lié). */
   refType?: string
   refId?: string
   name?: string
 }
 
-/** 受管数字员工引用（服务端反查结果）。 */
+/** Référence d'employé numérique géré (résultat de reconnexion côté serveur). */
 export interface ManagedEmployeeRef {
   employeeId: string
   agentId: string
   appointmentId: string
   appointmentVersion: number
   workOrgId: string
-  /** 任用冻结的业务密级上限。 */
+  /** Plafond de confidentialité métier du gel d'affectation. */
   dataClass: WorkDataClass
 }
 
-/** 资源动作事实：由资源服务自行解析，不接受客户端/模型自报风险（附录 D.5）。 */
+/** Fait d'action sur ressource : résolu par le service de ressource lui-même, jamais d'auto-rapport de risque accepté du client/du modèle (annexe D.5). */
 export interface ResourceActionFacts {
   kind: 'mcp' | 'connector' | 'model' | 'skill' | 'nas' | 'app'
-  /** mcp 服务 ID / connector provider / 模型 slug / skill ID / NAS ID / 应用 ID。 */
+  /** ID de service mcp / provider connector / slug de modèle / ID de skill / ID NAS / ID d'application. */
   registryId: string
-  /** 工具名 / 动作 ID / invoke / read|write|search… 由各网关语义决定。 */
+  /** Nom d'outil / ID d'action / invoke / read|write|search… selon la sémantique de chaque passerelle. */
   action: string
   /**
-   * W 批次 V11 根治：risk 取「可信风险登记生效值」；无生效登记时为 'unknown'
-   * （不再按 read 隐式开放、也不按 write 盲目保守初判）。
-   * 'unknown' 的裁决在工作策略端口：只读语境（清单句柄仅授 read / 只读约束）放行，
-   * 写语境一律 RISK_UNREGISTERED 拒绝——写能力必须先经「登记→审核→生效」。
+   * Cure V11 du lot W : risk prend la « valeur effective du registre de risques fiable » ; sans enregistrement effectif, 'unknown'
+   * (ni ouverture implicite sur read, ni jugement initial aveuglément conservateur sur write).
+   * L'arbitrage de 'unknown' se fait dans le port de stratégie de travail : contexte en lecture seule (handle de listing n'accordant que read / contraintes de lecture seule) → passage,
+   * contexte d'écriture → toujours refus RISK_UNREGISTERED — toute capacité d'écriture doit d'abord suivre « enregistrement → revue → mise en effet ».
    */
   risk: 'read' | 'write' | 'admin' | 'unknown'
 }
 
-/** 工作引用索引：允许由请求携带，仅作索引；授权事实一律服务端回查（§10.4）。 */
+/** Index de référence de travail : peut être porté par la requête, uniquement comme index ; les faits d'autorisation sont toujours revérifiés côté serveur (§10.4). */
 export interface WorkRefIndex {
   permitId?: string
   runId?: string
@@ -129,11 +129,11 @@ export interface WorkRefIndex {
 export interface WorkActionQuery {
   facts: ResourceActionFacts
   ref?: WorkRefIndex
-  /** 规范化参数摘要（哈希），由调用方网关计算；用于步骤冲突判定与审计。 */
+  /** Résumé normalisé des paramètres (haché), calculé par la passerelle appelante ; sert au jugement de conflit d'étapes et à l'audit. */
   argsHash?: string
 }
 
-/** 服务端核验后的可信执行上下文（§8.3）：身份、组织、版本与代理链由服务端解析，不接受客户端同形 JSON。 */
+/** Contexte d'exécution fiable après vérification serveur (§8.3) : identité, organisation, version et chaîne de délégation résolues côté serveur, pas de JSON isomorphe accepté du client. */
 export interface WorkExecutionContext {
   employeeId: string
   agentId: string
@@ -142,13 +142,13 @@ export interface WorkExecutionContext {
   appointmentVersion: number
   workOrgId: string
   dataClass: WorkDataClass
-  /** 原始业务发起人（有则保留，与员工身份并存不互覆）。 */
+  /** Initiateur métier d'origine (conservé s'il existe, coexiste avec l'identité de l'employé sans se recouvrir). */
   requesterUserId?: string
   actChain?: Array<{ name: string; type: string }>
   issueId?: string
   runId?: string
   leaseVersion?: number
-  /** 本次放行依据的工作授权（permit）ID。 */
+  /** ID du permit (autorisation de travail) fondant ce passage. */
   permitId: string
   capabilityManifestId?: string
   policyVersion: number
@@ -159,22 +159,22 @@ export type WorkPolicyDecision =
   | { allow: true; work: WorkExecutionContext }
   | { allow: false; code: WorkDenyCode; message: string }
 
-/** 资源执行前策略端口：由 plugin-workforce 实现并登记；资源网关在网络动作前消费。 */
+/** Port de stratégie avant exécution sur ressource : implémenté et enregistré par plugin-workforce ; consommé par les passerelles de ressources avant toute action réseau. */
 export interface ResourceExecutionPolicyPort {
-  /** 可信 caller 反查受管员工；非员工返回 null（旧路径继续走原有授权链）。 */
+  /** Reconnaît l'employé géré à partir du caller fiable ; renvoie null si non employé (l'ancien chemin poursuit sa chaîne d'autorisation existante). */
   resolveManagedEmployee(caller: WorkCallerRef): Promise<ManagedEmployeeRef | null>
-  /** 按技术 Agent 反查受管员工（Panel/A2A「问答 vs 执行」分型等场景使用）。 */
+  /** Reconnaît l'employé géré à partir de l'Agent technique (scénarios comme la typologie Panel/A2A « question vs exécution »). */
   describeManagedAgent(agentId: string): Promise<ManagedEmployeeRef | null>
   /**
-   * 工作级授权：员工在岗、任用生效、permit 有效且主体匹配、run/租约归属、
-   * 工具在能力清单、参数范围、审批与预算状态。返回放行时携带核验后上下文。
+   * Autorisation de niveau travail : employé en poste, affectation effective, permit valide et sujet correspondant, appartenance du run/du bail,
+   * outil présent dans la liste de capacités, périmètre des paramètres, état des approbations et du budget. En cas de passage, renvoie le contexte vérifié.
    */
   authorizeWorkAction(caller: WorkCallerRef, query: WorkActionQuery): Promise<WorkPolicyDecision>
 }
 
 /**
- * 登记器（platform-core 持有，装配早于一切业务插件）。
- * plugin-workforce 装配完成（迁移与各服务就绪）后调用 register()。
+ * Enregistreur (détenu par platform-core, assemblé avant tout plugin métier).
+ * plugin-workforce appelle register() une fois son assemblage terminé (migrations et services prêts).
  */
 export class WorkforcePolicyRegistry extends Service {
   static readonly provide = 'workforcePolicy'
@@ -190,11 +190,11 @@ export class WorkforcePolicyRegistry extends Service {
     try {
       this.ctx.platformBus?.emit('workforce.port.ready', { at: new Date().toISOString() })
     } catch {
-      // platformBus 未注入当前 fiber 时跳过通知（cordis 严格服务访问）
+      // Si platformBus n'est pas injecté dans le fiber courant, on saute la notification (accès strict aux services cordis)
     }
   }
 
-  /** 未登记返回 null：消费方据此走 legacy 或拒绝新工作路径（V29）。 */
+  /** Non enregistré → renvoie null : les consommateurs passent alors en legacy ou refusent le nouveau parcours de travail (V29). */
   port(): ResourceExecutionPolicyPort | null {
     return this.provider
   }
@@ -210,11 +210,11 @@ export type ManagedWorkGate =
   | { mode: 'managed'; work: WorkExecutionContext }
 
 /**
- * 网关统一消费助手：
- *   - 端口未就绪或调用者缺失 → legacy（非受管路径继续原授权链）；
- *   - caller 命中受管员工 → 工作级校验；拒绝则 denied（fail-closed）；
- *   - 端口执行异常 → denied POLICY_INTERNAL_ERROR（不静默降级）。
- * 判定只依据可信 caller，与请求是否携带 work 引用无关（D.5 防绕行）。
+ * Aide de consommation unifiée pour les passerelles :
+ *   - port non prêt ou appelant absent → legacy (le chemin non géré poursuit sa chaîne d'autorisation existante) ;
+ *   - caller correspondant à un employé géré → contrôle de niveau travail ; en cas de refus → denied (fail-closed) ;
+ *   - exception d'exécution du port → denied POLICY_INTERNAL_ERROR (pas de repli silencieux).
+ * Le jugement ne repose que sur le caller fiable, indépendamment de la présence d'une référence work dans la requête (anti-contournement D.5).
  */
 export async function gateManagedWork(
   registry: WorkforcePolicyRegistry | null | undefined,
@@ -240,9 +240,9 @@ export async function gateManagedWork(
   }
 }
 
-// Cordis Context 类型增补：workforcePolicy 由 platform-core 首位装配时提供（provide='workforcePolicy'），
-// 各资源网关与 exec-hub 经 ctx.workforcePolicy 消费——写进 Context 契约，消除消费方防御式读取的类型盲区
-// （写法对齐 plugin-exec-hub/src/index.ts 末尾的 declare module）。
+// Compléments de type Cordis Context : workforcePolicy est fourni par platform-core lors du premier assemblage (provide='workforcePolicy'),
+// les passerelles de ressources et exec-hub consomment via ctx.workforcePolicy — inscrit dans le contrat Context pour éliminer l'angle mort de typage des lectures défensives
+// (écriture alignée sur le declare module en fin de plugin-exec-hub/src/index.ts).
 declare module '@deepseek-ai/cordis' {
   interface Context {
     workforcePolicy: WorkforcePolicyRegistry

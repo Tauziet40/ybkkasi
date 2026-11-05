@@ -1,12 +1,12 @@
 /**
- * SQLite 集合 → JSON 集合导出（ADR-0001 回滚工具）。
+ * Export des collections SQLite → collections JSON (outil de retour arrière ADR-0001).
  *
- * 场景：以 PLATFORM_STORAGE=sqlite 运行一段时间后需要回退 JSON 后端时，
- * 把 collections.db 中的最新数据导出为 JSON 集合文件（覆盖同名旧回滚源），
- * 再以默认后端（json）重启即可无缝回退。
+ * Scénario : après un fonctionnement en PLATFORM_STORAGE=sqlite, pour repasser au backend JSON,
+ * exporte les données les plus récentes de collections.db en fichiers de collections JSON (écrasant l'ancienne source de retour arrière homonyme),
+ * puis un redémarrage sur le backend par défaut (json) suffit pour un retour arrière sans couture.
  *
- * 用法：
- *   node scripts/storage-export.mjs --data ./data            # 全部集合导出到同一数据目录
+ * Usage :
+ *   node scripts/storage-export.mjs --data ./data            # exporte toutes les collections dans le même répertoire de données
  *   node scripts/storage-export.mjs --data ./data --out ./data-json
  *   node scripts/storage-export.mjs --data ./data --only iam:users,authn:tokens
  */
@@ -39,7 +39,7 @@ let total = 0
 for (const name of selected) {
   const rows = db.prepare('SELECT id, doc FROM collection_docs WHERE name = ? ORDER BY rowid').all(name)
   const file = join(outDir, `${name.replace(/[:*?"<>|]/g, '~')}.json`)
-  // 已有同名 JSON（旧回滚源）先挪开，绝不无痕覆盖
+  // Un JSON homonyme existant (ancienne source de retour arrière) est d'abord déplacé, jamais d'écrasement sans trace
   if (existsSync(file)) renameSync(file, `${file}.pre-export-${Date.now()}`)
   writeFileSync(file, JSON.stringify(rows.map((row) => JSON.parse(row.doc)), null, 2), 'utf8')
   console.log(`  ${name} → ${file}（${rows.length} 条）`)

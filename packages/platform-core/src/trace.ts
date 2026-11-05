@@ -1,14 +1,14 @@
 /**
- * 全链 trace 基元（MCP 治理契约 §14，W3-T5）。
+ * Primitives de trace de bout en bout (contrat de gouvernance MCP §14, W3-T5).
  *
- * 平台侧最小的 W3C Trace Context 子集：
- *   - newTraceId()：32 位小写 hex 的 trace id（128-bit，随机生成，非全零）；
+ * Sous-ensemble minimal côté plateforme du W3C Trace Context :
+ *   - newTraceId() : trace id en 32 caractères hex minuscules (128 bits, généré aléatoirement, jamais tout zéro) ;
  *   - parseTraceparent / formatTraceparent：`{version}-{trace-id}-{parent-id}-{trace-flags}`
- *     四段格式的解析与序列化（version=00 口径；非法输入解析返回 null、序列化抛错）。
+ *     analyse et sérialisation du format à quatre segments (périmètre version=00 ; entrée invalide → null à l'analyse, lève à la sérialisation).
  *
- * 消费面：plugin-mcp invoke 入口无 trace 即生成（调用方可经 InvokeCaller.traceId /
- * X-Trace-Id / mcp-session-id 头透传），下游 HTTP 转发带 traceparent 头，
- * usage/调用记录/审计事件按 traceId 关联还原调用链。
+ * Facette consommatrice : l'entrée invoke de plugin-mcp génère un trace s'il n'y en a pas (l'appelant peut le transmettre via InvokeCaller.traceId /
+ * en-têtes X-Trace-Id / mcp-session-id), le transfert HTTP aval embarque l'en-tête traceparent,
+ * usage/enregistrements d'appel/événements d'audit reconstituent la chaîne d'appel par association au traceId.
  */
 import { randomBytes } from 'node:crypto'
 
@@ -17,29 +17,29 @@ const TRACE_ID_RE = /^[0-9a-f]{32}$/
 const PARENT_ID_RE = /^[0-9a-f]{16}$/
 const FLAGS_RE = /^[0-9a-f]{2}$/
 
-/** 生成 32 位 hex trace id（128-bit 随机，全零概率忽略；防御性重抽一次）。 */
+/** Génère un trace id hex de 32 caractères (128 bits aléatoires, probabilité de tout-zéro négligeable ; nouvelle tentative défensive une fois). */
 export function newTraceId(): string {
   const id = randomBytes(16).toString('hex')
   return id === '0'.repeat(32) ? randomBytes(16).toString('hex') : id
 }
 
-/** 解析后的 traceparent 结构（W3C Trace Context version 00）。 */
+/** Structure traceparent analysée (W3C Trace Context version 00). */
 export interface Traceparent {
   version: string
-  /** 32 位 hex trace id。 */
+  /** trace id hex de 32 caractères. */
   traceId: string
-  /** 16 位 hex parent span id。 */
+  /** parent span id hex de 16 caractères. */
   parentId: string
-  /** 2 位 hex trace flags。 */
+  /** trace flags hex de 2 caractères. */
   flags: string
 }
 
 /**
- * 解析 traceparent 头（W3C 口径，version=00）：
- *   - 四段、段数不符 / 含空白变体 → null；
- *   - version 必须为 '00'（本平台仅产出/接收 00；'ff' 按规范禁止，其余版本不识别）；
- *   - trace-id 32 hex 且非全零、parent-id 16 hex 且非全零、flags 2 hex；
- *   - 任何不合法一律 null（调用方回落生成新 trace，绝不带病透传）。
+ * Analyse l'en-tête traceparent (périmètre W3C, version=00) :
+ *   - quatre segments ; nombre de segments incorrect / variantes avec espaces → null ;
+ *   - version doit valoir '00' (la plateforme ne produit/accepte que 00 ; 'ff' interdit par la spécification, autres versions non reconnues) ;
+ *   - trace-id : 32 hex non tous zéro ; parent-id : 16 hex non tous zéro ; flags : 2 hex ;
+ *   - tout élément invalide → null (l'appelant retombe sur la génération d'un nouveau trace, jamais de transmission défectueuse).
  */
 export function parseTraceparent(header: string): Traceparent | null {
   if (typeof header !== 'string') return null
@@ -54,9 +54,9 @@ export function parseTraceparent(header: string): Traceparent | null {
 }
 
 /**
- * 序列化 traceparent 头：version 恒 '00'；parentId 缺省随机生成（网关发起的新 span）；
- * flags 缺省 '01'（sampled）。traceId/parentId 非法（形态或全零）抛错——构造面错误
- * 必须显式暴露，不允许降级成坏头外发。
+ * Sérialise l'en-tête traceparent : version toujours '00' ; parentId généré aléatoirement par défaut (nouveau span initié par la passerelle) ;
+ * flags par défaut '01' (sampled). traceId/parentId invalides (forme ou tout zéro) → lève — les erreurs de construction
+ * doivent être exposées explicitement, jamais dégradées en mauvais en-tête émis.
  */
 export function formatTraceparent(traceId: string, parentId?: string, flags = '01'): string {
   if (!TRACE_ID_RE.test(traceId) || /^0+$/.test(traceId)) {

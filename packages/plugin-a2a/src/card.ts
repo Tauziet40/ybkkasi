@@ -1,16 +1,16 @@
 /**
- * Agent Card 生成 / JWS(Ed25519) 签名与验签（协作方案 §5.2）。
+ * Génération de l'Agent Card / signature et vérification JWS(Ed25519) (plan de collaboration §5.2).
  *
- * 声明以授权为权威：卡片内容由 f(授权集 + 资产 attrs) 投影生成，禁止手改——
- * 调用方（或边缘网关）注册/发现卡片时先验签后采信，验签失败不进入目录并触发审计告警。
- * 签名复用 plugin-market 抽升的平台级 Ed25519 基建（platform-core/src/signature.ts），
- * 不新建密码学组件。签名格式：JWS compact（alg=EdDSA），签名输入 = `${protected}.${payload}`，
- * 复用 signEd25519 对「字符串字节」的原始签名语义。
+ * La déclaration a l'autorisation pour autorité : le contenu de la carte est projeté par f(ensemble d'autorisations + attrs d'actif), toute modification manuelle est interdite —
+ * l'appelant (ou la passerelle de bord) vérifie la signature avant de faire confiance à la carte lors de l'enregistrement/de la découverte ; échec de vérification = hors annuaire + alerte audit.
+ * La signature réutilise l'infrastructure Ed25519 au niveau plateforme extraite de plugin-market (platform-core/src/signature.ts),
+ * sans nouveau composant cryptographique. Format de signature : JWS compact (alg=EdDSA), entrée de signature = `${protected}.${payload}`,
+ * réutilisant la sémantique de signature brute de signEd25519 sur les « octets de la chaîne ».
  */
 import { signEd25519, verifyEd25519 } from '../../platform-core/src/signature.ts'
 
 // ---------------------------------------------------------------------------
-// 卡片结构（协议键保持 ASCII，中文释义见《协议键中文对照总表》）
+// Structure de la carte (les clés de protocole restent ASCII ; signification en chinois : voir la Table de correspondance des clés de protocole)
 // ---------------------------------------------------------------------------
 
 export interface AgentCardSkill {
@@ -26,14 +26,14 @@ export interface AgentCardGovernanceExtension {
     autonomy: string
     runtime: string
     dataClassCeiling: string
-    /** 本员工（被调侧）计量主体。 */
+    /** Sujet de mesure de cet employé (côté appelé). */
     meteringSubject: string
-    /** 协作调用的计量主体（发起侧）；外部对账方据此拉全两侧账（Q-32/E-7）。 */
+    /** Sujet de mesure des appels de collaboration (côté initiateur) ; le réconciliateur externe en tire les comptes des deux côtés (Q-32/E-7). */
     callerMeteringSubject?: string
   }
 }
 
-/** 协议面扩展（Q-31）：协议版本、方法面、流式传输与发现端点——外部 Agent 只靠卡片即可协作。 */
+/** Extensions de la facette protocole (Q-31) : version du protocole, facette de méthodes, transport en flux et points de découverte — un Agent externe peut collaborer avec la seule carte. */
 export interface AgentCardProtocolExtension {
   uri: 'urn:ybk:ext:protocol:v1'
   params: {
@@ -51,7 +51,7 @@ export interface AgentCardProtocolExtension {
   }
 }
 
-/** 未签名卡片体（payload）。 */
+/** Corps de carte non signé (payload). */
 export interface AgentCardBody {
   name: string
   description: string
@@ -61,9 +61,9 @@ export interface AgentCardBody {
   defaultInputModes: string[]
   defaultOutputModes: string[]
   skills: AgentCardSkill[]
-  /** 调用所需权限点（securitySchemes.*.scopes）。 */
+  /** Points de permission requis pour l'appel (securitySchemes.*.scopes). */
   securitySchemes: Record<string, Record<string, unknown>>
-  /** 任务事件流地址（模板含 {taskId}）。 */
+  /** Adresse du flux d'événements de tâche (le modèle contient {taskId}). */
   eventsUrl?: string
   extensions: Array<AgentCardGovernanceExtension | AgentCardProtocolExtension>
 }
@@ -77,7 +77,7 @@ export interface CardSignature {
 export type SignedAgentCard = AgentCardBody & { signatures: CardSignature[] }
 
 // ---------------------------------------------------------------------------
-// base64url 工具（JWS compact 编码；Node Buffer 无填充 base64url）
+// Outils base64url (encodage JWS compact ; Buffer Node en base64url sans remplissage)
 // ---------------------------------------------------------------------------
 
 function b64urlJson(value: unknown): string {
@@ -85,10 +85,10 @@ function b64urlJson(value: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
-// 签名 / 验签
+// Signature / vérification
 // ---------------------------------------------------------------------------
 
-/** 对卡片体做 JWS(EdDSA/Ed25519) 签名，返回带 signatures 的完整卡片。 */
+/** Signe le corps de carte en JWS(EdDSA/Ed25519), renvoie la carte complète avec signatures. */
 export function signAgentCard(body: AgentCardBody, privateKeyPem: string, keyId: string): SignedAgentCard {
   const protectedHeader = b64urlJson({ alg: 'EdDSA', typ: 'JWT', kid: keyId })
   const payload = b64urlJson(body)
@@ -97,7 +97,7 @@ export function signAgentCard(body: AgentCardBody, privateKeyPem: string, keyId:
   return { ...body, signatures: [{ protected: protectedHeader, signature, keyId }] }
 }
 
-/** 验签：先验签后采信（协作方案 §5.2）。任一形态非法返回 false（不抛错，调用方按验签失败处理）。 */
+/** Vérification : vérifier la signature avant de faire confiance (plan de collaboration §5.2). Renvoie false pour toute forme invalide (sans lever ; l'appelant traite comme un échec de vérification). */
 export function verifyAgentCard(card: SignedAgentCard, publicKeyBase64: string): boolean {
   try {
     const sig = card.signatures?.[0]

@@ -1,9 +1,9 @@
 /**
- * @dsh-ops/plugin-authn —— 统一认证中心。
+ * @dsh-ops/plugin-authn —— centre d'authentification unifié.
  *
- * 双轨身份：人（SSO/密码）与机器（Client Credentials）共用一套 Principal 体系。
- * 令牌：HMAC 签名的短期访问令牌（默认 30min，可刷新），支持吊销与密钥轮换。
- * 令牌链（on-behalf-of）：用户 → 应用 → Agent → MCP，act 链在令牌中叠加，审计可还原。
+ * Identité à double voie : les humains (SSO/mot de passe) et les machines (Client Credentials) partagent le même système de Principal.
+ * Jetons : jetons d'accès courts signés HMAC (30 min par défaut, rafraîchissables), avec révocation et rotation de clés.
+ * Chaînes de jetons (on-behalf-of) : utilisateur → application → Agent → MCP, la chaîne act se superpose dans le jeton, reconstituable à l'audit.
  */
 import { createHmac, randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
@@ -25,21 +25,21 @@ export * from './oidc.ts'
 export * from './entry-ticket.ts'
 
 // ---------------------------------------------------------------------------
-// 数据模型
+// Modèle de données
 // ---------------------------------------------------------------------------
 
 export interface PrincipalRecord extends RecordBase {
   type: 'human' | 'machine'
-  /** human: userId；machine: 资源引用（agent:xxx / app:xxx）或自由主体。 */
+  /** human : userId ; machine : référence de ressource (agent:xxx / app:xxx) ou sujet libre. */
   refType?: 'user' | 'agent' | 'app' | 'external'
   refId?: string
   name: string
   status: 'active' | 'disabled'
   clientId?: string
   clientSecretHash?: string
-  /** 机器角色：引用 iam:roles 的角色 ID，权限随角色实时同步（human 走 user.roleIds，同一存储）。 */
+  /** Rôles machine : ID de rôles référençant iam:roles, permissions synchronisées en temps réel avec le rôle (human passe par user.roleIds, même stockage). */
   roleIds?: string[]
-  /** 附加直接权限点（与 roleIds 并集生效；须命中权限目录，防拼错）。 */
+  /** Points de permission directs additionnels (union avec roleIds ; doivent figurer dans le catalogue de permissions, anti-faute de frappe). */
   scopes: string[]
 }
 
@@ -54,7 +54,7 @@ export interface TokenRecord extends RecordBase {
   principalId: string
   kind: 'access' | 'machine' | 'refresh'
   scopes: string[]
-  /** 受众声明：该令牌只对指定服务/插件有效（生态设计 v1.2 第 1 步收紧）。 */
+  /** Déclaration d'audience : ce jeton n'est valable que pour le service/plugin désigné (resserrement de l'étape 1 de la conception écosystème v1.2). */
   audience?: string
   actChain: ActEntry[]
   issuedAt: string
@@ -63,39 +63,39 @@ export interface TokenRecord extends RecordBase {
   revokedAt?: string
   revokedReason?: string
   issuedBy: string
-  /** 会话 id：封禁/改密/解绑按会话即时吊销（auth-identity docs/06）。 */
+  /** id de session : interdiction/changement de mot de passe/déliaison → révocation immédiate par session (auth-identity docs/06). */
   sid?: string
-  /** 刷新链 id：refresh token 重放时按链吊销全部令牌。 */
+  /** id de chaîne de rafraîchissement : en cas de rejeu du refresh token, révocation de tous les jetons de la chaîne. */
   chainId?: string
-  /** refresh token 的 SHA-256 哈希（原文不落库，仅签发时返回一次）。 */
+  /** Hash SHA-256 du refresh token (le texte original n'est pas stocké, renvoyé une seule fois à l'émission). */
   refreshHash?: string
-  /** 已被轮转的时间：再次出现即判定重放（宽限窗口内除外，见 REFRESH_GRACE_MS）。 */
+  /** Horodatage de rotation : toute réapparition = rejeu (sauf dans la fenêtre de grâce, voir REFRESH_GRACE_MS). */
   rotatedAt?: string
-  /** 宽限窗口内的兑换次数（多标签页互踩自愈计数，超过上限拒绝且不再签发）。 */
+  /** Nombre d'échanges dans la fenêtre de grâce (compteur d'auto-réparation des collisions multi-onglets ; au-delà du plafond, refus et plus aucune émission). */
   graceRedemptions?: number
-  /** 委托令牌增量（MCP 治理契约 §3）：被代理用户（sub=该用户的委托链，冻结即联动吊销）。 */
+  /** Complément de jeton délégué (contrat de gouvernance MCP §3) : utilisateur représenté (sub = chaîne de délégation de cet utilisateur, gel = révocation en cascade). */
   delegatedUserId?: string
-  /** 委托令牌增量（MCP 治理契约 §3）：受众快照（mcp:service:<slug> / plugin:<id>）。 */
+  /** Complément de jeton délégué (contrat de gouvernance MCP §3) : instantané d'audience (mcp:service:<slug> / plugin:<id>). */
   delegationAudience?: string
-  /** 个人接入令牌备注（员工自助 MCP 配置签发，additive；非该通道签发不下发）。 */
+  /** Note du jeton d'accès personnel (émission en libre-service de la configuration MCP des employés, additif ; non transmis pour les émissions hors de ce canal). */
   label?: string
 }
 
-/** OAuth state 记录（防 CSRF，一次性消费）。 */
+/** Enregistrement de state OAuth (anti-CSRF, consommation unique). */
 export interface OAuthStateRecord extends RecordBase {
   provider: string
-  /** 多主体：发起授权时指定的连接器配置实例 id（缺省=该 provider 第一个，旧行为）。 */
+  /** Multi-instances : id de l'instance de configuration de connecteur désignée à l'initiation d'autorisation (défaut = la première du provider, comportement historique). */
   configId?: string
   scene: string
-  /** 用途隔离：login=三方登录；bind=已登录账号绑定三方身份（防拿绑定 state 换登录）。 */
+  /** Isolation des usages : login = connexion tierce ; bind = liaison d'identité tierce d'un compte déjà connecté (empêche d'utiliser un state de liaison pour se connecter). */
   purpose?: 'login' | 'bind'
-  /** purpose=bind 时锁定的目标平台账号（authorize 时服务端从会话取，前端不可指定）。 */
+  /** Compte plateforme cible verrouillé quand purpose=bind (résolu côté serveur depuis la session à l'authorize, non spécifiable par le frontend). */
   userId?: string
   createdAt: string
   consumedAt?: string
 }
 
-/** 三方登录未命中的待绑定票据。 */
+/** Billet de liaison en attente quand la connexion tierce ne trouve pas de correspondance. */
 export interface SsoTicketRecord extends RecordBase {
   provider: string
   profile: Record<string, string>
@@ -112,45 +112,45 @@ export interface VerifiedPrincipal {
 }
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
-/** 令牌生命周期基线（auth-identity docs/06）：access 30min + refresh 7d 轮转。 */
+/** Base du cycle de vie des jetons (auth-identity docs/06) : access 30 min + rotation du refresh tous les 7 j. */
 const ACCESS_TTL_MS = 30 * 60_000
 const REFRESH_TTL_MS = 7 * 24 * 3600_000
 /**
- * refresh 轮换宽限窗口（QA 2026-09-08 T-08 / 交接清单 H3）：旧 refresh 轮转后 N 秒内再现
- * 不判重放，改签发同链新兄弟对——多标签页场景下标签 A 刷新令牌后，标签 B/C 持有的同一旧
- * token 401 自愈，不再被「重放检测」整链吊销。窗口外再现仍是硬重放：整链吊销（不变）。
- * 每条已轮转记录的宽限兑换次数上限兜底（防窗口内无限铸造），超限仅拒绝该次请求不吊销链。
+ * Fenêtre de grâce de rotation du refresh (QA 2026-09-08 T-08 / liste de passation H3) : la réapparition d'un ancien refresh dans les N secondes après rotation
+ * n'est pas jugée comme rejeu mais émet une nouvelle paire frère de la même chaîne — dans un scénario multi-onglets, après que l'onglet A a rafraîchi, le même ancien
+ * token détenu par les onglets B/C se répare en 401, sans être révoqué en chaîne par la « détection de rejeu ». Une réapparition hors fenêtre reste un rejeu dur : révocation de la chaîne entière (inchangé).
+ * Filet du plafond d'échanges de grâce par enregistrement déjà tourné (contre la frappe illimitée dans la fenêtre) ; au-delà, seule la requête est refusée, sans révocation de chaîne.
  */
 const REFRESH_GRACE_MS = 30_000
 const REFRESH_GRACE_MAX_REDEMPTIONS = 10
-/** 旧签名密钥的验签宽限期：轮换后旧令牌在窗口内仍可验证，宽限期后自然失效（评审 S2）。 */
+/** Période de grâce de vérification des anciennes clés de signature : après rotation, les anciens jetons restent vérifiables dans la fenêtre, puis expirent naturellement (revue S2). */
 const SECRET_GRACE_MS = 24 * 3600_000
 
-/** 委托令牌 TTL（MCP 治理契约 §3）：默认 900s，上限 3600s。 */
+/** TTL des jetons délégués (contrat de gouvernance MCP §3) : défaut 900 s, plafond 3600 s. */
 const DELEGATION_TTL_DEFAULT_SECONDS = 900
 const DELEGATION_TTL_MAX_SECONDS = 3600
-/** act 链（human 之后）跳数上限：超限拒绝（防委托链无限叠加）。 */
+/** Plafond de sauts de la chaîne act (après l'humain) : refus au-delà (contre l'empilement infini de chaînes de délégation). */
 const DELEGATION_CHAIN_MAX_JUMPS = 4
 
 /**
- * 委托授权事实校验钩子（fail-closed）：由宿主（console 装配时）注入——
- * 查 agent bindings / app owner / iam 管理员。未注入时 exchangeDelegatedToken 一律拒绝
- * （DELEGATION_GUARD_UNAVAILABLE），绝不静默放行。
+ * Crochet de validation des faits d'autorisation de délégation (fail-closed) : injecté par l'hôte (à l'assemblage console) —
+ * consulte les liaisons agent / owner d'app / administrateurs iam. Sans injection, exchangeDelegatedToken refuse systématiquement
+ * (DELEGATION_GUARD_UNAVAILABLE), jamais de passage silencieux.
  */
 export interface DelegationGuardInput {
-  /** 委托 subject 用户（机器调用者必带；人类调用者缺省为调用者本人） */
+  /** Utilisateur sujet de la délégation (obligatoire pour un appelant machine ; par défaut l'appelant lui-même pour un humain) */
   userId?: string
-  /** 目标 principal（人类调用者为其签发 OBO 委托的 agent/app 主体） */
+  /** Principal cible (sujet agent/app pour lequel l'appelant humain émet la délégation OBO) */
   targetPrincipalId?: string
   caller: { principalId: string; kind: string; refType?: string; refId?: string }
 }
 
 export type DelegationGuardFn = (input: DelegationGuardInput) => Promise<boolean> | boolean
 
-/** 委托交换领域错误（带稳定原因码，REST 面据此映射 HTTP 状态与 extra.reason）。 */
+/** Erreur de domaine de l'échange de délégation (avec code de motif stable ; la facette REST en déduit le statut HTTP et extra.reason). */
 export class DelegationError extends Error {
   readonly code: string
   constructor(code: string, message: string) {
@@ -159,17 +159,17 @@ export class DelegationError extends Error {
   }
 }
 
-/** 登录失败锁定策略（评审 S3）：窗口内连续失败达阈值即锁定，时长逐次升级。 */
+/** Stratégie de verrouillage après échecs de connexion (revue S3) : seuil d'échecs consécutifs dans la fenêtre = verrouillage, durée croissante à chaque fois. */
 const LOGIN_MAX_FAILS = 5
 const LOGIN_WINDOW_MS = 15 * 60_000
 const LOGIN_BASE_LOCK_MS = 15 * 60_000
 const LOGIN_MAX_LOCK_MS = 24 * 3600_000
 
-/** 登录尝试计数（持久化：重启不清零，暴力破解者无法借重启绕过锁定）。 */
+/** Compteur de tentatives de connexion (persistant : un redémarrage ne remet pas à zéro, un attaquant ne contourne pas le verrouillage par redémarrage). */
 export interface LoginAttemptRecord extends RecordBase {
   key: string
   fails: number
-  /** 窗口起点（ISO）：窗口滑出后计数自然衰减。 */
+  /** Début de fenêtre (ISO) : le compteur décroît naturellement quand la fenêtre glisse. */
   windowStart: string
   lockCount: number
   lockedUntil?: string
@@ -179,24 +179,24 @@ export class AuthnService extends Service {
   static readonly provide = 'authn'
 
   private signingSecret: string
-  /** 已退役但仍在宽限期内的签名密钥（验签兼容旧令牌）。 */
+  /** Clés de signature retirées mais encore en période de grâce (vérification compatible des anciens jetons). */
   private retiredSecrets: Array<{ secret: string; retiredAt: number }> = []
   private refreshIndex = new Map<string, string>()
-  /** 授权页预检结果缓存（key=provider|configId|redirectUri；2 分钟）：登录页每次点击不再多打一次 IdP。 */
+  /** Cache du pré-contrôle de la page d'autorisation (key=provider|configId|redirectUri ; 2 min) : chaque clic sur la page de connexion ne sollicite plus l'IdP une fois de plus. */
   private authorizeProbeCache = new Map<string, { at: number; ok: boolean; code?: string; message?: string }>()
   private cleanupTimer: ReturnType<typeof setInterval> | undefined
-  /** 委托授权事实钩子（宿主注入；缺席=委托交换一律拒绝，fail-closed）。 */
+  /** Crochet des faits d'autorisation de délégation (injecté par l'hôte ; absent = tout échange de délégation refusé, fail-closed). */
   private delegationGuard: DelegationGuardFn | undefined
 
   constructor(ctx: Context) {
     super(ctx, 'authn')
-    // 认证数据用 durable 集合：吊销/锁定即时落盘（fsync），返回 200 后被杀不丢失
+    // Les données d'authentification utilisent des collections durable : révocation/verrouillage écrits immédiatement (fsync), une mort après le 200 ne perd rien
     this.ctx.opsStorage.collection<TokenRecord>('authn:tokens', { durability: 'durable' })
     this.ctx.opsStorage.collection<LoginAttemptRecord>('authn:loginAttempts', { durability: 'durable' })
     this.ctx.opsStorage.collection<PrincipalRecord>('authn:principals', { durability: 'durable' })
     this.signingSecret = this.loadOrCreateSecret()
     this.loadRetiredSecrets()
-    // refresh 哈希索引：替代全表扫描（评审 M2）
+    // Index de hash des refresh : remplace le scan de table complet (revue M2)
     for (const token of this.tokens().all()) {
       if (token.kind === 'refresh' && token.refreshHash) this.refreshIndex.set(token.refreshHash, token.id)
     }
@@ -206,27 +206,27 @@ export class AuthnService extends Service {
       if (change.kind === 'remove') this.refreshIndex.delete(hash)
       else this.refreshIndex.set(hash, change.record.id)
     })
-    // 过期令牌清理（评审 M2 / 测试 DEF-03：撤销/过期记录不无限增长，小时级巡检控制内存与存储膨胀）：
-    // 启动即清 + 每小时巡检
+    // Nettoyage des jetons expirés (revue M2 / test DEF-03 : les enregistrements révoqués/expirés ne croissent pas indéfiniment, inspection horaire maîtrisant la croissance mémoire et stockage) :
+    // nettoyage au démarrage + inspection horaire
     this.cleanupExpiredTokens()
     this.cleanupTimer = setInterval(() => this.cleanupExpiredTokens(), 3600_000)
-    this.cleanupTimer.unref?.() // OPT-P3-02：嵌入/测试形态允许进程自然退出
+    this.cleanupTimer.unref?.() // OPT-P3-02 : en forme embarquée/test, laisse le processus sortir naturellement
     ctx.effect(() => () => {
       if (this.cleanupTimer) clearInterval(this.cleanupTimer)
     })
-    // 事件联动：账号冻结 → 吊销全部令牌；Agent 下线 → 吊销机器凭证
+    // Cascades d'événements : gel de compte → révocation de tous les jetons ; mise hors ligne d'un Agent → révocation des identifiants machine
     ctx.platformBus.on(PlatformEvents.UserFrozen, (payload) => {
       const { userId, reason } = payload as { userId: string; reason: string }
-      // 委托令牌联动（MCP 治理契约 §3）：sub=该用户的全部委托令牌即时失效
-      // （先于主体清扫执行以获得专属 reason；reason 机器可检索，便于审计区分链路）
+      // Cascade des jetons délégués (contrat de gouvernance MCP §3) : tous les jetons délégués avec sub = cet utilisateur s'invalident immédiatement
+      // (exécuté avant le nettoyage du sujet pour obtenir un motif dédié ; motif consultable par machine, facilitant la distinction des chaînes à l'audit)
       for (const token of this.tokens().find((item) => item.delegatedUserId === userId && !item.revokedAt)) {
         this.revokeToken(token.jti, 'user-frozen-delegation')
       }
       const principal = this.humanPrincipal(userId)
       if (principal) this.revokePrincipalTokens(principal.id, t('账号冻结联动：{reason}', { reason }))
     })
-    // 口令重置联动（安全审查 P1-08，2026-10-31）：重置后既有 access/refresh 全部吊销——
-    // 旧 refresh 不得再换新令牌；sub=该用户的委托令牌同批失效。可审计（吊销原因机器可检索）。
+    // Cascade de réinitialisation de mot de passe (revue sécurité P1-08, 2026-10-31) : après réinitialisation, tous les access/refresh existants sont révoqués —
+    // les anciens refresh ne peuvent plus obtenir de nouveaux jetons ; les jetons délégués avec sub = cet utilisateur expirent dans le même lot. Auditable (motif de révocation consultable par machine).
     ctx.platformBus.on(PlatformEvents.UserPasswordReset, (payload) => {
       const { userId } = payload as { userId: string }
       for (const token of this.tokens().find((item) => item.delegatedUserId === userId && !item.revokedAt)) {
@@ -253,19 +253,19 @@ export class AuthnService extends Service {
     return this.ctx.opsStorage.collection<PrincipalRecord>('authn:principals')
   }
 
-  /** OAuth state（防 CSRF，一次性消费，10 分钟有效）。 */
+  /** state OAuth (anti-CSRF, consommation unique, valable 10 min). */
   oauthStates(): Collection<OAuthStateRecord> {
     return this.ctx.opsStorage.collection<OAuthStateRecord>('authn:oauthStates')
   }
 
-  /** 三方登录未命中时的待绑定票据（5 分钟有效，一次性）。 */
+  /** Billet de liaison en attente quand la connexion tierce ne trouve pas de correspondance (valable 5 min, usage unique). */
   ssoTickets(): Collection<SsoTicketRecord> {
     return this.ctx.opsStorage.collection<SsoTicketRecord>('authn:ssoTickets')
   }
 
-  // -- 会话令牌对（access + refresh 轮转链） --------------------------------
+  // -- Paire de jetons de session (chaîne de rotation access + refresh) --------------------------------
 
-  /** 签发会话令牌对：access（30min）+ refresh（7d，仅存哈希，单次轮转）。 */
+  /** Émet la paire de jetons de session : access (30 min) + refresh (7 j, stocké en hash seul, rotation unique). */
   issueSessionPair(principalId: string, options: { sid?: string; chainId?: string; issuedBy: string }): { token: string; refreshToken: string; access: TokenRecord; sid: string } {
     const sid = options.sid ?? newId('sid')
     const chainId = options.chainId ?? newId('chn')
@@ -296,10 +296,10 @@ export class AuthnService extends Service {
   }
 
   /**
-   * 刷新会话：校验 refresh 哈希 → 重放检测（已轮转的 refresh 再现 → 吊销整链）。
-   * 宽限契约（H3/T-08）：轮转后 REFRESH_GRACE_MS 内旧 token 再现不判重放，签发同链兄弟对
-   * （各标签此后各持独立令牌、后续轮转互不影响）；窗口外再现仍整链吊销。响应形状不变
-   * （{token, refreshToken, sid}），消费方无需改动即获得多标签自愈。
+   * Rafraîchit la session : validation du hash du refresh → détection de rejeu (réapparition d'un refresh déjà tourné → révocation de la chaîne entière).
+   * Contrat de grâce (H3/T-08) : dans REFRESH_GRACE_MS après rotation, la réapparition de l'ancien token n'est pas un rejeu, émission d'une paire frère de la même chaîne
+   * (chaque onglet détient ensuite ses jetons propres, rotations ultérieures indépendantes) ; hors fenêtre, révocation de la chaîne entière. Forme de réponse inchangée
+   * ({token, refreshToken, sid}), les consommateurs obtiennent l'auto-réparation multi-onglets sans modification.
    */
   refreshSession(refreshToken: string): { token: string; refreshToken: string; sid: string } {
     const hash = sha256Hex(refreshToken)
@@ -321,8 +321,8 @@ export class AuthnService extends Service {
             issuedBy: 'refresh-grace',
           })
         }
-        // 窗口内超限：仅拒绝该次请求（bounded minting 兜底），不牵连整链——多标签风暴的第
-        // N+1 个标签退化为重新登录，已签发的兄弟对不受影响。
+        // Dépassement dans la fenêtre : seule cette requête est refusée (filet de frappe borné), la chaîne n'est pas entraînée — l'onglet
+        // N+1 de la tempête multi-onglets retombe sur une reconnexion, les paires sœurs déjà émises restent intactes.
         throw new Error(t('refresh token 宽限兑换已达上限（{n} 次），请重新登录', { n: REFRESH_GRACE_MAX_REDEMPTIONS }))
       }
       this.revokeChain(record.chainId ?? '', t('refresh token 重放检测（原轮转于 {at}）', { at: record.rotatedAt }))
@@ -336,7 +336,7 @@ export class AuthnService extends Service {
     })
   }
 
-  /** 按链吊销全部令牌。 */
+  /** Révoque tous les jetons d'une chaîne. */
   revokeChain(chainId: string, reason: string): number {
     let count = 0
     for (const token of this.tokens().find((item) => item.chainId === chainId && !item.revokedAt)) {
@@ -346,7 +346,7 @@ export class AuthnService extends Service {
     return count
   }
 
-  /** 按会话吊销（登出/封禁/改密即时生效）。 */
+  /** Révoque par session (logout/interdiction/changement de mot de passe effectifs immédiatement). */
   revokeSession(sid: string, reason: string): number {
     let count = 0
     for (const token of this.tokens().find((item) => item.sid === sid && !item.revokedAt)) {
@@ -356,19 +356,19 @@ export class AuthnService extends Service {
     return count
   }
 
-  // -- 三方登录（IdentityProviderAdapter 链路，融合 auth-identity docs/03/04）--
+  // -- Connexion tierce (chaîne IdentityProviderAdapter, fusion auth-identity docs/03/04)--
 
   /**
-   * 发起三方授权：生成一次性 state，返回授权地址。
-   * 钉钉等真实 IdP 要求 redirect_uri 为绝对 URL，origin 由调用方从请求头推导后传入；
-   * 缺省时回落相对路径（仅本地/mock 链路可用）。
-   * options.purpose='bind' 时用于「已登录账号扫码绑定三方身份」：state 锁定目标 userId，
-   * 回调由 GET /api/auth/sso/callback 承接（与登录用途隔离，见 completeSso）。
-   * options.configId 指定多主体连接器实例：按其适配器发起授权并记入 state，回调按实例解析。
-   * options.promptConsent=true 时强制 IdP 弹授权确认页（刷新老用户授权快照，见 providers.ts）。
+   * Initie l'autorisation tierce : génère un state à usage unique, renvoie l'adresse d'autorisation.
+   * Les IdP réels comme DingTalk exigent un redirect_uri en URL absolue ; l'origin est déduit par l'appelant des en-têtes de requête et transmis ;
+   * à défaut, repli sur le chemin relatif (valable seulement pour les chaînes locales/mock).
+   * options.purpose='bind' sert à « lier par scan l'identité tierce d'un compte déjà connecté » : le state verrouille le userId cible,
+   * le callback est pris en charge par GET /api/auth/sso/callback (isolé de l'usage connexion, voir completeSso).
+   * options.configId désigne l'instance de connecteur multi-instances : l'autorisation est initiée via son adaptateur et consignée dans le state, le callback se résout par instance.
+   * options.promptConsent=true force l'IdP à afficher la page de confirmation d'autorisation (rafraîchit l'instantané d'autorisation des anciens utilisateurs, voir providers.ts).
    */
   async beginSso(provider: string, scene: 'web_qr' | 'h5' | 'in_app', origin?: string, options: { purpose?: 'login' | 'bind'; userId?: string; configId?: string; promptConsent?: boolean } = {}): Promise<{ authorizeUrl: string | null; state: string; blocked?: { code: string; message: string } }> {
-    // 多主体：指定 configId 时按配置实例取适配器并校验平台类型一致，否则取该 provider 第一个（旧行为）
+    // Multi-instances : avec configId, adaptateur pris sur l'instance de configuration et cohérence du type de plateforme vérifiée ; sinon la première du provider (comportement historique)
     const adapter = options.configId !== undefined
       ? this.ctx.iam.getAuthProviderByConfig(options.configId)
       : this.ctx.iam.getAuthProvider(provider)
@@ -385,15 +385,15 @@ export class AuthnService extends Service {
       purpose: options.purpose ?? 'login',
       ...(options.userId !== undefined ? { userId: options.userId } : {}),
     })
-    // redirect_uri 优先用连接器配置里的 callbackUrl（须与钉钉后台「安全设置」白名单逐字一致）；
-    // 未配置时回落 origin 推导的 /api/auth/sso/callback。
+    // redirect_uri prend en priorité le callbackUrl de la configuration de connecteur (doit correspondre mot à mot à la liste blanche « paramètres de sécurité » de la console DingTalk) ;
+    // sans configuration, repli sur /api/auth/sso/callback déduit de l'origin.
     const configured = (options.configId !== undefined
       ? this.ctx.iam.connectorConfigById(options.configId)?.callbackUrl
       : this.ctx.iam.connectorConfig(provider)?.callbackUrl)?.trim()
     const redirectUri = configured || (origin ? `${origin.replace(/\/+$/, '')}/api/auth/sso/callback` : '/api/auth/sso/callback')
     const authorizeUrl = await adapter.buildAuthorizeUrl(scene, state, redirectUri, { promptConsent: options.promptConsent ?? false })
-    // 应用级拒绝预检（钉钉 900103「应用不存在」）：与其把用户整页送到一张只能关掉的错误页，
-    // 不如在登录页给出「去钉钉开发者后台开哪一项」的指引。预检失败不阻断（网络异常按放行处理）。
+    // Pré-contrôle de refus au niveau application (DingTalk 900103 « application inexistante ») : plutôt que d'envoyer l'utilisateur vers une page d'erreur qu'il ne peut que fermer,
+    // mieux vaut donner sur la page de connexion le conseil « quelle entrée ouvrir dans la console développeur DingTalk ». Un échec du pré-contrôle ne bloque pas (anomalie réseau = passage).
     let blocked: { code: string; message: string } | undefined
     if (authorizeUrl && adapter.probeAuthorize) {
       const cacheKey = `${provider}|${options.configId ?? ''}|${redirectUri}`
@@ -408,8 +408,8 @@ export class AuthnService extends Service {
   }
 
   /**
-   * 完成三方登录：state 一次性消费 → Adapter 链（exchangeCode/getUserInfo/normalizeProfile）
-   * → 命中身份链接直接登录；未命中签发待绑定票据（绑定已有账号 / 注册新账号两分支）。
+   * Achève la connexion tierce : consommation unique du state → chaîne de l'Adapter (exchangeCode/getUserInfo/normalizeProfile)
+   * → correspondance d'un lien d'identité = connexion directe ; sinon émission d'un billet de liaison en attente (deux branches : lier un compte existant / créer un nouveau compte).
    */
   async completeSso(provider: string, code: string, state: string): Promise<{ kind: 'hit'; session: { token: string; refreshToken: string; access: TokenRecord; sid: string }; userId: string } | { kind: 'pending'; pendingTicket: string; profileName: string }> {
     const stateRecord = this.oauthStates().get(state)
@@ -419,12 +419,12 @@ export class AuthnService extends Service {
     if (Date.now() - new Date(stateRecord.createdAt).getTime() > 10 * 60_000) throw new Error(t('state 已过期'))
     this.oauthStates().update(state, { consumedAt: new Date().toISOString() })
 
-    // 多主体：以 state 记录为准（provider 参数仅兼容旧调用）；configId 命中时按配置实例取适配器
+    // Multi-instances : l'enregistrement du state fait foi (le paramètre provider ne sert qu'à la compatibilité des anciens appels) ; configId trouvé → adaptateur pris sur l'instance de configuration
     const ssoProvider = stateRecord.provider
     const adapter = stateRecord.configId
       ? this.ctx.iam.getAuthProviderByConfig(stateRecord.configId)
       : this.ctx.iam.getAuthProvider(ssoProvider)
-    const tokenSet = await adapter.exchangeCode(code) // code 一次性，重放抛 ProviderAuthError
+    const tokenSet = await adapter.exchangeCode(code) // code à usage unique, rejeu lève ProviderAuthError
     const raw = await adapter.getUserInfo(tokenSet)
     const profile = adapter.normalizeProfile(raw)
 
@@ -455,7 +455,7 @@ export class AuthnService extends Service {
     return { kind: 'pending', pendingTicket: ticket, profileName: profile.name }
   }
 
-  /** 读取 state 记录的用途（回调路由分发用；不消费）。 */
+  /** Lit l'usage enregistré dans le state (pour le dispatch des routes de callback ; sans consommer). */
   peekOAuthState(state: string): { provider: string; purpose: 'login' | 'bind'; userId?: string; configId?: string } {
     const record = this.oauthStates().get(state)
     if (!record) throw new Error(t('state 无效（未发起授权或已消费）'))
@@ -468,9 +468,9 @@ export class AuthnService extends Service {
   }
 
   /**
-   * 完成扫码绑定（purpose=bind）：state 一次性消费 → Adapter 链换 unionId
-   * → 绑定到 state 锁定的平台账号。全程无需手工输入任何三方 ID。
-   * 「一人一号」由 identityLinks 引擎级唯一约束兜底。
+   * Achève la liaison par scan (purpose=bind) : consommation unique du state → chaîne de l'Adapter pour obtenir l'unionId
+   * → liaison au compte plateforme verrouillé par le state. Aucune saisie manuelle d'identifiant tiers nécessaire sur tout le parcours.
+   * « Une personne, un compte » est garanti par la contrainte d'unicité au niveau moteur de identityLinks.
    */
   async completeSsoBind(code: string, state: string): Promise<{ userId: string; provider: string; displayName: string; providerUserId: string }> {
     const stateRecord = this.oauthStates().get(state)
@@ -481,11 +481,11 @@ export class AuthnService extends Service {
     if (Date.now() - new Date(stateRecord.createdAt).getTime() > 10 * 60_000) throw new Error(t('state 已过期'))
     this.oauthStates().update(state, { consumedAt: new Date().toISOString() })
 
-    // 多主体：state 携带 configId 时按配置实例取适配器，否则取该 provider 第一个（旧行为）
+    // Multi-instances : state portant configId → adaptateur de l'instance de configuration ; sinon la première du provider (comportement historique)
     const adapter = stateRecord.configId
       ? this.ctx.iam.getAuthProviderByConfig(stateRecord.configId)
       : this.ctx.iam.getAuthProvider(stateRecord.provider)
-    const tokenSet = await adapter.exchangeCode(code) // code 一次性，重放抛 ProviderAuthError
+    const tokenSet = await adapter.exchangeCode(code) // code à usage unique, rejeu lève ProviderAuthError
     const raw = await adapter.getUserInfo(tokenSet)
     const profile = adapter.normalizeProfile(raw)
 
@@ -510,7 +510,7 @@ export class AuthnService extends Service {
     return { userId: user.id, provider: stateRecord.provider, displayName: profile.name, providerUserId: profile.providerUserId }
   }
 
-  /** 待绑定票据 → 绑定已有平台账号（校验密码）→ 建立身份链接并登录。 */
+  /** Billet de liaison → liaison à un compte plateforme existant (validation du mot de passe) → création du lien d'identité et connexion. */
   ssoBindExisting(pendingTicket: string, username: string, password: string): { session: { token: string; refreshToken: string; access: TokenRecord; sid: string }; userId: string } {
     const ticket = this.peekTicket(pendingTicket)
     const throttleKey = `sso-bind:${username}`
@@ -536,7 +536,7 @@ export class AuthnService extends Service {
     return { session, userId: user.id }
   }
 
-  /** 待绑定票据 → 注册新账号（默认落入首个组织）→ 建立身份链接并登录。 */
+  /** Billet de liaison → création d'un nouveau compte (par défaut dans la première organisation) → création du lien d'identité et connexion. */
   ssoRegister(pendingTicket: string): { session: { token: string; refreshToken: string; access: TokenRecord; sid: string }; userId: string } {
     const ticket = this.consumeTicket(pendingTicket)
     void ticket
@@ -562,7 +562,7 @@ export class AuthnService extends Service {
     return { session, userId: user.id }
   }
 
-  /** 读取票据（不消费）。 */
+  /** Lit le billet (sans consommer). */
   private peekTicket(pendingTicket: string): { provider: string; profile: Record<string, string> } {
     const ticket = this.ssoTickets().get(pendingTicket)
     if (!ticket) throw new Error(t('待绑定票据无效'))
@@ -593,7 +593,7 @@ export class AuthnService extends Service {
       writeFileSync(file, secret, { encoding: 'utf8', mode: 0o600 })
       return secret
     } catch (error) {
-      // 降级为进程内密钥必须显式告警（重启即令牌全部失效，不可静默）
+      // La rétrogradation en clé en mémoire doit alerter explicitement (un redémarrage invalide tous les jetons, pas de silence)
       console.error('[authn] 签名密钥读取/落盘失败，降级为进程内密钥（重启后所有令牌失效）', error)
       return generateSecret('sign')
     }
@@ -606,7 +606,7 @@ export class AuthnService extends Service {
       const stored = JSON.parse(readFileSync(file, 'utf8')) as Array<{ secret: string; retiredAt: number }>
       const cutoff = Date.now() - SECRET_GRACE_MS
       this.retiredSecrets = stored.filter((item) => item.retiredAt > cutoff)
-    } catch { /* 历史文件缺失/损坏：视为无宽限密钥 */ }
+    } catch { /* fichier historique absent/corrompu : traité comme absence de clé de grâce */ }
   }
 
   private saveRetiredSecrets(): void {
@@ -619,9 +619,9 @@ export class AuthnService extends Service {
   }
 
   /**
-   * 轮换签名密钥（评审 S2 修复）：旧密钥进入宽限期（默认 24h）而非立即作废——
-   * 宽限期内旧令牌仍可通过验签（在途请求不掉线），宽限期后自然失效；
-   * 会话可随时用 refresh token 换取新密钥签发的访问令牌，全局无感轮换。
+   * Rotation de la clé de signature (correctif revue S2) : l'ancienne clé entre en période de grâce (24 h par défaut) au lieu d'être invalidée immédiatement —
+   * pendant la grâce, les anciens jetons passent encore la vérification (les requêtes en vol ne sont pas déconnectées), puis expirent naturellement ;
+   * les sessions peuvent à tout moment échanger un refresh token contre un jeton d'accès signé par la nouvelle clé, rotation imperceptible globalement.
    */
   rotateSigningSecret(): { graceMs: number } {
     this.retiredSecrets = [
@@ -635,13 +635,13 @@ export class AuthnService extends Service {
     return { graceMs: SECRET_GRACE_MS }
   }
 
-  /** 校验签名：先当前密钥，再宽限期内的退役密钥（轮换在途兼容）。 */
+  /** Vérifie la signature : d'abord la clé courante, puis les clés retirées encore en grâce (compatibilité pendant la rotation). */
   private signatureMatches(body: string, signature: string): boolean {
     const candidates = [this.signingSecret, ...this.retiredSecrets.filter((item) => Date.now() - item.retiredAt < SECRET_GRACE_MS).map((item) => item.secret)]
     return candidates.some((secret) => createHmac('sha256', secret).update(body).digest('base64url') === signature)
   }
 
-  /** 清理过期/吊销令牌（评审 M2）：过期 7 天后物理删除（保留一个 refresh 周期用于重放取证），撤销状态不再无限累积。 */
+  /** Nettoyage des jetons expirés/révoqués (revue M2) : suppression physique après 7 jours d'expiration (une période de refresh conservée pour l'expertise de rejeu), l'état révoqué ne s'accumule plus indéfiniment. */
   cleanupExpiredTokens(): number {
     const cutoff = Date.now() - 7 * 24 * 3600_000
     let removed = 0
@@ -673,7 +673,7 @@ export class AuthnService extends Service {
     })
   }
 
-  /** 创建机器身份凭证（Client Credentials）。secret 仅返回一次；授权 = 机器角色（roleIds，实时同步）+ 附加权限点（scopes，须命中权限目录）。 */
+  /** Crée un identifiant d'identité machine (Client Credentials). Le secret n'est renvoyé qu'une fois ; autorisation = rôles machine (roleIds, synchronisation temps réel) + points de permission additionnels (scopes, devant figurer au catalogue). */
   createMachineCredential(input: {
     name: string
     refType?: 'agent' | 'app' | 'external'
@@ -708,9 +708,9 @@ export class AuthnService extends Service {
     return this.principals().update(id, { status: 'disabled' })
   }
 
-  /** 校验机器身份附加权限点：恰为 ['*'] 或全部命中权限目录（防拼错，如 usage.wrtie）；可空（授权可全部来自机器角色）。
-   *  W3-T5（契约 §12）增量：接受资源限定 MCP scope 形态——mcp.service:<slug>.invoke / mcp.tool:<slug>:<tool>.invoke，
-   *  校验前缀形态 + （端口已接线时）slug 对应服务存在；其余规则（权限目录命中/'*' 唯一）不变。 */
+  /** Valide les points de permission additionnels d'une identité machine : exactement ['*'] ou tous présents au catalogue de permissions (anti-faute de frappe, p. ex. usage.wrtie) ; nullable (l'autorisation peut venir intégralement des rôles machine).
+   *  Incrément W3-T5 (contrat §12) : accepte les formes de scopes MCP à ressource limitée — mcp.service:<slug>.invoke / mcp.tool:<slug>:<tool>.invoke,
+   *  validation de la forme du préfixe + (si le port est câblé) existence du service correspondant au slug ; les autres règles (présence au catalogue/'*' unique) inchangées. */
   private assertMachineScopes(scopes: string[]): void {
     if (scopes.length === 0) return
     if (scopes.includes('*')) {
@@ -722,15 +722,15 @@ export class AuthnService extends Service {
     if (invalid.length > 0) throw new Error(t('非法权限点：{points}（须为权限目录中的点、资源限定 mcp.service:/mcp.tool: 形态，或仅 \'*\'）', { points: invalid.join('、') }))
   }
 
-  /** 资源限定 MCP scope 存在性端口（W3-T5）：宿主（console 装配处）可注入 slug 存在性回调；未接线=仅形态校验（可选端口口径）。 */
+  /** Port d'existence des scopes MCP à ressource limitée (W3-T5) : l'hôte (au montage console) peut injecter un callback d'existence de slug ; non câblé = validation de forme seule (port optionnel). */
   private mcpServiceExists: ((slug: string) => boolean) | undefined
 
-  /** 注册资源限定 scope 的服务存在性回调（slug → 是否存在）；传 undefined 恢复仅形态校验。 */
+  /** Enregistre le callback d'existence de service des scopes à ressource limitée (slug → existe ?) ; undefined = retour à la validation de forme seule. */
   setMcpServiceExistsCheck(fn: ((slug: string) => boolean) | undefined): void {
     this.mcpServiceExists = fn
   }
 
-  /** 资源限定 MCP scope 形态校验（契约 §12）：mcp.service:<slug>.invoke / mcp.tool:<slug>:<tool>.invoke；slug 存在性端口已接线时强校验。 */
+  /** Validation de forme des scopes MCP à ressource limitée (contrat §12) : mcp.service:<slug>.invoke / mcp.tool:<slug>:<tool>.invoke ; validation forte quand le port d'existence de slug est câblé. */
   private validResourceScopedMcpScope(scope: string): boolean {
     const service = /^mcp\.service:([^:\s]+)\.invoke$/.exec(scope)
     if (service) return this.mcpServiceExists ? this.mcpServiceExists(service[1]!) : true
@@ -739,14 +739,14 @@ export class AuthnService extends Service {
     return false
   }
 
-  /** 校验机器角色引用：角色必须真实存在（共用 iam:roles 存储）。 */
+  /** Valide les références de rôles machine : les rôles doivent réellement exister (stockage iam:roles partagé). */
   private assertMachineRoles(roleIds: string[]): void {
     for (const roleId of roleIds) {
       if (!this.ctx.iam.roles().get(roleId)) throw new Error(t('机器角色不存在：{id}', { id: roleId }))
     }
   }
 
-  /** 机器主体生效权限 = 角色权限（通配符展开，实时同步）∪ 附加直接权限点。 */
+  /** Permissions effectives d'un sujet machine = permissions des rôles (expansion des jokers, synchronisation temps réel) ∪ points de permission directs additionnels. */
   resolveMachineScopes(principal: PrincipalRecord): string[] {
     const fromRoles = this.ctx.iam.resolveRolePermissions(principal.roleIds ?? [])
     if (fromRoles.includes('*') || principal.scopes.includes('*')) return ['*']
@@ -754,7 +754,7 @@ export class AuthnService extends Service {
     return [...merged]
   }
 
-  /** 调整机器身份授权（机器角色 / 附加权限点）；联动吊销全部存量令牌（收权即时生效，下次换牌按新范围签发）。 */
+  /** Ajuste l'autorisation d'une identité machine (rôles / points additionnels) ; révocation en cascade de tous les jetons existants (retrait de droit effectif immédiat, prochaine émission au nouveau périmètre). */
   updateMachineScopes(id: string, patch: { roleIds?: string[]; scopes?: string[] }): PrincipalRecord {
     const principal = this.principals().get(id)
     if (!principal) throw new Error(t('身份不存在：{id}', { id }))
@@ -772,7 +772,7 @@ export class AuthnService extends Service {
     return updated
   }
 
-  /** 轮换机器凭证密钥：clientId 不变，旧 secret 立即失效，存量令牌全部吊销；新 secret 仅此一次返回。 */
+  /** Renouvelle le secret d'un identifiant machine : clientId inchangé, ancien secret invalidé immédiatement, tous les jetons existants révoqués ; le nouveau secret n'est renvoyé qu'une fois. */
   rotateMachineCredential(id: string): { principal: PrincipalRecord; clientSecret: string } {
     const principal = this.principals().get(id)
     if (!principal) throw new Error(t('身份不存在：{id}', { id }))
@@ -787,16 +787,16 @@ export class AuthnService extends Service {
     return this.principals().update(id, { status: 'active' })
   }
 
-  // -- 登录 ---------------------------------------------------------------
+  // -- Connexion ---------------------------------------------------------------
 
-  /** 登录尝试计数集合（durable：重启不清零）。 */
+  /** Collection des compteurs de tentatives de connexion (durable : un redémarrage ne remet pas à zéro). */
   loginAttempts(): Collection<LoginAttemptRecord> {
     const collection = this.ctx.opsStorage.collection<LoginAttemptRecord>('authn:loginAttempts')
     collection.uniqueOn('login_attempt_key', (item) => item.key)
     return collection
   }
 
-  /** 锁定校验：命中锁定窗口直接拒绝（评审 S3：暴力破解面收敛；OIDC 授权/换牌端点复用）。 */
+  /** Contrôle de verrouillage : dans la fenêtre de verrouillage → refus direct (revue S3 : réduction de la surface de force brute ; réutilisé par les points d'autorisation/échange OIDC). */
   assertNotLocked(key: string): void {
     const record = this.loginAttempts().findOne((item) => item.key === key)
     if (!record?.lockedUntil) return
@@ -815,7 +815,7 @@ export class AuthnService extends Service {
       collection.insert({ id: newId('lga'), key, fails: 1, windowStart: new Date().toISOString(), lockCount: 0 })
       return
     }
-    // 窗口滑出后重新计数
+    // Nouveau comptage après glissement de la fenêtre
     const inWindow = now - new Date(existing.windowStart).getTime() < LOGIN_WINDOW_MS
     const fails = inWindow ? existing.fails + 1 : 1
     const patch: Partial<LoginAttemptRecord> = {
@@ -881,7 +881,7 @@ export class AuthnService extends Service {
     return { token, record, principal }
   }
 
-  // -- 令牌 ---------------------------------------------------------------
+  // -- Jetons ---------------------------------------------------------------
 
   issueToken(principalId: string, options: {
     kind: TokenRecord['kind']
@@ -892,16 +892,16 @@ export class AuthnService extends Service {
     issuedBy?: string
     sid?: string
     chainId?: string
-    /** 委托令牌增量（MCP 治理契约 §3）：被代理用户 / 受众快照（缺省不产出，存量行为不变）。 */
+    /** Complément de jeton délégué (contrat de gouvernance MCP §3) : utilisateur représenté / instantané d'audience (non produit par défaut, comportement existant inchangé). */
     delegatedUserId?: string
     delegationAudience?: string
-    /** 个人接入令牌备注（员工自助 MCP 配置通道，落 TokenRecord 供列表自见）。 */
+    /** Note du jeton d'accès personnel (canal de libre-service MCP des employés, stockée dans TokenRecord pour être visible dans les listes). */
     label?: string
   }): { token: string; record: TokenRecord } {
     const principal = this.principals().get(principalId)
     if (!principal) throw new Error(t('身份不存在：{id}', { id: principalId }))
     if (principal.status !== 'active') throw new Error(t('身份已禁用，无法签发令牌'))
-    // 插件受众收敛面（v1.2 第 1 步）：aud 为 plugin:<id> 时，scope 必须全部落在该插件命名空间内
+    // Surface de convergence d'audience des plugins (v1.2 étape 1) : aud = plugin:<id> → le scope doit intégralement rester dans l'espace de noms du plugin
     if (options.audience?.startsWith('plugin:')) {
       const namespace = `${options.audience}:`
       const offender = (options.scopes ?? []).find((scope) => scope !== '*' && !scope.startsWith(namespace))
@@ -948,14 +948,14 @@ export class AuthnService extends Service {
   }
 
   /**
-   * 委托令牌交换（MCP 治理契约 §3，RFC 8693 语义子集）：
-   *   - 人类调用者：可为目标 agent/app principal 签发 OBO 委托令牌（sub=用户，act=调用者+目标）；
-   *   - 机器调用者（agent/app 凭证）：仅可携带 userId 换取 sub=该用户 的委托令牌（act=调用者主体）；
-   *   - 授权事实校验 fail-closed：delegationGuard 未注入一律拒绝（DELEGATION_GUARD_UNAVAILABLE）；
-   *   - audience 强校验：必须 mcp:service:<slug> 或 plugin:<id> 形态（复用 issueToken 既有收敛）；
-   *   - scopes = 请求 ∩ 调用者 scopes ∩ 目标 principal scopes（verify 侧 delegate: 前缀二次夹紧）；
-   *   - TTL 默认 900s 上限 3600s；act 链（human 之后）跳数 ≤ 4。
-   * issueOnBehalfOf 保留不动（旧链路兼容）。
+   * Échange de jeton délégué (contrat de gouvernance MCP §3, sous-ensemble sémantique de RFC 8693) :
+   *   - appelant humain : peut émettre un jeton de délégation OBO pour un principal agent/app cible (sub = utilisateur, act = appelant + cible) ;
+   *   - appelant machine (identifiants agent/app) : peut échanger avec un userId contre un jeton délégué sub = cet utilisateur (act = sujet appelant) ;
+   *   - validation des faits d'autorisation fail-closed : sans delegationGuard injecté, refus systématique (DELEGATION_GUARD_UNAVAILABLE) ;
+   *   - validation forte d'audience : forme mcp:service:<slug> ou plugin:<id> obligatoire (réutilise la convergence issueToken existante) ;
+   *   - scopes = requête ∩ scopes de l'appelant ∩ scopes du principal cible (resserrement secondaire du préfixe delegate: côté verify) ;
+   *   - TTL défaut 900 s, plafond 3600 s ; sauts de la chaîne act (après l'humain) ≤ 4.
+   * issueOnBehalfOf reste inchangé (compatibilité ancienne chaîne).
    */
   async exchangeDelegatedToken(input: {
     caller: VerifiedPrincipal
@@ -968,7 +968,7 @@ export class AuthnService extends Service {
     if (!this.delegationGuard) {
       throw new DelegationError('DELEGATION_GUARD_UNAVAILABLE', t('委托授权钩子未装配（fail-closed），令牌交换被拒绝'))
     }
-    // audience 形态强校验：仅接受服务级 MCP 与插件命名空间两种形态
+    // Validation forte de la forme d'audience : seules les formes service MCP et espace de noms plugin sont acceptées
     const audience = String(input.audience ?? '')
     if (!(audience.startsWith('mcp:service:') && audience.length > 'mcp:service:'.length)
       && !(audience.startsWith('plugin:') && audience.length > 'plugin:'.length)) {
@@ -984,7 +984,7 @@ export class AuthnService extends Service {
     let targetScopes: string[]
 
     if (caller.principal.type === 'human') {
-      // 人类调用者：目标 agent/app principal 必填，sub=用户（本人或显式指定的 subject）
+      // Appelant humain : principal agent/app cible obligatoire, sub = utilisateur (soi-même ou sujet explicitement désigné)
       if (!input.targetPrincipalId) {
         throw new DelegationError('DELEGATION_TARGET_REQUIRED', t('人类调用者必须指定目标主体（targetPrincipalId，agent/app）'))
       }
@@ -994,7 +994,7 @@ export class AuthnService extends Service {
       }
       subjectUserId = input.userId ?? caller.principal.refId ?? ''
       if (!subjectUserId) throw new DelegationError('DELEGATION_USER_REQUIRED', t('调用者令牌缺少用户身份（refId），无法确定委托 subject'))
-      // subject 用户必须真实存在且在册（显式指定他人时校验档案，防拼错主体）
+      // L'utilisateur sujet doit réellement exister et être enregistré (validation du profil quand un tiers est explicitement désigné, anti-erreur de sujet)
       const subjectUser = this.ctx.iam.users().get(subjectUserId)
       if (!subjectUser) throw new DelegationError('DELEGATION_USER_NOT_FOUND', t('委托 subject 用户不存在：{id}', { id: subjectUserId }))
       if (subjectUser.status !== 'active') throw new DelegationError('DELEGATION_USER_INACTIVE', t('委托 subject 用户状态异常（{status}），拒绝签发', { status: subjectUser.status }))
@@ -1003,16 +1003,16 @@ export class AuthnService extends Service {
       actChain = [...caller.actChain, callerEntry, { principalId: target.id, name: target.name, type: target.type }]
       targetScopes = this.resolveMachineScopes(target)
     } else {
-      // 机器调用者：两种模式
-      //  ① 自委托（不传 userId/targetPrincipalId）：sub=调用者自身，act 链为空——即计划 §6.2
-      //     「Agent 自身调用」形态（sub=agent:xxx, aud=mcp:service:<slug>）。平台长期机器凭证
-      //     不出域，只换出「短期 + 绑定单一服务受众」的令牌（aud 强校验在数据面强制）。
-      //  ② 代用户委托（传 userId）：sub=该用户，act 链含调用者主体（既有语义不变）。
+      // Appelant machine : deux modes
+      //  ① Auto-délégation (sans userId/targetPrincipalId) : sub = appelant lui-même, chaîne act vide — la forme « appels propres de l'Agent »
+      //     du plan §6.2 (sub=agent:xxx, aud=mcp:service:<slug>). L'identifiant machine longue durée de la plateforme
+      //     ne sort pas du domaine, on n'échange que contre un « jeton court + audience liée à un seul service » (validation forte d'aud appliquée au plan de données).
+      //  ② Délégation pour un utilisateur (avec userId) : sub = cet utilisateur, chaîne act contenant le sujet appelant (sémantique existante inchangée).
       if (input.targetPrincipalId) {
         throw new DelegationError('DELEGATION_TARGET_NOT_ALLOWED', t('机器调用者仅可携带 userId 换取委托令牌（不可指定 targetPrincipalId）'))
       }
       if (!input.userId) {
-        // 自委托：主体即调用者自身，无需用户档案与绑定校验
+        // Auto-délégation : le sujet est l'appelant lui-même, ni profil utilisateur ni validation de liaison requis
         subjectPrincipalId = caller.principal.id
         actChain = []
         targetScopes = caller.scopes
@@ -1028,13 +1028,13 @@ export class AuthnService extends Service {
       }
     }
 
-    // act 链跳数：链首为 human 时其自身不计（human 之后 ≤ 4）；链首即机器时全部计（subject 用户为链外 human）
+    // Sauts de la chaîne act : si la tête est human, elle ne se compte pas (≤ 4 après l'humain) ; si la tête est machine, tout compte (l'utilisateur sujet est l'humain hors chaîne)
     const jumps = actChain.length > 0 && actChain[0]!.type === 'human' ? actChain.length - 1 : actChain.length
     if (jumps > DELEGATION_CHAIN_MAX_JUMPS) {
       throw new DelegationError('DELEGATION_CHAIN_TOO_LONG', t('委托链过长：human 之后跳数 {jumps} 超过上限 {max}', { jumps, max: DELEGATION_CHAIN_MAX_JUMPS }))
     }
 
-    // 授权事实校验（fail-closed）：guard 拒绝/不可用即终止
+    // Validation des faits d'autorisation (fail-closed) : refus du guard/indisponible = arrêt immédiat
     const allowed = await this.delegationGuard({
       userId: subjectUserId,
       ...(input.targetPrincipalId !== undefined ? { targetPrincipalId: input.targetPrincipalId } : {}),
@@ -1049,7 +1049,7 @@ export class AuthnService extends Service {
       throw new DelegationError('DELEGATION_DENIED', t('委托授权校验未通过（绑定关系/归属/管理员白名单均未命中）'))
     }
 
-    // scopes 三方交集：请求 ∩ 调用者实时 scopes ∩ 目标 principal scopes（'*' 按既有交集语义收敛）
+    // Intersection tripartite des scopes : requête ∩ scopes temps réel de l'appelant ∩ scopes du principal cible ('*' converge selon la sémantique d'intersection existante)
     const requested = input.scopes ?? caller.scopes
     const scopes = intersectScopes(intersectScopes(requested, caller.scopes), targetScopes)
 
@@ -1065,12 +1065,12 @@ export class AuthnService extends Service {
     })
   }
 
-  /** 注册委托授权事实钩子（宿主装配时注入；传 undefined 恢复 fail-closed 拒绝态）。 */
+  /** Enregistre le crochet des faits d'autorisation de délégation (injecté à l'assemblage hôte ; undefined = retour au refus fail-closed). */
   setDelegationGuard(fn: DelegationGuardFn | undefined): void {
     this.delegationGuard = fn
   }
 
-  /** on-behalf-of：以当前主体身份为另一主体签发透传令牌（act 链叠加）。 */
+  /** on-behalf-of : émet un jeton de transmission pour un autre sujet sous l'identité du sujet courant (chaîne act superposée). */
   issueOnBehalfOf(parent: VerifiedPrincipal, targetPrincipalId: string): { token: string; record: TokenRecord } {
     const target = this.principals().get(targetPrincipalId)
     if (!target) throw new Error(t('目标身份不存在：{id}', { id: targetPrincipalId }))
@@ -1088,8 +1088,8 @@ export class AuthnService extends Service {
   }
 
   /**
-   * 校验令牌。options.audience 指定时执行受众校验：令牌 aud 不匹配即拒绝
-   * （v1.2 第 1 步：一个泄漏的插件令牌拿不到平台其它服务）。
+   * Vérifie un jeton. Avec options.audience, contrôle d'audience : aud du jeton non concordant = refus
+   * (v1.2 étape 1 : un jeton de plugin divulgué n'atteint pas les autres services de la plateforme).
    */
   verify(tokenString: string, options: { audience?: string } = {}): VerifiedPrincipal {
     const parts = tokenString.split('.')
@@ -1113,14 +1113,14 @@ export class AuthnService extends Service {
     const principal = this.principals().get(record.principalId)
     if (!principal) throw new Error(t('令牌主体不存在'))
     if (principal.status !== 'active') throw new Error(t('令牌主体已禁用'))
-    // 人机均实时解析：human 按用户角色、machine 按机器角色+附加权限点，角色变更即时同步到存量令牌
+    // Humain et machine résolus en temps réel : human par les rôles utilisateur, machine par rôles machine + points additionnels ; un changement de rôle se synchronise immédiatement aux jetons existants
     let scopes = principal.type === 'human'
       ? this.ctx.iam.userPermissions(principal.refId ?? '')
       : this.resolveMachineScopes(principal)
-    // QA A-07：OBO 令牌签发时 scopes 取「父链 ∩ 目标」交集——验签若只按主体实时解析，
-    // 交集即被丢弃（透传令牌反而拿到目标全量权限）。对 OBO 签发的令牌按签发交集二次夹紧：
-    // 实时权限收缩仍然生效（交集），但不再放大出签发时刻授予之外的能力。
-    // MCP 治理（契约 §3）：delegate: 前缀的委托令牌同口径（签发时已做三方交集，实时只收不放）。
+    // QA A-07 : à l'émission d'un jeton OBO, les scopes prennent l'intersection « chaîne parentale ∩ cible » — si la vérification résolvait seulement les permissions temps réel du sujet,
+    // l'intersection serait perdue (le jeton transmis obtiendrait au contraire les permissions complètes de la cible). Pour les jetons OBO émis, resserrement secondaire à l'intersection d'émission :
+    // la contraction des permissions temps réel reste effective (intersection), mais plus aucune amplification au-delà de ce qui était accordé à l'instant d'émission.
+    // Gouvernance MCP (contrat §3) : même périmètre pour les jetons délégués au préfixe delegate: (intersection tripartite faite à l'émission, en temps réel on ne fait que resserrer).
     if (record.issuedBy?.startsWith('obo:') || record.issuedBy?.startsWith('delegate:')) {
       scopes = intersectScopes(scopes, record.scopes)
     }
@@ -1153,11 +1153,11 @@ export class AuthnService extends Service {
     return count
   }
 
-  /** 令牌是否仍活跃（DEF-03：过期/已轮转的记录不计入「活跃令牌」，避免计数随运行时长失真）。 */
+  /** Le jeton est-il encore actif (DEF-03 : les enregistrements expirés/déjà tournés ne comptent pas comme « jetons actifs », pour éviter une dérive du comptage avec la durée d'exécution). */
   isTokenActive(token: TokenRecord, now = Date.now()): boolean {
     if (token.revokedAt) return false
     if (new Date(token.expiresAt).getTime() <= now) return false
-    // 已轮转的 refresh token（同链已换发新令牌）不再是活跃凭证
+    // Un refresh token déjà tourné (même chaîne, nouveaux jetons émis) n'est plus un identifiant actif
     if (token.kind === 'refresh' && token.rotatedAt) return false
     return true
   }
@@ -1175,7 +1175,7 @@ function intersectScopes(a: string[], b: string[]): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// 插件
+// Plugin
 // ---------------------------------------------------------------------------
 
 declare module '@deepseek-ai/cordis' {

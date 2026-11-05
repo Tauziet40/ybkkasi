@@ -1,11 +1,11 @@
 /**
- * 委托令牌（exchangeDelegatedToken）单测（MCP 治理契约 §3，W1-T1，2026-10-22）。
- * 运行：node --test packages/plugin-authn/src/delegation.test.mjs
+ * Tests unitaires du jeton délégué (exchangeDelegatedToken) (contrat de gouvernance MCP §3, W1-T1, 2026-10-22).
+ * Exécution : node --test packages/plugin-authn/src/delegation.test.mjs
  *
- * 进程内构造最小 AuthnService 宿主（内存集合 + 桩 iam/总线），覆盖：
- * 人类→agent OBO 签发、机器+userId 换取、guard 缺席/拒绝（fail-closed）、aud 形态强校验、
- * scopes 三方交集收敛、TTL 默认/上限、act 链跳数上限、verify 侧 delegate: 二次夹紧不放大、
- * 用户冻结 → 委托令牌联动吊销。
+ * Construit dans le processus un hôte AuthnService minimal (collections en mémoire + iam/bus factices), couverture :
+ * émission OBO humain→agent, échange machine+userId, guard absent/refusant (fail-closed), validation forte de la forme aud,
+ * convergence de l'intersection tripartite des scopes, TTL défaut/plafond, plafond de sauts de la chaîne act, non-amplification du resserrement delegate: côté verify,
+ * gel d'utilisateur → révocation en cascade des jetons délégués.
  */
 import assert from 'node:assert/strict'
 import { test, beforeEach, afterEach } from 'node:test'
@@ -16,7 +16,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { PlatformEvents } from '../../platform-core/src/index.ts'
 import { AuthnService, DelegationError } from './index.ts'
 
-/** 内存集合（镜像 StorageService\Collection 契约的最小面）。 */
+/** Collection en mémoire (surface minimale miroir du contrat StorageService\Collection). */
 function makeCollection(name) {
   const rows = new Map()
   const listeners = new Set()
@@ -55,12 +55,12 @@ function makeCollection(name) {
       listeners.add(fn)
       return () => listeners.delete(fn)
     },
-    uniqueOn() { /* 单测无需引擎级唯一 */ },
+    uniqueOn() { /* inutile en test unitaire d'avoir de l'unicité au niveau moteur */ },
     count: () => rows.size,
   }
 }
 
-/** 最小宿主：桩 iam（用户表 + 实时权限表）+ 可派发总线 + 内存集合。 */
+/** Hôte minimal : iam factice (table utilisateurs + table de permissions temps réel) + bus distribuable + collections en mémoire. */
 function makeHost({ users = {}, permissions = {} } = {}) {
   const ctx = new Context()
   const dir = mkdtempSync(join(tmpdir(), 'authn-delegation-'))
@@ -112,21 +112,21 @@ test.beforeEach(() => {
 })
 test.afterEach(() => host.cleanup())
 
-/** 造一个已验证人类调用者（verify 走实时权限解析，与生产同路径）。 */
+/** Fabrique un appelant humain vérifié (verify passe par la résolution de permissions temps réel, même chemin qu'en production). */
 function humanCaller(service) {
   const principal = service.ensureHumanPrincipal('u001', '沈亦澜')
   const { token } = service.issueToken(principal.id, { kind: 'access', issuedBy: 'password:shenyl' })
   return service.verify(token)
 }
 
-/** 造一个已验证机器调用者（agent 主体，可选预置 act 链）。 */
+/** Fabrique un appelant machine vérifié (sujet agent, chaîne act préchargée en option). */
 function machineCaller(service, actChain = []) {
   const principal = seedAgentPrincipal(service)
   const { token } = service.issueToken(principal.id, { kind: 'machine', scopes: service.resolveMachineScopes(principal), actChain, issuedBy: 'client_credentials' })
   return service.verify(token)
 }
 
-/** 预置 agent 机器主体（幂等：目标 principal 必须先于交换存在）。 */
+/** Précharge un sujet machine agent (idempotent : le principal cible doit exister avant l'échange). */
 function seedAgentPrincipal(service) {
   const existing = service.principals().findOne((item) => item.refType === 'agent' && item.refId === 'agt_1')
   return existing ?? service.principals().insert({
@@ -168,7 +168,7 @@ test('人类→agent OBO 签发：sub=用户、act=调用者+目标、scopes 三
 
 test('机器+userId 换取：sub=该用户、act=调用者主体、目标 scopes=用户实时权限', async () => {
   host.service.setDelegationGuard(() => true)
-  // plugin: 受众沿用既有命名空间收敛（issueToken）：请求 scope 必须落在 plugin:nas: 内
+  // Audience plugin : reprise de la convergence d'espace de noms existante (issueToken) : le scope demandé doit rester dans plugin:nas:
   host.iam.userPermissions = (userId) => userId === 'u001'
     ? ['console.login', 'nas.read', 'usage.write', 'plugin:nas:read']
     : []
@@ -189,9 +189,9 @@ test('机器+userId 换取：sub=该用户、act=调用者主体、目标 scopes
     () => host.service.exchangeDelegatedToken({ caller, userId: 'u001', audience: 'plugin:nas', targetPrincipalId: 'pri_agt' }),
     (error) => error.code === 'DELEGATION_TARGET_NOT_ALLOWED',
   )
-  // W4 CTO 裁决（2026-10-22，落实整改计划 §6.2「Agent 自身调用」）：机器调用者不带 userId
-  // 不再拒绝，而是走自委托通道——sub=自身、act 链为空、audience 绑定目标服务；
-  // 长期机器凭证不出域，授权面由 scopes 三方交集夹紧到自身实时权限。
+  // Arbitrage CTO W4 (2026-10-22, mise en œuvre du plan de remédiation §6.2 « appels propres de l'Agent ») : un appelant machine sans userId
+  // n'est plus refusé mais passe par le canal d'auto-délégation — sub=soi-même, chaîne act vide, audience liée au service cible ;
+  // l'identifiant machine longue durée ne sort pas du domaine, la surface d'autorisation étant serrée par l'intersection tripartite des scopes sur ses permissions temps réel propres.
   const selfScoped = await host.service.exchangeDelegatedToken({ caller, audience: 'plugin:nas', scopes: ['plugin:nas:read'] })
   assert.equal(selfScoped.record.principalId, caller.principal.id, '自委托：sub=调用者自身')
   assert.deepEqual(selfScoped.record.actChain, [], '自委托：act 链为空（未代他人）')
@@ -255,7 +255,7 @@ test('act 链跳数上限：human 之后 >4 跳拒绝（DELEGATION_CHAIN_TOO_LON
     () => host.service.exchangeDelegatedToken({ caller, userId: 'u001', audience: 'mcp:service:a' }),
     (error) => error.code === 'DELEGATION_CHAIN_TOO_LONG',
   )
-  // 恰 4 跳可过（链首 machine 全计：4 跳 = 上限内）
+  // Exactement 4 sauts peuvent passer (la tête de chaîne machine compte intégralement : 4 sauts = dans la limite)
   const okChain = ['m1', 'm2', 'm3'].map((name) => ({ principalId: `pri_${name}`, name, type: 'machine' }))
   const okCaller = machineCaller(host.service, okChain)
   const { record } = await host.service.exchangeDelegatedToken({ caller: okCaller, userId: 'u001', audience: 'mcp:service:a' })
@@ -269,7 +269,7 @@ test('verify 二次夹紧：主体权限放大后委托令牌不跟随放大（d
     caller, targetPrincipalId: 'pri_agt', audience: 'mcp:service:a', scopes: ['nas.read'],
   })
   assert.deepEqual(host.service.verify(token).scopes, ['nas.read'])
-  // 实时权限表此后放大为 '*'：verify 实时解析得 ['*']，但 delegate: 夹紧回签发交集 ['nas.read']
+  // La table de permissions temps réel est ensuite élargie à '*' : verify résout en temps réel ['*'], mais delegate: resserre à l'intersection émise ['nas.read']
   host.iam.userPermissions = () => ['*']
   assert.deepEqual(host.service.verify(token).scopes, ['nas.read'], '放大不越出签发交集')
 })

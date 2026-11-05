@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
- * billing 存量资金流水 CSV 封存导出（M0-2，2026-09-09）。
+ * Export d'archivage CSV des flux de trésorerie existants de billing (M0-2, 2026-09-09).
  *
- * plugin-billing 已下线封存：本脚本把 SQLite（data/txnstore.db）中的 wallet_journal /
- * ledger_entries 全量导出为只读 CSV 档案，供 90 天封存期（见 docs/billing-archive-register.md）
- * 内备查。只读操作：仅 SELECT，不写不删，可重复执行（每次生成带时间戳的新档案文件）。
+ * plugin-billing est retiré et archivé : ce script exporte intégralement wallet_journal /
+ * ledger_entries de SQLite (data/txnstore.db) en archive CSV en lecture seule, pour les 90 jours de période d'archivage (voir docs/billing-archive-register.md)
+ * de consultation. Opération en lecture : SELECT seulement, aucune écriture ni suppression, réexécutable (chaque exécution génère un nouveau fichier d'archive horodaté).
  *
- * 用法：
- *   node scripts/billing-archive-export.mjs [--db <txnstore.db路径>] [--out <输出目录>]
- * 缺省：--db <repo>/data/txnstore.db --out <repo>/data/archive
- * 输出：billing-journal-<UTC日期>.csv 与 billing-ledger-<UTC日期>.csv（UTF-8 BOM，Excel 友好）。
+ * Usage :
+ *   node scripts/billing-archive-export.mjs [--db <chemin txnstore.db>] [--out <répertoire de sortie>]
+ * Défauts : --db <repo>/data/txnstore.db --out <repo>/data/archive
+ * Sortie : billing-journal-<date UTC>.csv et billing-ledger-<date UTC>.csv (BOM UTF-8, compatible Excel).
  */
 import { DatabaseSync } from 'node:sqlite'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'

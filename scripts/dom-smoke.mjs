@@ -1,8 +1,8 @@
 /**
- * DOM 级前端集成冒烟测试：真实服务 + 真实前端模块 + jsdom 事件模拟。
- * 覆盖 2026-08-23 控制台弹窗系统性缺陷的全部回归场景（modal foot 按钮绑定 / TDZ / 双重导航）。
- * 用法：先启动隔离实例（DEMO_SEED=1 node src/main.ts --port 7301 --data data-guitest），
- *       再 SMOKE_BASE=http://127.0.0.1:7301 node scripts/dom-smoke.mjs
+ * Tests de fumée d'intégration frontend au niveau DOM : vrai service + vrais modules frontend + simulation d'événements jsdom.
+ * Couvre tous les scénarios de régression du défaut systémique des fenêtres modales console du 2026-08-23 (liaison des boutons modal foot / TDZ / double navigation).
+ * Usage : démarrer d'abord l'instance isolée (DEMO_SEED=1 node src/main.ts --port 7301 --data data-guitest),
+ *       puis SMOKE_BASE=http://127.0.0.1:7301 node scripts/dom-smoke.mjs
  */
 import { JSDOM, VirtualConsole } from 'jsdom'
 import { join } from 'node:path'
@@ -14,7 +14,7 @@ const REPO = fileURLToPath(new URL('..', import.meta.url))
 const RUN_ID = Date.now().toString(36).slice(-5)
 const JS_ROOT = join(REPO, 'packages', 'plugin-console', 'public', 'js')
 
-// ---------- jsdom 环境 ----------
+// ---------- Environnement jsdom ----------
 const pageErrors = []
 const vc = new VirtualConsole()
 vc.on('jsdomError', (e) => pageErrors.push(`jsdomError: ${e.message}${e.detail?.stack ? '\n' + e.detail.stack : ''}`))
@@ -33,7 +33,7 @@ const nativeFetch = globalThis.fetch
 globalThis.fetch = (input, init) => nativeFetch(new URL(String(input), BASE).href, init)
 process.on('unhandledRejection', (r) => pageErrors.push(`unhandledRejection: ${r?.stack ?? r}`))
 
-// ---------- 断言工具 ----------
+// ---------- Outils d'assertion ----------
 const results = []
 async function test(name, fn) {
   try { await fn(); results.push(['PASS', name]) } catch (e) { results.push(['FAIL', `${name} — ${e.message}`]) }
@@ -64,14 +64,14 @@ async function raw(path, { method = 'GET', token, body } = {}) {
 }
 const P = (p) => import(pathToFileURL(join(JS_ROOT, p)).href)
 
-// ---------- 登录（admin 会话贯穿 UI 模块；ops 仅经 raw 发起审批） ----------
+// ---------- Connexion (session admin traversant les modules UI ; ops ne déclenche les approbations que via raw) ----------
 const { api, session } = await P('api.js')
 const login = await raw('/api/auth/login', { method: 'POST', body: { username: 'admin', password: 'Ybk@2026' } })
 session.save(login.token, login.user)
 if (login.refreshToken) session.saveRefresh(login.refreshToken)
 
-// 演示种子在启动后异步落盘（void seedAll），健康检查先亮、Agent 面晚数秒就绪——
-// 不等待会让 T3/T4 间歇拿到空列表（2026-10-14 观测：健康就绪后 0~1.5s 内才可见）。等齐再跑。
+// La graine de démo s'écrit de façon asynchrone après le démarrage (void seedAll) ; le health check passe d'abord, la facette Agent n'est prête que quelques secondes plus tard —
+// sans attente, T3/T4 prennent parfois des listes vides (observé le 2026-10-14 : visible seulement 0~1,5 s après le health). On attend que tout soit prêt avant de lancer.
 {
   const deadline = Date.now() + 30_000
   for (;;) {
@@ -82,7 +82,7 @@ if (login.refreshToken) session.saveRefresh(login.refreshToken)
   }
 }
 
-// ================= 场景 =================
+// ================= Scénarios =================
 
 await test('T1 工作台渲染 + 快捷入口点击跳转（dashboard.js:79 回归）', async () => {
   const { renderDashboard } = await P('pages/dashboard.js')
@@ -112,7 +112,7 @@ await test('T2 confirmDialog 取消/必填原因/确认（ui.js:177 回归）', 
 })
 
 await test('T3 审批中心 驳回弹窗真实执行（approvals.js:117/127 回归）', async () => {
-  // 保证存在 pending 审批：由 ops 发起 Agent 下线（发起人 ops ≠ 审批人 admin）
+  // Garantit l'existence d'une approbation pending : mise hors ligne d'un Agent initiée par ops (initiateur ops ≠ approbateur admin)
   let pendings = (await api.get('/api/approvals')).approvals.filter((a) => a.status === 'pending')
   if (!pendings.length) {
     const ops = await raw('/api/auth/login', { method: 'POST', body: { username: 'ops', password: 'Ybk@2026' } })
@@ -248,7 +248,7 @@ await test('T10 IAM 创建账号全流程 + 口令展示弹窗（iam/members.js 
   assert($('.modal [data-ok]'), '创建账号弹窗应打开')
   $('.modal [name=displayName]').value = '冒烟测试账号'
   $('.modal [name=username]').value = 'smoke' + RUN_ID
-  // UI-04 整改后组织选择为可搜索选择器：点开展示框 → 等待选项列表 → 点选第一个非空选项
+  // Après la remédiation UI-04, la sélection d'organisation est un sélecteur cherchable : ouvrir la boîte d'affichage → attendre la liste d'options → cliquer la première option non vide
   $('.modal [data-ss-display]').click()
   assert(await waitFor(() => $('.modal .searchable-select.open .searchable-select-item')), '组织选择器应展开选项列表')
   const orgItem = $$('.modal .searchable-select.open .searchable-select-item').find((el) => el.dataset.value)
@@ -305,10 +305,10 @@ await test('T14 认证中心 签发凭证弹窗（authn.js:126 回归）', async
   const { renderAuthn } = await P('pages/authn.js')
   await renderAuthn(freshContent(), new URLSearchParams(), ctxOf())
   $('#authn-credential').click()
-  // 弹窗打开前需异步拉取可绑定资源与授权目录，等待打开
+  // Avant l'ouverture de la fenêtre, il faut tirer de façon asynchrone les ressources liables et le catalogue d'autorisation ; attendre l'ouverture
   assert(await waitFor(() => $('.modal [data-ok]')), '签发凭证弹窗应打开')
   $('.modal [name=name]').value = 'external:smoke-test'
-  // 授权选择器为必填（至少选机器角色、附加权限点或 *）；冒烟走 '*' 全权限分支
+  // Le sélecteur d'autorisation est obligatoire (au moins un rôle machine, des points additionnels ou *) ; la fumée passe par la branche '*' toutes permissions
   $('.modal #authz-star').click()
   $('.modal [data-ok]').click()
   assert(await waitFor(() => $$('.modal').some((m) => m.textContent.includes('client_secret'))), '签发后应展示凭证（仅一次）')
@@ -317,7 +317,7 @@ await test('T14 认证中心 签发凭证弹窗（authn.js:126 回归）', async
   assert(await modalGone(), '「已保存」按钮默认关闭行为应生效')
 })
 
-// ================= 汇总 =================
+// ================= Résumé =================
 const passed = results.filter(([s]) => s === 'PASS').length
 const failed = results.filter(([s]) => s === 'FAIL')
 const skipped = results.filter(([s]) => s === 'SKIP')

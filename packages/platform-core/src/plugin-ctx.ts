@@ -1,14 +1,14 @@
 /**
- * 轻量插件上下文（代理 ctx）：第三方插件运行边界的第 1 层防线。
- * 范围（生态设计 v1.2 第 3 步，S3 消解）：**只做事件源鉴别 + 能力裁剪**，
- * 不做模块级沙箱（require/fs/net 隔离属第 10 步 L1 自研沙箱）。
+ * Contexte de plugin léger (proxy ctx) : première ligne de défense de la frontière d'exécution des plugins tiers.
+ * Périmètre (conception écosystème v1.2 étape 3, résolution S3) : **uniquement l'authentification de la source d'événements + l'élagage des capacités**,
+ * pas de sandbox au niveau module (l'isolation require/fs/net relève de l'étape 10, sandbox L1 autonome).
  *
- * 三层防线声明：代理 ctx（运行时强制）→ lint/静态扫描（可绕过）→ 运行时对账
- * （usage 事件 principal/resource vs manifest 声明 capabilities，偏差告警下架）。
+ * Déclaration des trois lignes de défense : proxy ctx (forçage à l'exécution) → lint/scan statique (contournable) → réconciliation à l'exécution
+ * (principal/resource des événements usage vs capabilities déclarées du manifest ; écart → alerte et retrait).
  */
 import type { Context } from '@deepseek-ai/cordis'
 
-/** 平台能力 → ctx 服务名映射（裁剪白名单的依据）。 */
+/** Capacité plateforme → nom de service ctx (fondement de la liste blanche d'élagage). */
 export const CAPABILITY_SERVICES: Record<string, string[]> = {
   'model-gateway.invoke': ['modelGateway'],
   'knowledgebase.read': [],
@@ -19,15 +19,15 @@ export const CAPABILITY_SERVICES: Record<string, string[]> = {
 
 export interface PluginSandboxOptions {
   pluginId: string
-  /** 安装时企业审批通过的能力集合（approved ⊆ requested）。 */
+  /** Ensemble de capacités approuvées par l'entreprise à l'installation (approved ⊆ requested). */
   capabilities: string[]
 }
 
 /**
- * 构造插件代理上下文：
- *   - platformBus.emit 强制盖 source: plugin:<id>，事件名强制收敛到 plugin:<id>: 前缀；
- *   - 平台服务访问按 approved capabilities 裁剪，越权访问抛错；
- *   - 平台内部发射路径（不带 source）对插件不可达。
+ * Construit le contexte proxy du plugin :
+ *   - platformBus.emit force source: plugin:<id>, les noms d'événements sont forcés dans le préfixe plugin:<id>: ;
+ *   - l'accès aux services plateforme est élagué selon les capabilities approuvées, tout accès hors permission lève ;
+ *   - le chemin d'émission interne de la plateforme (sans source) est inaccessible aux plugins.
  */
 export function createPluginContext(ctx: Context, options: PluginSandboxOptions): PluginContext {
   const { pluginId, capabilities } = options
@@ -35,7 +35,7 @@ export function createPluginContext(ctx: Context, options: PluginSandboxOptions)
 
   const platformBus = {
     on: (event: string, cb: (payload: unknown, event: unknown) => void) => ctx.platformBus.on(event, cb as never),
-    /** 插件事件：只允许自有命名空间；总线层再强制一次 source 一致性。 */
+    /** Événements de plugin : uniquement leur propre espace de noms ; la couche bus reforce une fois de plus la cohérence de source. */
     emit: (name: string, payload: unknown) => {
       if (!name.startsWith(`plugin:${pluginId}:`)) {
         throw new Error(`[plugin-ctx] 插件 ${pluginId} 只能发射 plugin:${pluginId}: 前缀的事件，收到：${name}`)
@@ -51,7 +51,7 @@ export function createPluginContext(ctx: Context, options: PluginSandboxOptions)
     pluginId,
     capabilities: [...allowed],
     platformBus,
-    /** 能力裁剪的服务访问入口：未授权服务抛错（运行时强制）。 */
+    /** Point d'accès aux services avec élagage des capacités : lève pour un service non autorisé (forçage à l'exécution). */
     service(name: string): unknown {
       const entry = Object.entries(CAPABILITY_SERVICES).find(([, services]) => services.includes(name))
       const capability = entry?.[0] ?? name

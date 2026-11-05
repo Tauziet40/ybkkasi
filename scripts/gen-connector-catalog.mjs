@@ -1,17 +1,17 @@
 /**
- * 连接器风险目录生成与校验（R6：声明式化，吸收 paperclip app-definitions 模式）。
+ * Génération et validation du catalogue de risques des connecteurs (R6 : déclaration, s'inspire du modèle app-definitions de paperclip).
  *
- * 事实源：packages/plugin-connector/catalog/risk-overrides.json（声明式目录）
- * 生成物：packages/plugin-connector/src/risk-overrides.generated.ts（入库，勿手改）
+ * Source de faits : packages/plugin-connector/catalog/risk-overrides.json (catalogue déclaratif)
+ * Produit : packages/plugin-connector/src/risk-overrides.generated.ts (en base, ne pas modifier à la main)
  *
- * 流程：读声明 → 校验 schema → 键排序生成 TS 常量（幂等：重复跑输出字节级稳定）。
- * 校验规则：
- *   - 风险值 ∈ {read,write,admin}；tier ∈ {S1,S2}
- *   - provider 名满足 [a-z0-9-]+；action id 非空
- *   - defaultRisk 必填
- *   - actions 声明与 defaultRisk 相同值 → 警告不挡（无意义重复）
+ * Flux : lecture des déclarations → validation du schema → génération des constantes TS avec clés triées (idempotent : sortie stable octet par octet en exécutions répétées).
+ * Règles de validation :
+ *   - valeur de risque ∈ {read,write,admin} ; tier ∈ {S1,S2}
+ *   - nom de provider conforme à [a-z0-9-]+ ; id d'action non vide
+ *   - defaultRisk obligatoire
+ *   - actions déclarant la même valeur que defaultRisk → avertissement sans blocage (répétition sans intérêt)
  *
- * 用法：node scripts/gen-connector-catalog.mjs
+ * Usage : node scripts/gen-connector-catalog.mjs
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -31,7 +31,7 @@ const warnings = []
 const fail = (message) => errors.push(message)
 const warn = (message) => warnings.push(message)
 
-// -- 读取与顶层结构 -----------------------------------------------------------
+// -- Lecture et structure de premier niveau -----------------------------------------------------------
 
 let declaration
 try {
@@ -52,7 +52,7 @@ if (typeof providers !== 'object' || providers === null || Array.isArray(provide
   fail('顶层 providers 必须是对象')
 }
 
-// -- 逐 provider / action 校验 ------------------------------------------------
+// -- Validation provider par provider / action par action ------------------------------------------------
 
 if (typeof providers === 'object' && providers !== null) {
   for (const [service, entry] of Object.entries(providers)) {
@@ -87,7 +87,7 @@ if (errors.length > 0) {
 }
 for (const message of warnings) console.warn(`  ⚠ ${message}`)
 
-// -- 排序序列化（幂等：键全序排序，输出字节级稳定） -------------------------------
+// -- Sérialisation triée (idempotent : tri d'ordre total des clés, sortie stable octet par octet) -------------------------------
 
 const sorted = (object) => {
   if (Array.isArray(object)) return object.map(sorted)

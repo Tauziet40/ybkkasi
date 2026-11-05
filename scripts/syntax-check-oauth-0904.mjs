@@ -1,5 +1,5 @@
-// 临时语法校验（0904）：oauth.js / login.js 为浏览器 ES Module，用动态 import 触发解析。
-// 解析阶段抛 SyntaxError 即语法错误；运行期缺少浏览器全局（ReferenceError 等）属预期，视为通过。
+// Validation syntaxique temporaire (0904) : oauth.js / login.js sont des ES Modules navigateur, analyse déclenchée par import dynamique.
+// Une SyntaxError à l'analyse = erreur de syntaxe ; l'absence de globales navigateur à l'exécution (ReferenceError etc.) est attendue, compte comme réussite.
 const base = 'file:///' + process.cwd().replace(/\\/g, '/') + '/packages/plugin-console/public/js/pages/'
 for (const name of ['oauth.js', 'login.js']) {
   try {

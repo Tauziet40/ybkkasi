@@ -1,51 +1,51 @@
 /**
- * 装配顺序与模块边界校验（R3，REFACTOR-2026-10-13，2026-10-13）。
+ * Validation de l'ordre d'assemblage et des frontières de modules (R3, REFACTOR-2026-10-13, 2026-10-13).
  *
- * 背景：插件加载顺序契约此前只存在于 boot-all.ts 注释与 cordis yml 顺序中；
- * inject 声明缺提供者时插件会静默 INACTIVE，无任何门禁拦截。本工具把隐式
- * 契约变为机器可校验（吸收 paperclip scripts/check-module-boundaries.mjs 模式）。
+ * Contexte : le contrat d'ordre de chargement des plugins n'existait auparavant que dans les commentaires de boot-all.ts et l'ordre du yml cordis ;
+ * un inject déclarant un fournisseur absent laissait le plugin INACTIVE en silence, sans aucune porte. Cet outil transforme le contrat implicite
+ * en validation machine (s'inspire du modèle scripts/check-module-boundaries.mjs de paperclip).
  *
- * 校验项：
- *   [A] 依赖先于使用：对 boot-all 与 cordis.yml 两个装配序列，逐插件校验其
- *       inject 键的提供者（代码内 static provide 声明）均先于该插件装配；
- *       无任何提供者的 inject 键 = 静默 INACTIVE 风险，直接红。
- *   [B] plugin.yaml depends 对账：dsh-plugin-* 引用必须映射到真实包且先于
- *       使用；非 id 自然语言条目须登记豁免；inject×provide 推导出的真实
- *       依赖未登记进 depends 时给补录提示（warn）。
- *   [C] cordis.yml ↔ cordis.patch.yml：两份宿主装配文件的插件序列必须一致
- *       （成员与顺序；name 形态差异 file:///包名+子路径 不在校验范围）。
- *   [D] boot-all ↔ yml 公共序列一致：去掉登记的宿主形态差异项后，公共插件
- *       相对顺序必须一致（已知豁免：connect 的 host/client 角色时序差异）。
- *   [E] provides.services 对账：plugin.yaml 声明的服务键必须有代码 provide 实现
- *       （幽灵声明红）；代码 provide 键未登记进清单给补录提示（warn）。
+ * Points de validation :
+ *   [A] dépendance avant usage : sur les deux séquences d'assemblage boot-all et cordis.yml, pour chaque plugin, valider que les
+ *       fournisseurs de ses clés inject (déclarations static provide dans le code) sont assemblés avant lui ;
+ *       une clé inject sans aucun fournisseur = risque d'INACTIVE silencieux, rouge direct.
+ *   [B] réconciliation des depends de plugin.yaml : les références dsh-plugin-* doivent mapper à de vrais paquets et précéder
+ *       l'usage ; les entrées en langage naturel non-id doivent être enregistrées en exemption ; les dépendances réelles
+ *       déduites de inject×provide non enregistrées dans depends donnent un rappel de complément (warn).
+ *   [C] cordis.yml ↔ cordis.patch.yml : les séquences de plugins des deux fichiers d'assemblage hôte doivent être identiques
+ *       (membres et ordre ; les différences de forme de name file:///paquet+sous-chemin sont hors périmètre).
+ *   [D] boot-all ↔ yml : la séquence commune doit être cohérente : après retrait des entrées de différences de forme hôte enregistrées, l'ordre relatif
+ *       des plugins communs doit être identique (exemption connue : différence de séquencement des rôles host/client de connect).
+ *   [E] réconciliation provides.services : les clés de services déclarées dans plugin.yaml doivent avoir une implémentation provide dans le code
+       (déclaration fantôme = rouge) ; les clés provide du code non enregistrées dans le manifeste donnent un rappel de complément (warn).
  *
- * 结构性登记（宿主形态差异，非债，改动须同步脚本常量与理由）：
- *   - yml 独有：plugin-dsh-bridge（dsh webServer 桥接，独立宿主不需要）、
- *               plugin-rq-card（浏览器半插件，仅 dsh 会话侧）；
- *   - boot 独有：无。
+ * Enregistrement structurel (différences de forme hôte, pas des dettes ; toute modification doit synchroniser les constantes du script et les motifs) :
+ *   - propres au yml : plugin-dsh-bridge (pont du webServer dsh, inutile en hôte autonome),
+ *               plugin-rq-card (plugin moitié navigateur, uniquement côté session dsh) ;
+ *   - propres au boot : aucun.
  *
- * 豁免：scripts/check-boot-order.exemptions.json（{exemptions:[{kind,key,reason}]}，
- * 与 contract-lint 相同机制），每条必须写明销账条件。
+ * Exemptions : scripts/check-boot-order.exemptions.json ({exemptions:[{kind,key,reason}]},
+ * même mécanisme que contract-lint), chaque entrée doit indiquer sa condition de radiation.
  *
- * 用法：node scripts/check-boot-order.mjs（红即 exit 1）；npm run lint:boot-order。
+ * Usage : node scripts/check-boot-order.mjs (rouge = exit 1) ; npm run lint:boot-order.
  */
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseYaml } from '../packages/platform-core/src/yaml.ts'
 
-/** dsh 宿主提供的服务键（独立宿主形态由 platform-core 等价提供或该插件不装配）；
- *  slots/locale 为 dsh client 运行时（浏览器半插件会话槽位与语言环境），仅 yml 形态存在 */
+/** Clés de services fournies par l'hôte dsh (en hôte autonome, fournies en équivalent par platform-core ou le plugin n'est pas assemblé) ;
+ *  slots/locale sont le runtime client dsh (slots de session et environnement de langue du plugin moitié navigateur), n'existent qu'en forme yml */
 const HOST_PROVIDED_KEYS = new Set(['webServer', 'slots', 'locale'])
 
-/** yml 形态独有插件（结构性登记，见文件头注释） */
+/** Plugins propres à la forme yml (enregistrement structurel, voir l'en-tête du fichier) */
 const YML_ONLY_PKGS = new Set(['plugin-dsh-bridge', 'plugin-rq-card'])
-/** boot 形态独有插件（结构性登记） */
+/** Plugins propres à la forme boot (enregistrement structurel) */
 const BOOT_ONLY_PKGS = new Set([])
 
 const PROVIDE_RE = /static\s+(?:readonly\s+)?provide\s*=\s*'([^']+)'/
 const INJECT_RE = /export\s+const\s+inject\s*(?::\s*string\s*\[\]\s*)?=\s*\[([^\]]*)\]/
 
-/** 解析 boot-all.ts：import 别名 → @dsh-ops 包名映射 + ctx.plugin(x) 装配序列（包目录名） */
+/** Analyse boot-all.ts : mapping alias d'import → noms de paquets @dsh-ops + séquence d'assemblage ctx.plugin(x) (noms de répertoires de paquets) */
 export function parseBootAll(text) {
   const aliasToPkg = new Map()
   for (const m of text.matchAll(/import\s+\*\s+as\s+(\w+)\s+from\s+'@dsh-ops\/([\w-]+)'/g)) {
@@ -60,8 +60,8 @@ export function parseBootAll(text) {
 }
 
 /**
- * 解析 cordis yml：提取 insert 列表的 (id, name) 序列，name 归一化为包目录名。
- * 支持三种 name 形态：file:// 绝对路径 / 包名+子路径（安装形态）/ 纯包名（浏览器半）。
+ * Analyse le yml cordis : extrait la séquence (id, name) des listes insert, name normalisé en nom de répertoire de paquet.
+ * Trois formes de name prises en charge : chemin absolu file:// / nom de paquet + sous-chemin (forme installée) / nom de paquet nu (moitié navigateur).
  */
 export function parseCordisYml(text) {
   const sequence = []
@@ -86,7 +86,7 @@ export function parseCordisYml(text) {
   return sequence
 }
 
-/** 扫描一个包的 src 下全部 .ts（递归），返回 { provides:Set, injects:Set }（服务键） */
+/** Scanne tous les .ts sous src d'un paquet (récursif), renvoie { provides:Set, injects:Set } (clés de services) */
 export async function scanPackageFaces(srcDir) {
   const provides = new Set()
   const injects = new Set()
@@ -111,13 +111,13 @@ export async function scanPackageFaces(srcDir) {
   return { provides, injects }
 }
 
-/** dsh-plugin-X id → 包目录名 */
+/** id dsh-plugin-X → nom de répertoire de paquet */
 export function yamlIdToDir(id) {
   if (id === 'dsh-plugin-platform-core') return 'platform-core'
   return id.replace(/^dsh-plugin-/, 'plugin-')
 }
 
-/** depends 归一化：parseYaml 不支持内联 flow 数组（返回原字符串），此处统一提取为字符串数组 */
+/** Normalisation de depends : parseYaml ne gère pas les tableaux flow en ligne (renvoie la chaîne brute), extraction unifiée ici en tableau de chaînes */
 export function normalizeDepends(value) {
   if (Array.isArray(value)) return value
   if (typeof value !== 'string') return []
@@ -132,14 +132,14 @@ export async function loadExemptions(root) {
 }
 
 /**
- * 主校验：返回 { ok, diffs, stats }。diffs 条目 { severity:'red'|'warn', kind, message }。
+ * Validation principale : renvoie { ok, diffs, stats }. Entrées de diffs : { severity:'red'|'warn', kind, message }.
  */
 export async function runBootOrderCheck(root) {
   const diffs = []
   const pushRed = (kind, message) => diffs.push({ severity: 'red', kind, message })
   const pushWarn = (kind, message) => diffs.push({ severity: 'warn', kind, message })
 
-  // -- 采集：三份装配文件 --
+  // -- Collecte : les trois fichiers d'assemblage --
   const bootText = await readFile(join(root, 'src', 'boot-all.ts'), 'utf8')
   const boot = parseBootAll(bootText)
   const ymlEntries = parseCordisYml(await readFile(join(root, 'cordis.yml'), 'utf8'))
@@ -147,9 +147,9 @@ export async function runBootOrderCheck(root) {
   const ymlSeq = ymlEntries.map((e) => e.dir).filter(Boolean)
   const patchSeq = patchEntries.map((e) => e.dir).filter(Boolean)
 
-  // -- 采集：包目录、plugin.yaml、代码 provide/inject 面 --
-  // 「清单挂靠目录」：有 plugin.yaml 但无 src（如 plugin-platform-core 挂靠 platform-core
-  // 的五面清单，P2-04 补齐前的分离形态）——其清单归属对应代码目录参与对账。
+  // -- Collecte : répertoires de paquets, plugin.yaml, surfaces provide/inject du code --
+  // « Répertoires porteurs de manifestes » : ont un plugin.yaml mais pas de src (comme plugin-platform-core portant le manifeste à cinq facettes
+  // de platform-core, forme séparée avant le complément P2-04) — leur manifeste est rattaché au répertoire de code correspondant pour la réconciliation.
   const allDirs = (await readdir(join(root, 'packages'), { withFileTypes: true }))
     .filter((d) => d.isDirectory())
     .map((d) => d.name)
@@ -174,7 +174,7 @@ export async function runBootOrderCheck(root) {
     manifests.set(owner, parseYaml(text))
   }
 
-  // 键 → 提供者包集合
+  // clé → ensemble de paquets fournisseurs
   const provideMap = new Map()
   for (const [pkg, face] of faces) {
     for (const key of face.provides) {
@@ -186,7 +186,7 @@ export async function runBootOrderCheck(root) {
   const exemptions = await loadExemptions(root)
   const isExempt = (kind, key) => exemptions.has(`${kind}::${key}`)
 
-  // -- [A] 依赖先于使用（boot 与 yml 两个序列各自校验）--
+  // -- [A] dépendance avant usage (séquences boot et yml validées séparément) --
   const checkOrder = (sequence, label) => {
     const pos = new Map(sequence.map((pkg, i) => [pkg, i]))
     for (const pkg of sequence) {
@@ -205,7 +205,7 @@ export async function runBootOrderCheck(root) {
   checkOrder(boot.sequence, 'boot-all')
   checkOrder(ymlSeq, 'cordis.yml')
 
-  // -- [B] plugin.yaml depends 对账（以 boot-all 序列为基准序）--
+  // -- [B] réconciliation des depends de plugin.yaml (séquence boot-all comme ordre de référence) --
   const bootPos = new Map(boot.sequence.map((pkg, i) => [pkg, i]))
   for (const [pkg, manifest] of manifests) {
     for (const dep of normalizeDepends(manifest.depends)) {
@@ -224,7 +224,7 @@ export async function runBootOrderCheck(root) {
         pushRed('depends_order', `${pkg} depends「${dep}」晚于其装配（boot-all 序列）`)
       }
     }
-    // inject×provide 推导的真实依赖未登记 → 补录提示
+    // dépendances réelles déduites de inject×provide non enregistrées → rappel de complément
     const declared = new Set(normalizeDepends(manifest.depends).filter((d) => d.startsWith('dsh-plugin-')).map(yamlIdToDir))
     for (const key of faces.get(pkg)?.injects ?? []) {
       for (const provider of provideMap.get(key) ?? []) {
@@ -235,14 +235,14 @@ export async function runBootOrderCheck(root) {
     }
   }
 
-  // -- [C] cordis.yml ↔ cordis.patch.yml 序列一致 --
+  // -- [C] cohérence des séquences cordis.yml ↔ cordis.patch.yml --
   const ymlIds = ymlEntries.map((e) => e.id)
   const patchIds = patchEntries.map((e) => e.id)
   if (ymlIds.join('|') !== patchIds.join('|')) {
     pushRed('yml_pair_divergence', `cordis.yml 与 cordis.patch.yml 插件序列不一致：\n    cordis.yml       = ${ymlIds.join(' → ')}\n    cordis.patch.yml = ${patchIds.join(' → ')}`)
   }
 
-  // -- [D] boot-all ↔ yml 公共序列一致 --
+  // -- [D] cohérence de la séquence commune boot-all ↔ yml --
   const ymlSet = new Set(ymlSeq)
   const bootSet = new Set(boot.sequence)
   for (const pkg of boot.sequence) {
@@ -265,7 +265,7 @@ export async function runBootOrderCheck(root) {
     }
   }
 
-  // -- [E] provides.services 对账 --
+  // -- [E] réconciliation provides.services --
   for (const [pkg, manifest] of manifests) {
     const codeProvides = faces.get(pkg)?.provides ?? new Set()
     for (const key of manifest.provides?.services ?? []) {
@@ -291,7 +291,7 @@ export async function runBootOrderCheck(root) {
   return { ok: reds.length === 0, diffs, stats, exemptions }
 }
 
-// -- CLI 入口 --
+// -- Entrée CLI --
 if (process.argv[1]?.replace(/\\/g, '/').endsWith('scripts/check-boot-order.mjs')) {
   const root = process.cwd()
   const { ok, diffs, stats, exemptions } = await runBootOrderCheck(root)

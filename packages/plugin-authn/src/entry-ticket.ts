@@ -1,18 +1,18 @@
 /**
- * 平台授权直达 entry-ticket（一次性入场票据）。
+ * Ticket d'entrée d'autorisation directe plateforme (entry-ticket, billet d'admission à usage unique).
  *
- * 控制台「打开交互界面 / 打开应用」不再裸跳转：登录用户先向平台签发端
- * （POST /api/agents/:id/entry-ticket、POST /api/apps/:id/entry-ticket）领取一次性短时票据，
- * 目标地址以 #entry_ticket=<ticket> 片段打开；目标前端读取片段后回平台公开端点换取身份：
+ * Le « ouvrir l'interface / ouvrir l'application » de la console ne fait plus de saut nu : l'utilisateur connecté demande d'abord au point d'émission plateforme
+ * (POST /api/agents/:id/entry-ticket, POST /api/apps/:id/entry-ticket) un billet court à usage unique,
+ * l'adresse cible s'ouvre avec le fragment #entry_ticket=<ticket> ; le frontend cible lit le fragment puis échange l'identité au point public de la plateforme :
  *   POST /api/authn/entry-tickets/redeem { ticket } → { refType, refId, identity }
- *（公开路由挂在 plugin-console——PUBLIC_PATHS 与审计写入均在彼处收敛。）
+ * (la route publique est montée dans plugin-console — PUBLIC_PATHS et l'écriture d'audit convergent tous deux là-bas.)
  *
- * 安全语义（与 OIDC 授权码互补：标准 RP 走 /oauth/authorize，任意 entryUrl 零改造直达走本通道）：
- *   - 一次性（redeem 即消费，重放拒绝）+ 短时（默认 120s，ENTRY_TICKET_TTL_SECONDS 可调 30~600）；
- *   - 票据为 256bit 随机值（不可穷举），仅经 https 传输且不落目标应用日志（URL fragment 不进服务端）；
- *   - 兑换时实时校验用户状态（冻结/离职即时失效）；agent 票据在签发侧校验「owner / 绑定用户 / 管理员」，
- *     兑换侧不做资源级授权（授权语义在签发时已定格并审计）；
- *   - 签发与兑换均入审计（可按 *.entry.ticket.* 检索直达链路）。
+ * Sémantique de sécurité (complémentaire du code d'autorisation OIDC : les RP standards passent par /oauth/authorize, les entryUrl arbitraires sans modification passent par ce canal) :
+ *   - usage unique (consommé au redeem, rejeu refusé) + courte durée (défaut 120 s, ajustable de 30 à 600 via ENTRY_TICKET_TTL_SECONDS) ;
+ *   - le billet est une valeur aléatoire de 256 bits (non énumérable), transportée uniquement en https et jamais dans les logs de l'application cible (le fragment d'URL n'atteint pas le serveur) ;
+ *   - à l'échange, l'état de l'utilisateur est vérifié en temps réel (gelé/départ = invalidation immédiate) ; les billets agent vérifient côté émission « owner / utilisateur lié / administrateur »,
+ *     la réception ne fait pas d'autorisation au niveau ressource (la sémantique d'autorisation a été figée et audité à l'émission) ;
+ *   - émission et échange entrent tous deux dans l'audit (chaîne d'accès directe consultable par *.entry.ticket.*).
  */
 import { randomBytes } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
@@ -21,8 +21,8 @@ import { type Collection, type RecordBase } from '../../platform-core/src/index.
 import { t } from '../../platform-i18n/src/index.ts'
 
 export interface EntryTicketRecord extends RecordBase {
-  /** 票据本体即主键（etk_ + 256bit 随机值）；兑换后立即置 consumedAt。
-   *  refType 'self'：登录人类自助签发（交接清单 G1 跨源自举回跳），refId 即签发人 userId。 */
+  /** Le billet lui-même est la clé primaire (etk_ + valeur aléatoire 256 bits) ; consumedAt posé immédiatement après l'échange.
+   *  refType 'self' : auto-émission par l'humain connecté (retour multi-origine de la liste de passation G1), refId = userId de l'émetteur. */
   refType: 'agent' | 'app' | 'self'
   refId: string
   userId: string
@@ -67,8 +67,8 @@ export class EntryTicketService extends Service {
     return this.ctx.opsStorage.collection<EntryTicketRecord>('authn:entryTickets')
   }
 
-  /** 签发：调用方（console 端点）已完成资源存在性、human 身份与使用授权校验并落审计；此处校验用户状态。
-   *  maxTtlSeconds：票种 TTL 硬上限（self 自助票 ≤120s，交接清单 G1——覆盖 env 调高）。 */
+  /** Émission : l'appelant (point console) a déjà vérifié l'existence de la ressource, l'identité humaine et l'autorisation d'usage, avec audit ; ici validation de l'état de l'utilisateur.
+   *  maxTtlSeconds : plafond matériel du TTL pour ce type de billet (billets self ≤ 120 s, liste de passation G1 — lève même si env augmente). */
   issue(input: { refType: 'agent' | 'app' | 'self'; refId: string; userId: string; userName: string }, options: { maxTtlSeconds?: number } = {}): { ticket: string; expiresAt: string; ttlSeconds: number } {
     const user = this.ctx.iam.users().get(input.userId)
     if (!user) throw new Error(t('用户不存在'))
@@ -88,8 +88,8 @@ export class EntryTicketService extends Service {
   }
 
   /**
-   * 兑换：一次性消费 → 实时校验用户状态 → 返回资源指向与标准化身份（审计由路由层写入）。
-   * 票据熵 256bit 且一次性，不做 IP 限流（错误尝试无爆破收益，锁定只会伤及共享出口的正常用户）。
+   * Échange : consommation unique → validation en temps réel de l'état utilisateur → renvoi de la ressource cible et de l'identité normalisée (l'audit est écrit par la couche de routes).
+   * Entropie du billet 256 bits et usage unique : pas de limitation par IP (les tentatives erronées n'offrent aucun gain de force brute, un verrouillage ne pénaliserait que les utilisateurs normaux des sorties partagées).
    */
   redeem(ticket: string, clientIp: string): { refType: EntryTicketRecord['refType']; refId: string; expiresAt: string; identity: EntryTicketIdentity } {
     const record = this.tickets().get(String(ticket ?? ''))
@@ -115,7 +115,7 @@ export class EntryTicketService extends Service {
     }
   }
 
-  /** 过期票据 24h 清理（已消费/未消费一并无留存价值）。 */
+  /** Nettoyage des billets expirés toutes les 24 h (consommés ou non, aucune valeur de conservation). */
   private cleanupExpired(): number {
     let removed = 0
     for (const record of this.tickets().all()) {

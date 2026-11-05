@@ -1,33 +1,33 @@
 /**
- * platform-i18n —— 平台多语言内核（UI 全球化，2026-10-16 批次）。
+ * platform-i18n —— noyau multilingue de la plateforme (globalisation UI, lot 2026-10-16).
  *
- * 职责（单一，可被任何插件 / CLI / 前端词典管线复用）：
- *   - locale 解析与降级链：请求 ?lang= > Cookie rq_lang > Accept-Language > PLATFORM_LOCALE > zh-CN
- *   - 词典加载：locales/<locale>/*.json 按文件名序浅合并（多团队分文件并行维护，互不覆盖）；
- *     I18N_EXTRA_DIR/<locale>/*.json 为企业定制覆盖层（同键后者胜），支持私有化部署本地化话术
- *   - t()：以**中文原文为键**的翻译查询（zh-CN 原样返回 ⇒ 既有 selftest 断言零影响）；
- *     未命中词典降级回中文原文（词典可增量补齐，运行永不因缺翻译而炸）
- *   - {name} 插值 + Intl 日期/数字本地化
+ * Responsabilité (unique, réutilisable par tout plugin / CLI / pipeline de dictionnaire frontend) :
+ *   - résolution de locale et chaîne de repli : requête ?lang= > Cookie rq_lang > Accept-Language > PLATFORM_LOCALE > zh-CN
+ *   - chargement des dictionnaires : locales/<locale>/*.json fusionnés superficiellement dans l'ordre des noms de fichiers
+ *     (plusieurs équipes maintiennent des fichiers en parallèle sans se écraser mutuellement) ;
+ *   - t() : requête de traduction dont **la clé est le texte source chinois** (zh-CN renvoyé tel quel ⇒ zéro impact sur les assertions selftest existantes) ;
+ *     en cas d'absence du dictionnaire, repli sur le texte source chinois (le dictionnaire se complète par incrément, l'exécution ne casse jamais faute de traduction)
+ *   - interpolation {name} + localisation Intl des dates/nombres
  *
- * 协议口径（R10 兼容）：新增 ASCII 协议键——?lang= 查询参数、Cookie rq_lang、
- * 环境变量 PLATFORM_LOCALE / DSHCTL_LANG / I18N_EXTRA_DIR；事件名、权限点、错误原因码、
- * API 信封字段（ok/data/error）一律不变。协议键中文释义见 docs/协议键中文对照总表.md。
+ * Contrat protocolaire (compatibilité R10) : nouvelles clés de protocole ASCII — paramètre de requête ?lang=, cookie rq_lang,
+ * variables d'environnement PLATFORM_LOCALE / DSHCTL_LANG / I18N_EXTRA_DIR ; les noms d'événements, points de permission,
+ * API (ok/data/error) restent inchangés. Signification des clés de protocole : voir docs/协议键中文对照总表.md.
  *
- * 线程模型：HTTP 分发层（platform-core/src/http.ts dispatch）以 AsyncLocalStorage
- * 为每个请求建立 locale 上下文，任意深度的路由/服务代码直接调 t() 即得当前请求语言；
- * 非 HTTP 上下文（定时任务/事件消费/CLI）取 PLATFORM_LOCALE（CLI 另有 DSHCTL_LANG）。
+ * Modèle d'exécution : la couche de dispatch HTTP (platform-core/src/http.ts dispatch) utilise AsyncLocalStorage
+ * pour établir un contexte de locale par requête ; tout code de route/service, quelle que soit sa profondeur, appelle t() et obtient la langue de la requête courante ;
+ * hors contexte HTTP (tâches planifiées/consommation d'événements/CLI), PLATFORM_LOCALE est utilisée (la CLI a en plus DSHCTL_LANG).
  */
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
 
-/** 支持的语言（UI 全球化：简体中文默认 + 英语 + 日语 + 法语；扩展新语言 = 加目录 + 加映射）。 */
+/** Langues prises en charge (globalisation UI : chinois simplifié par défaut + anglais + japonais + français ; ajouter une langue = ajouter un répertoire + une entrée). */
 export const SUPPORTED_LOCALES = ['zh-CN', 'en-US', 'ja-JP', 'fr-FR'] as const
 export type Locale = (typeof SUPPORTED_LOCALES)[number]
 export const DEFAULT_LOCALE: Locale = 'zh-CN'
 
-/** 各语言的 Intl tag 与展示名（切换器直接消费，避免前端再维护一份）。 */
+/** Tag Intl et nom d'affichage de chaque langue (consommés directement par le sélecteur, pour éviter un doublon côté frontend). */
 export const LOCALE_DISPLAY_NAMES: Record<Locale, { native: string; en: string; intl: string }> = {
   'zh-CN': { native: '简体中文', en: 'Simplified Chinese', intl: 'zh-CN' },
   'en-US': { native: 'English (US)', en: 'English (US)', intl: 'en-US' },
@@ -42,7 +42,7 @@ const LANG_PREFIX_MAP: Array<{ prefix: string; locale: Locale }> = [
   { prefix: 'fr', locale: 'fr-FR' },
 ]
 
-/** BCP47 宽容归一：'en'/'en-GB' → en-US，'ja' → ja-JP，'fr'/'fr-CA' → fr-FR，'zh'/'zh-SG' → zh-CN；不支持返回 null。 */
+/** Normalisation tolérante BCP47 : 'en'/'en-GB' → en-US, 'ja' → ja-JP, 'fr'/'fr-CA' → fr-FR, 'zh'/'zh-SG' → zh-CN ; renvoie null si non pris en charge. */
 export function normalizeLocale(input?: string | null): Locale | null {
   if (!input) return null
   const lower = String(input).trim().toLowerCase()
@@ -53,7 +53,7 @@ export function normalizeLocale(input?: string | null): Locale | null {
   return null
 }
 
-/** Cookie 头解析（IncomingMessage.headers.cookie 可能为 string | string[] | undefined）。 */
+/** Analyse de l'en-tête Cookie (IncomingMessage.headers.cookie peut être string | string[] | undefined). */
 export function parseCookieHeader(header?: string | string[] | undefined): Record<string, string> {
   const raw = Array.isArray(header) ? header[0] : header
   if (!raw) return {}
@@ -67,7 +67,7 @@ export function parseCookieHeader(header?: string | string[] | undefined): Recor
   return out
 }
 
-/** Accept-Language 头解析：按 q 值降序返回语言标签（非法片段忽略）。 */
+/** Analyse de l'en-tête Accept-Language : renvoie les tags de langue triés par q décroissant (segments invalides ignorés). */
 export function parseAcceptLanguage(header?: string | string[] | undefined): string[] {
   const raw = Array.isArray(header) ? header.join(',') : header
   if (!raw) return []
@@ -95,8 +95,8 @@ export interface ResolveLocaleInput {
 }
 
 /**
- * locale 决议（纯函数，selftest 直测）。优先级：显式 query > 用户 Cookie >
- * 浏览器语言 > 安装级环境变量 > zh-CN。任何一级不支持即落入下一级。
+ * Résolution de locale (fonction pure, testée directement par selftest). Priorité : query explicite > cookie utilisateur >
+ * langue du navigateur > variable d'environnement d'installation > zh-CN. Chaque niveau non pris en charge passe au suivant.
  */
 export function resolveRequestLocale(input: ResolveLocaleInput): Locale {
   return normalizeLocale(input.query)
@@ -108,14 +108,14 @@ export function resolveRequestLocale(input: ResolveLocaleInput): Locale {
     ?? DEFAULT_LOCALE
 }
 
-// ------------------------------------------------------------------ 词典加载
+// ------------------------------------------------------------------ Chargement des dictionnaires
 
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
-/** 词典缓存：locale → 合并视图（进程内一次性加载；I18N_EXTRA_DIR 变更需重启，与其它 env 同口径）。 */
+/** Cache des dictionnaires : locale → vue fusionnée (chargé une fois par processus ; un changement d'I18N_EXTRA_DIR exige un redémarrage, même règle que pour les autres variables d'env). */
 const catalogCache = new Map<Locale, Record<string, string>>()
 
-/** 读取单个词典目录（<dir>/*.json 按文件名序浅合并）。控制台 /locales 合并端点与 CLI 复用。 */
+/** Lecture d'un répertoire de dictionnaire (<dir>/*.json fusionné superficiellement par ordre de nom). Réutilisé par le point de fusion /locales de la console et la CLI. */
 export function readCatalogDir(dir: string): Record<string, string> {
   if (!existsSync(dir)) return {}
   const merged: Record<string, string> = {}
@@ -128,13 +128,13 @@ export function readCatalogDir(dir: string): Record<string, string> {
         if (typeof value === 'string') merged[key] = value
       }
     } catch {
-      // 单个词典文件损坏不拖垮启动：跳过（fail-soft，等价缺翻译降级中文）
+      // Un fichier de dictionnaire corrompu ne bloque pas le démarrage : on l'ignore (fail-soft, équivalent à un repli chinois faute de traduction)
     }
   }
   return merged
 }
 
-/** 合并指定 locale 的全部词典层：内核目录（多文件按名序）+ 企业定制覆盖层（I18N_EXTRA_DIR）。 */
+/** Fusionne toutes les couches de dictionnaire d'une locale donnée : répertoire du noyau (plusieurs fichiers par ordre de nom) + couche de personnalisation entreprise (I18N_EXTRA_DIR). */
 export function localeCatalog(locale: Locale): Record<string, string> {
   const cached = catalogCache.get(locale)
   if (cached) return cached
@@ -145,26 +145,26 @@ export function localeCatalog(locale: Locale): Record<string, string> {
   return merged
 }
 
-// ------------------------------------------------------------------ 请求级 locale 上下文
+// ------------------------------------------------------------------ Contexte de locale par requête
 
 const requestLocaleStorage = new AsyncLocalStorage<Locale>()
 
-/** 安装级默认语言（PLATFORM_LOCALE，默认 zh-CN）：非 HTTP 上下文（定时任务/事件消费）的 t() 语言。 */
+/** Langue par défaut au niveau installation (PLATFORM_LOCALE, zh-CN par défaut) : langue de t() hors contexte HTTP (tâches planifiées/consommation d'événements). */
 export function installLocale(): Locale {
   return normalizeLocale(process.env.PLATFORM_LOCALE) ?? DEFAULT_LOCALE
 }
 
-/** 当前生效语言：请求上下文 > PLATFORM_LOCALE > zh-CN。 */
+/** Langue actuellement effective : contexte de requête > PLATFORM_LOCALE > zh-CN. */
 export function currentLocale(): Locale {
   return requestLocaleStorage.getStore() ?? installLocale()
 }
 
-/** 在指定语言上下文中执行 fn（HTTP 分发层包裹整个中间件+处理器链；测试亦直接使用）。 */
+/** Exécute fn dans le contexte de langue donné (la couche de dispatch HTTP enveloppe toute la chaîne middleware+handlers ; les tests l'utilisent aussi directement). */
 export function runWithLocale<T>(locale: Locale, fn: () => T): T {
   return requestLocaleStorage.run(locale, fn)
 }
 
-// ------------------------------------------------------------------ t() 与插值
+// ------------------------------------------------------------------ t() et interpolation
 
 const INTERP = /\{(\w+)\}/g
 
@@ -175,8 +175,8 @@ function interpolate(template: string, params?: Record<string, string | number>)
 }
 
 /**
- * 翻译当前上下文的一条文案：中文原文为键，命中词典返回译文，未命中原样返回中文
- * （词典增量补齐，运行永不因缺翻译失败）；两种语言都执行 {name} 插值。
+ * Traduit un libellé dans le contexte courant : la clé est le texte source chinois ; renvoie la traduction si présente dans le dictionnaire, sinon le texte chinois tel quel
+ * (le dictionnaire se complète par incrément, l'exécution n'échoue jamais faute de traduction) ; l'interpolation {name} est appliquée dans les deux langues.
  */
 export function t(zhText: string, params?: Record<string, string | number>): string {
   const locale = currentLocale()
@@ -185,16 +185,16 @@ export function t(zhText: string, params?: Record<string, string | number>): str
   return interpolate(translated ?? zhText, params)
 }
 
-/** 显式指定语言的 t()（事件消费侧按「事件产生时语言」或收件人偏好回放文案时使用）。 */
+/** t() avec langue explicite (côté consommation d'événements, pour rejouer un libellé selon la langue d'émission de l'événement ou la préférence du destinataire). */
 export function tIn(locale: Locale, zhText: string, params?: Record<string, string | number>): string {
   if (locale === DEFAULT_LOCALE) return interpolate(zhText, params)
   const translated = localeCatalog(locale)[zhText]
   return interpolate(translated ?? zhText, params)
 }
 
-// ------------------------------------------------------------------ Intl 本地化
+// ------------------------------------------------------------------ Localisation Intl
 
-/** 日期时间本地化（默认 medium 日期 + medium 时间；技术上下文请继续用 ISO 8601 原文）。 */
+/** Localisation date/heure (par défaut date medium + heure medium ; en contexte technique, continuer à utiliser ISO 8601 tel quel). */
 export function formatDateValue(value: string | number | Date, locale?: Locale, opts?: Intl.DateTimeFormatOptions): string {
   const date = value instanceof Date ? value : new Date(value)
   if (Number.isNaN(date.getTime())) return String(value)
@@ -202,7 +202,7 @@ export function formatDateValue(value: string | number | Date, locale?: Locale, 
   return new Intl.DateTimeFormat(tag, opts ?? { dateStyle: 'medium', timeStyle: 'medium' }).format(date)
 }
 
-/** 数字本地化（千分位/小数点随语言；百分比/金额语义由调用方给 Intl opts）。 */
+/** Localisation des nombres (séparateurs de milliers/décimal selon la langue ; la sémantique pourcentage/montant est fournie par l'appelant via les opts Intl). */
 export function formatNumberValue(value: number, locale?: Locale, opts?: Intl.NumberFormatOptions): string {
   const tag = LOCALE_DISPLAY_NAMES[locale ?? currentLocale()].intl
   return new Intl.NumberFormat(tag, opts).format(value)

@@ -1,25 +1,25 @@
 #!/usr/bin/env node
 /**
- * run-closed-loop-review.mjs —— 执行中枢自动化闭环实测驱动（心跳 + 任务脉络端到端验证）。
+ * run-closed-loop-review.mjs — pilotage du test réel de la boucle fermée automatisée du centre d'exécution (heartbeat + fil de tâches, vérification de bout en bout).
  *
- * 以治理执行官身份（client-credentials 换牌，scopes=*）对运行中的平台完成一次
- * 「立案 → 心跳配置 → 唤醒 → 认领 → 执行审查 → 交回 → 脉络回读」的完整闭环，
- * 全程走平台正式面（REST /api/exec/* 与 MCP /mcp exec_* 工具），不直连数据文件。
- * 幂等可重跑：目标/项目/任务按标题复用，已持锁任务走幂等认领。
+ * Sous l'identité de l'officier d'exécution de gouvernance (échange client-credentials, scopes=*), réalise sur la plateforme en cours d'exécution une boucle complète
+ * « ouverture de dossier → configuration heartbeat → réveil → claim → exécution de la revue → restitution → relecture du fil »,
+ * en passant intégralement par les facettes officielles de la plateforme (REST /api/exec/* et outils MCP /mcp exec_*), sans toucher directement aux fichiers de données.
+ * Idempotent et réexécutable : objectifs/projets/tâches réutilisés par titre, les tâches déjà verrouillées passent par un claim idempotent.
  *
- * 用法：
+ * Usage :
  *   node scripts/run-closed-loop-review.mjs [--platform http://127.0.0.1:7300]
  *       [--data-dir ~/ybkkasi/data] [--heartbeat-min 30] [--skip-a2a]
  *
- * 闭环八步（每步打印证据，任一步失败即非零退出）：
- *   ① 换牌取机器令牌（治理执行官）
- *   ② 三官 Agent 配置心跳间隔（attrs.heartbeatIntervalMinutes）
- *   ③ 目标 → 项目 → 任务三级立案（任务派给执行官，自动入唤醒队列）
- *   ④ 手动 tick 处理唤醒 → 心跳留痕（woken / skipped_no_todo）
- *   ⑤ MCP exec_claim 认领取执行租约
- *   ⑥ 审查执行：探活 ybkk.ybkkasi.com 及姊妹子域，产出审查结论
- *   ⑦ MCP exec_complete 交回（审查结论写入任务摘要，任务转待审）
- *   ⑧ 脉络回读：血缘 / 唤醒 / run / 心跳健康度（+ 可选 A2A 任务追踪脉络）
+ * Les huit étapes de la boucle (chaque étape imprime ses preuves ; le premier échec sort en non-zéro) :
+ *   ① échange pour obtenir le jeton machine (officier d'exécution de gouvernance)
+ *   ② configuration de l'intervalle de heartbeat des trois Agents officiers (attrs.heartbeatIntervalMinutes)
+ *   ③ ouverture de dossier à trois niveaux objectif → projet → tâche (tâche affectée à l'officier d'exécution, entre automatiquement dans la file de réveil)
+ *   ④ tick manuel traitant les réveils → trace de heartbeat (woken / skipped_no_todo)
+ *   ⑤ claim MCP exec_claim pour obtenir le bail d'exécution
+ *   ⑥ exécution de la revue : sonde de vie de ybkk.ybkkasi.com et de ses sous-domaines sœurs, production de la conclusion de revue
+ *   ⑦ restitution MCP exec_complete (conclusion de revue écrite dans le résumé de la tâche, tâche passée en attente de revue)
+ *   ⑧ relecture du fil : lignée / réveils / run / santé des heartbeats (+ fil optionnel de suivi des tâches A2A)
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -27,7 +27,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { join, resolve } from 'node:path'
 
-// ---- 参数 ------------------------------------------------------------------
+// ---- Paramètres ------------------------------------------------------------------
 const argv = process.argv.slice(2)
 const arg = (flag, fallback) => {
   const i = argv.indexOf(flag)
@@ -39,7 +39,7 @@ const HEARTBEAT_MIN = Number(arg('--heartbeat-min', '30'))
 const SKIP_A2A = argv.includes('--skip-a2a')
 const CRED_FILE = join(DATA_DIR, 'governance-credentials.json')
 
-// 闭环剧本（幂等键）
+// Scénario de boucle (clés d'idempotence)
 const GOAL_TITLE = '数字员工自治闭环运行验证'
 const PROJECT_NAME = 'ybkk.ybkkasi.com 方案落地'
 const ISSUE_TITLE = 'ybkk.ybkkasi.com 方案落地的自动化闭环任务的审查与修订'
@@ -53,7 +53,7 @@ const log = (msg) => console.log(`[closed-loop] ${msg}`)
 const step = (n, msg) => log(`── 第${n}步 ${msg}`)
 const fail = (msg) => { console.error(`[closed-loop] ✘ ${msg}`); process.exit(1) }
 
-// ---- HTTP / MCP 基座 ---------------------------------------------------------
+// ---- Socle HTTP / MCP ---------------------------------------------------------
 let bearer = ''
 async function api(method, path, body) {
   const response = await fetch(`${PLATFORM}${path}`, {
@@ -68,7 +68,7 @@ async function api(method, path, body) {
   return payload?.data ?? payload
 }
 
-// 平台 MCP 面（/mcp）：标准 streamable HTTP 握手（initialize → initialized → tools/call）
+// Facette MCP de la plateforme (/mcp) : poignée de main streamable HTTP standard (initialize → initialized → tools/call)
 let mcpSessionId = ''
 let mcpRpcId = 0
 async function mcpRaw(method, params, { notify = false } = {}) {
@@ -88,14 +88,14 @@ async function mcpRaw(method, params, { notify = false } = {}) {
   if (notify || response.status === 202) return null
   const text = await response.text()
   if (!text) return null
-  // streamable 响应可能是 SSE 帧，取最后一个 data: JSON 帧
+  // La réponse streamable peut être une trame SSE : prendre la dernière trame data: JSON
   const line = text.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).pop() ?? text
   const payload = JSON.parse(line)
   if (payload.error) throw new Error(`MCP ${method} 错误：${payload.error.message}`)
   return payload.result
 }
 
-/** MCP tools/call exec_* 工具（取 text 内容中的结构化 JSON；isError 视为失败抛出）。 */
+/** Outils exec_* MCP tools/call (JSON structuré extrait du contenu text ; isError traité comme échec et levé). */
 async function execTool(name, args) {
   const result = await mcpRaw('tools/call', { name, arguments: args })
   const textPart = (result?.content ?? []).find((c) => c.type === 'text')?.text
@@ -107,7 +107,7 @@ async function execTool(name, args) {
 const execFileP = promisify(execFile)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-/** 探活一个 URL，返回 { url, status }。 */
+/** Sonde de vie d'une URL, renvoie { url, status }. */
 async function probe(url) {
   try {
     const { stdout } = await execFileP('curl', ['-s', '-m', '8', '-o', '/dev/null', '-w', '%{http_code}', url], { timeout: 12_000 })
@@ -118,13 +118,13 @@ async function probe(url) {
   }
 }
 
-// ---- 主流程 ------------------------------------------------------------------
+// ---- Flux principal ------------------------------------------------------------------
 if (!existsSync(CRED_FILE)) fail(`凭证文件不存在：${CRED_FILE}（先跑 scripts/register-governance-credentials.mjs）`)
 const cred = JSON.parse(readFileSync(CRED_FILE, 'utf8'))
 const operator = cred.operator
 if (!operator?.clientId || !operator?.clientSecret) fail('治理凭证缺少 operator clientId/clientSecret')
 
-// ① 换牌
+// ① Échange de jeton
 step(1, `换牌取机器令牌（${operator.name}）`)
 const tokenRes = await fetch(`${PLATFORM}/api/auth/client-credentials`, {
   method: 'POST',
@@ -145,7 +145,7 @@ const init = await mcpRaw('initialize', {
 log(`✔ 服务端 ${init?.serverInfo?.name ?? '?'} v${init?.serverInfo?.version ?? '?'}`)
 await mcpRaw('notifications/initialized', undefined, { notify: true })
 
-// ② 三官 Agent 心跳配置
+// ② Configuration heartbeat des trois Agents officiers
 step(2, `三官 Agent 配置心跳间隔（${HEARTBEAT_MIN} 分钟）`)
 const agents = (await api('GET', '/api/agents')).agents ?? []
 const OFFICERS = ['执行官', '评价官', '验收官']
@@ -160,7 +160,7 @@ for (const officer of officers) {
 }
 const executor = officers.find((a) => a.name.includes('执行官'))
 
-// ③ 三级立案（按标题幂等复用）
+// ③ Ouverture de dossier à trois niveaux (réutilisation idempotente par titre)
 step(3, '目标 → 项目 → 任务 立案')
 const goals = (await api('GET', '/api/exec/goals')).goals ?? []
 let goal = goals.find((g) => g.title === GOAL_TITLE && g.status !== 'archived')
@@ -201,7 +201,7 @@ if (!issue) {
   log(`↺ 复用既有任务 ${issue.id}（状态 ${issue.status}）`)
 }
 
-// ④ tick 处理唤醒 → 心跳留痕
+// ④ tick traitant les réveils → trace de heartbeat
 step(4, '手动 tick 处理唤醒队列 → 心跳留痕')
 await api('POST', '/api/exec/tick', {})
 await sleep(300)
@@ -214,13 +214,13 @@ for (const h of healthMid.filter((h) => OFFICERS.some((k) => h.name.includes(k))
   log(`· ${h.name} 最近心跳=${h.lastHeartbeatAt ?? '无'} 健康度=${h.health}`)
 }
 
-// ⑤ MCP exec_claim 认领
+// ⑤ Claim MCP exec_claim
 step(5, `MCP exec_claim 认领任务 ${issue.id}`)
 const claim = await execTool('exec_claim', { issueId: issue.id })
 if (claim?.ok === false) fail(`exec_claim 被拒：${claim.code} ${claim.message}`)
 log(`✔ run=${claim.runId} 租约=${claim.leaseId ?? '—'}（幂等=${claim.idempotent ?? false}）`)
 
-// ⑥ 审查执行：四域探活 + 结论
+// ⑥ Exécution de la revue : sondes de vie des quatre domaines + conclusion
 step(6, '审查执行：ybkk.ybkkasi.com 及姊妹子域探活')
 const probes = await Promise.all([
   probe('https://ybkk.ybkkasi.com/'),
@@ -241,7 +241,7 @@ const summaryLines = [
 ].join('\n')
 log('✔ 审查结论已产出（写入交回摘要）')
 
-// ⑦ MCP exec_complete 交回（runId 缺席时按 issueId 收尾——exec_complete 双形态）
+// ⑦ Restitution MCP exec_complete (sans runId, clôture par issueId — double forme d'exec_complete)
 step(7, `MCP exec_complete 交回 run ${claim.runId ?? issue.executionRunId ?? '(按任务收尾)'}`)
 const done = await execTool('exec_complete', {
   ...(claim.runId ? { runId: claim.runId } : { issueId: issue.id }),
@@ -251,7 +251,7 @@ const done = await execTool('exec_complete', {
 if (done?.ok === false) fail(`exec_complete 失败：${done.code ?? ''} ${done.message ?? ''}`)
 log('✔ run 完成、租约释放；任务转待审（review），等待人工验收归档')
 
-// ⑧ 脉络回读
+// ⑧ Relecture du fil
 step(8, '脉络回读：血缘 / 任务 / run / 心跳健康度')
 const lineage = await api('GET', `/api/exec/lineage/${issue.id}`)
 log(`✔ 血缘链：${[lineage.goal?.title, lineage.project?.name, lineage.issue?.title].filter(Boolean).join(' → ')}`)
@@ -265,7 +265,7 @@ for (const h of health.filter((h) => OFFICERS.some((k) => h.name.includes(k)))) 
   log(`✔ ${h.name}：健康度=${h.health} 最近心跳=${h.lastHeartbeatAt ?? '无'}`)
 }
 
-// （可选）A2A 任务追踪脉络
+// (optionnel) Fil de suivi des tâches A2A
 if (!SKIP_A2A) {
   step('A2A', '发起 A2A 协作任务（任务追踪时间线脉络）')
   try {

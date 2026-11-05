@@ -1,14 +1,14 @@
 /**
- * 依据「插件标准解剖结构」批量生成各插件的声明文件：
- *   plugin.yaml（id/version/依赖/权限）+ manifest/{api,permissions,events,ui}.yaml
- * 这些声明是插件对外的契约文档（api.yaml 为唯一事实源，CLI/Skill/Web 三端对齐）。
+ * Génère en lot les fichiers de déclaration de chaque plugin selon « l'anatomie standard d'un plugin » :
+ *   plugin.yaml (id/version/dépendances/permissions) + manifest/{api,permissions,events,ui}.yaml
+ * Ces déclarations sont le document de contrat externe des plugins (api.yaml est la source de vérité unique, alignée sur les trois faces CLI/Skill/Web).
  */
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const ROOT = process.cwd()
 
-// 版本唯一事实源：根 package.json（plugin.yaml/manifest 与根版本一处同步，不再散落硬编码）
+// Source de vérité unique de version : package.json racine (plugin.yaml/manifest synchronisés en un seul endroit avec la version racine, plus de codage dispersé)
 const VERSION = String(JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version ?? '0.0.0')
 
 const PLUGINS = [
@@ -102,7 +102,7 @@ const PLUGINS = [
       'GET/POST /api/authn/principals · PATCH /api/authn/principals/:id（scopes 调整，联动吊销令牌）',
       'POST /api/authn/principals/:id/disable|enable|rotate-secret（轮换：旧值即废，新值仅一次返回）',
       'GET/POST /api/authn/tokens · DELETE /api/authn/tokens/:jti · POST /api/authn/rotate-secret',
-      // W1 MCP 治理（契约 §3/§15）：委托令牌交换——自委托（机器为自己换牌）/ 代用户委托 / 人类→目标主体
+      // Gouvernance MCP W1 (contrat §3/§15) : échange de jetons délégués — auto-délégation (machine échange sa propre carte) / délégation pour un utilisateur / humain → sujet cible
       'POST /api/authn/token/exchange（委托令牌交换：audience 绑定 mcp:service:<slug> 或 plugin:<id>）',
     ],
     tools: ['authn_token_issue', 'authn_token_revoke', 'authn_token_list', 'authn_credential_create', 'authn_credential_scopes', 'authn_credential_rotate'],
@@ -119,7 +119,7 @@ const PLUGINS = [
     ],
     api: [
       'GET /api/audit/logs（?traceId= 全链 trace 精确检索，W3-T5 §14） · GET /api/audit/summary',
-      // W3-T5 §14：审计 ndjson 流式导出（append-only，行序=时间序，附尾行 _chainTip；权限点同 audit.read）
+      // W3-T5 §14 : export ndjson en flux de l'audit (append-only, ordre des lignes = ordre chronologique, ligne finale _chainTip ; point de permission identique à audit.read)
       'GET /api/audit/export?since=&until=（application/x-ndjson；哈希链可校验导出）',
       'GET/POST /api/audit/alert-rules · PATCH /api/audit/alert-rules/:id · GET /api/audit/alerts · POST /api/audit/alerts/:id/read · POST /api/audit/alerts/read-all',
       'GET /api/audit/cost?groupBy=app|agent|org|date',
@@ -154,14 +154,14 @@ const PLUGINS = [
       'GET/POST /api/mcp/perm-groups · PATCH/DELETE /api/mcp/perm-groups/:id',
       'POST /api/mcp/invoke（网关统一鉴权/限流/审计；body.work 仅 permitId/runId/stepKey 索引透传；兼容层：Agent 标准默认路径是 /mcp/services/:serviceSlug，W2-T3 §9）',
       'POST/GET /api/mcp/risk-registry · POST /api/mcp/risk-registry/:id/decide|retire · GET /api/mcp/risk-registry/review-list（W1/V11 工具风险登记：两级审批+全量重审，mcp.risk.admin）',
-      // 以下两段为防覆盖同步：W1-T2 曾只手工写进 manifest/api.yaml，npm run manifests 会抹掉——
-      // 补进生成器使生成输出与手工事实一致（仅 mcp 段，additive）。
+      // Les deux paragraphes suivants sont une synchronisation anti-écrasement : W1-T2 n'avait été écrit qu'à la main dans manifest/api.yaml et npm run manifests l'aurait effacé —
+      // intégré au générateur pour que la sortie générée corresponde aux faits manuels (segment mcp seulement, additif).
       'POST /api/mcp/services/:id/owner-entity（归属指派） · GET /api/mcp/governance/summary（治理待办：unowned/plainHeaderServices/nonGateway，W1-T2 §5）',
       'PUT/GET /api/mcp/services/:id/credential（下游凭证 SecretBroker：值落密钥文件 0600，业务集合与响应零明文，W1-T2 §6）',
       'POST /api/mcp/credentials/migrate（存量明文敏感头迁移入 SecretBroker；dryRun 预检报告）',
-      // W2-T3 §7/§8：服务级 MCP 数据面（标准 MCP 协议直连单服务；注册于 plugin-console routes/mcp-dataplane.ts）
+      // W2-T3 §7/§8 : plan de données MCP au niveau service (connexion directe au protocole MCP standard d'un seul service ; enregistré dans plugin-console routes/mcp-dataplane.ts)
       'POST /mcp/services/:serviceSlug（服务级 MCP 数据面：Bearer 平台令牌或 aud=mcp:service:<slug> 委托令牌，initialize/ping/tools/list/tools/call，tools/list 经 authorizedToolsFor 按调用方过滤，tools/call 统一走网关 invoke 链） · GET/DELETE /mcp/services/:serviceSlug（Streamable HTTP 会话语义与平台 /mcp 一致：GET=SSE 长流不支持 405，DELETE=会话终结恒成功） · POST /mcp/s/:serviceId（同上别名，按服务 ID 直达） · GET/DELETE /mcp/s/:serviceId（同上）',
-      // W3-T5 §12/§14（防覆盖同步，与手工 manifest/api.yaml 一致）：策略模拟与 scope 模板（dry 语义不落库）
+      // W3-T5 §12/§14 (synchronisation anti-écrasement, cohérent avec le manifeste manuel api.yaml) : simulation de stratégie et gabarits de scope (sémantique dry sans stockage)
       'POST /api/mcp/perm-groups/dry-run（mcp.permgroup.write；权限变更影响预演：newServices/writeTools/confidential/crossOrg/affectedSubjects，不落库） · POST /api/mcp/perm-groups/:id/scope-template（mcp.permgroup.read；按权限组策略生成资源限定 scope 模板 mcp.service:/mcp.tool: 形态，W3-T5 契约 §12/§14 控制台消费面）',
     ],
     tools: ['mcp_service_list', 'mcp_deploy', 'mcp_offline', 'mcp_metrics', 'mcp_invoke', 'mcp_health_check'],
@@ -282,7 +282,7 @@ const PLUGINS = [
       'GET /api/apps/:id（含 topology/cost/impact） · DELETE /api/apps/:id（下架移除）',
       'POST /api/apps/:id/sso-client · PATCH /api/apps/:id/sso-client · POST /api/apps/:id/sso-client/rotate（应用 SSO 客户端治理） · POST /api/apps/:id/onboarding-prompt（接入提示词重生成）',
       'GET /api/apps/developer-options（开发者接入选项）',
-      // W2 应用能力绑定（契约 §10/§15）：应用 ↔ MCP 服务绑定（绑定回写服务归属、冲突 409 OWNER_CONFLICT）
+      // Liaison des capacités applicatives W2 (contrat §10/§15) : liaisons application ↔ services MCP (la liaison réécrit la propriété du service, conflit 409 OWNER_CONFLICT)
       'GET/POST /api/apps/:id/capabilities · DELETE /api/apps/:id/capabilities/:serviceId（应用 MCP 能力绑定）',
       'GET /api/apps/:id/org-sync（组织架构同步快照：组织树+在职成员，?ifNoneMatch= 零载荷变更轮询；应用自助复用平台组织模块，经 console 暴露）',
       '# 平台侧自动折算：entry-ticket 兑换 / OIDC 发码 → DAU；浏览器 beacon → PV/UV（端点经 console 聚合暴露）',
@@ -415,9 +415,9 @@ const PLUGINS = [
     ui: { routes: [], menus: [] },
   },
   {
-    // 2026-10-29 面板架构统一：面板轨实现收编自 01men/DeptAI-UI-DSH（IAW 六空间工作台），
-    // inject 瘦身为数据面基座 5 键（iam/authn/audit/usage/modelgw/skillhub 转运行期软依赖降级），
-    // depends 随之收敛——与上游面板轨 plugin.yaml 保持同一事实。
+    // Unification de l'architecture de panneau 2026-10-29 : l'implémentation de la voie panneau est reprise de 01men/DeptAI-UI-DSH (espace de travail IAW à six espaces),
+    // inject réduit à 5 clés de socle du plan de données (iam/authn/audit/usage/modelgw/skillhub passent en dépendances molles dégradées à l'exécution),
+    // depends converge en conséquence — même vérité que le plugin.yaml de la voie panneau amont.
     dir: 'panel-core', id: 'dsh-plugin-panel-core', label: '行业 AI 工作台面板（一图四清单 · 五空间 + 制造工具箱）',
     depends: ['dsh-plugin-platform-core'],
     permissions: ['panel.read', 'panel.write', 'panel.task.write', 'panel.config.write', 'scenegraph.read', 'scenegraph.activate'],

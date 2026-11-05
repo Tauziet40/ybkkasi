@@ -1,13 +1,13 @@
 /**
- * 接入文档一致性核查：docs/*.md 引用的 API 端点 ↔ 代码注册路由（manifests + 源码）。
- * 用法：node scripts/check-docs-consistency.mjs
+ * Contrôle de cohérence de la documentation d'intégration : points d'API référencés par docs/*.md ↔ routes enregistrées dans le code (manifestes + sources).
+ * Usage : node scripts/check-docs-consistency.mjs
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// QA G-01：URL.pathname 是百分号编码形态——中文目录（如「元冰可产品」）下直接当文件路径必现
-// ENOENT；fileURLToPath 负责解码并处理盘符，Windows/非 ASCII 路径均正确。
+// QA G-01 : URL.pathname est en encodage pourcent — un répertoire chinois (comme `元冰可产品`) traité directement comme chemin de fichier provoque
+// systématiquement ENOENT ; fileURLToPath décode et gère les lettres de lecteur, chemins Windows/non-ASCII corrects dans les deux cas.
 const root = fileURLToPath(new URL('..', import.meta.url))
 const docFiles = [
   'docs/agent-onboarding.md', 'docs/app-onboarding.md', 'docs/app-sso-integration.md',
@@ -16,13 +16,13 @@ const docFiles = [
   'docs/entry-switching.md', 'docs/panel-implementation.md',
 ]
 
-// 1. 汇总代码侧路由：manifests api.yaml + 源码 register/guarded 调用
+// 1. Agrégation des routes côté code : manifests api.yaml + appels register/guarded des sources
 const codeRoutes = new Set()
 function addRoute(method, path) {
   const norm = String(path).replace(/\/+$/, '')
   if (!norm.startsWith('/')) return
   codeRoutes.add(`${method.toUpperCase()} ${norm}`)
-  codeRoutes.add(norm) // 供无方法引用匹配
+  codeRoutes.add(norm) // pour la correspondance des références sans méthode
 }
 function walk(dir, cb) {
   for (const name of readdirSync(dir)) {
@@ -36,7 +36,7 @@ function walk(dir, cb) {
 walk(join(root, 'packages'), (file) => {
   if (file.endsWith('manifest' + String.fromCharCode(92) + 'api.yaml') || file.endsWith('/manifest/api.yaml') || file.includes('manifest') && file.endsWith('api.yaml')) {
     const text = readFileSync(file, 'utf8')
-    for (const m of text.matchAll(/(get|post|put|patch|delete)\s*:\s*\n?\s*([^\s:][^\n]*)?/gi)) { /* yaml 结构多样，改用源码为准 */ }
+    for (const m of text.matchAll(/(get|post|put|patch|delete)\s*:\s*\n?\s*([^\s:][^\n]*)?/gi)) { /* structures yaml trop variées, la source fait foi */ }
     for (const m of text.matchAll(/'?(\/api\/[A-Za-z0-9/:_{}.\-]+)'?/g)) addRoute('ANY', m[1])
   }
   if (file.endsWith('.ts')) {
@@ -49,10 +49,10 @@ walk(join(root, 'packages'), (file) => {
   }
 })
 
-// 2. 提取文档端点引用
-// 豁免名单（对齐 contract-lint.exemptions.json 惯例）：并非平台路由的引用——
-// /oauth/callback 与 /api/connections 指 open-connector sidecar 自身服务（端口 3000，非平台），
-// /api 为前缀概念提及。G-01 修复后本脚本首次可在本机完整跑通，暴露的即这三处历史误报。
+// 2. Extraction des références de points d'API de la documentation
+// Liste d'exemptions (convention contract-lint.exemptions.json) : références qui ne sont pas des routes plateforme —
+// /oauth/callback et /api/connections désignent le propre service du sidecar open-connector (port 3000, hors plateforme),
+// /api est une mention de préfixe conceptuel. Après le correctif G-01, ce script tourne intégralement en local pour la première fois et expose ces trois faux positifs historiques.
 const DOC_REF_EXEMPTS = new Set(['/oauth/callback', '/api/connections', '/api'])
 let missing = [], total = 0
 for (const doc of docFiles) {
@@ -79,7 +79,7 @@ for (const doc of docFiles) {
         if (re.test(pathNorm) || re.test(routeNorm)) { hit = true; break }
       }
     }
-    // 前缀引用（如 /api/portal/、/api/connector/）
+    // Référence de préfixe (comme /api/portal/, /api/connector/)
     if (!hit && pathNorm.endsWith('/')) {
       for (const route of codeRoutes) { if (route.includes(pathNorm.replace(/\/$/, ''))) { hit = true; break } }
     }

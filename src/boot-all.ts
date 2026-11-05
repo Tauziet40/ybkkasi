@@ -1,6 +1,6 @@
 /**
- * 插件树组装：按依赖顺序挂载全部平台插件。
- * 这棵树等价于 cordis.yml 在完整 dsh 中加载的内容——一份插件代码，两种宿主。
+ * Assemblage de l'arbre de plugins : monte tous les plugins de la plateforme dans l'ordre des dépendances.
+ * Cet arbre équivaut au contenu chargé par cordis.yml dans un dsh complet — un seul code de plugin, deux hôtes.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import * as platformCore from '@dsh-ops/platform-core'
@@ -8,8 +8,8 @@ import * as resourceCore from '@dsh-ops/plugin-resource-core'
 import * as iam from '@dsh-ops/plugin-iam'
 import * as authn from '@dsh-ops/plugin-authn'
 import * as usage from '@dsh-ops/plugin-usage'
-// plugin-billing 已下线封存（M0-2，2026-09-09）：钱包/复式分账功能面退出运行时，
-// 存量流水经 scripts/billing-archive-export.mjs 导出 CSV 只读封存 90 天（见 docs/billing-archive-register.md）。
+// plugin-billing est retiré et archivé (M0-2, 2026-09-09) : le portefeuille/la comptabilité en partie double quittent le runtime,
+// les flux existants sont exportés en CSV en lecture seule via scripts/billing-archive-export.mjs, archivage 90 jours (voir docs/billing-archive-register.md).
 import * as audit from '@dsh-ops/plugin-audit'
 import * as market from '@dsh-ops/plugin-market'
 import * as connector from '@dsh-ops/plugin-connector'
@@ -28,11 +28,11 @@ import * as flowCore from '@dsh-ops/plugin-flow-core'
 import * as execHub from '@dsh-ops/plugin-exec-hub'
 import * as workforce from '@dsh-ops/plugin-workforce'
 import * as dingtalkBridge from '@dsh-ops/plugin-dingtalk-bridge'
-// 企业数字员工内网协作（A2A/UHP，协作方案 §4/§11）：UHP 执行驱动层（Server 协议面 + configured
-// harness 注册表）先于 A2A 协作平面装配；两者间联动只走 ctx.platformBus（a2a.task.* 事件族）
+// Collaboration intranet des employés numériques d'entreprise (A2A/UHP, plan de collaboration §4/§11) : la couche de pilotage d'exécution UHP (facette protocole Server + registre
+// de harness configurés) est assemblée avant le plan de collaboration A2A ; leurs interactions passent uniquement par ctx.platformBus (famille d'événements a2a.task.*)
 import * as uhp from '@dsh-ops/plugin-uhp'
 import * as a2a from '@dsh-ops/plugin-a2a'
-// W2 启动健壮性：双实例断言 + 装配后插件树体检
+// Robustesse du démarrage W2 : assertion de double instance + diagnostic de l'arbre de plugins après assemblage
 import { assertSingleRoot, formatTreeHealth, probeTree } from '@dsh-ops/platform-core'
 
 export interface BootOptions {
@@ -41,7 +41,7 @@ export interface BootOptions {
 }
 
 export async function bootAll(ctx: Context, options: BootOptions): Promise<void> {
-  // 装配前断言进程内只有一个 root（双实例会让 fiber 静默 PENDING，必须 fail-fast）
+  // Avant assemblage : assertion qu'il n'y a qu'un seul root dans le processus (une double instance laisse les fiber en PENDING silencieux, fail-fast obligatoire)
   assertSingleRoot(ctx)
   await ctx.plugin(platformCore, { dataDir: options.dataDir, http: { port: options.port } })
   const restored = await ctx.opsStorage.restoreAll()
@@ -54,46 +54,46 @@ export async function bootAll(ctx: Context, options: BootOptions): Promise<void>
   await ctx.plugin(usage)
   await ctx.plugin(audit)
   await ctx.plugin(market)
-  // 连接器纳管（open-connector 数据面网关适配）：依赖 iam/usage/audit，先于 mcp/modelgw
+  // Gouvernance des connecteurs (adaptateur passerelle du plan de données open-connector) : dépend d'iam/usage/audit, avant mcp/modelgw
   await ctx.plugin(connector)
   await ctx.plugin(mcp)
-  // NAS（FS 文件存储）资产：先于 skillhub 加载（skillhub 上架时经 nasRegistry 上传 skill.zip）
+  // Actifs NAS (stockage de fichiers FS) : chargés avant skillhub (lors de la mise en ligne, skillhub téléverse skill.zip via nasRegistry)
   await ctx.plugin(nas)
   await ctx.plugin(skillhub)
   await ctx.plugin(agent)
   await ctx.plugin(app)
   await ctx.plugin(modelgw)
-  // 宿主角色：提供远程接入端点（接入码/enroll/客户端管理）与接入管理工具
+  // Rôle de l'hôte : fournir les points d'accès distants (codes d'accès/enroll/gestion des clients) et les outils de gestion des accès
   await ctx.plugin(connect, { role: 'host' })
-  // 平台自更新：上游版本检查（自动+手动）与一键升级（source 形态）
+  // Auto-mise à jour de la plateforme : vérification de version amont (auto+manuelle) et mise à niveau en un clic (forme source)
   await ctx.plugin(update)
-  // 门户数据通道（外部系统拉取端点，非核心；PORTAL_SYNC=off 可停用）：
-  // 端点公开只读，必须先于 console 装配——在其鉴权中间件之前截获 /api/portal/* 请求
+  // Canal de données du portail (points de tirage pour systèmes externes, hors cœur ; PORTAL_SYNC=off pour désactiver) :
+  // points publics en lecture seule, à assembler avant console — intercepte les requêtes /api/portal/* avant son middleware d'authentification
   await ctx.plugin(portal)
   await ctx.plugin(consolePlugin)
-  // 部门面板（review-dsh-agent-panel-v2）：REST 依赖 console 鉴权中间件先行注册（/api/* Bearer 面）；
-  // 自注册路由经 httpServer.routeMatrix 共享登记处汇入 RBAC 断言矩阵
+  // Panneau de département (review-dsh-agent-panel-v2) : REST dépend de l'enregistrement préalable du middleware d'authentification console (facette Bearer /api/*) ;
+  // les routes auto-enregistrées convergent via le registre partagé httpServer.routeMatrix vers la matrice d'assertions RBAC
   await ctx.plugin(panelCore)
-  // 事务流引擎（IAW 交接 3-1..3-4，宿主新域）：/api/flow/* 自注册 guarded 路由，同样依赖 console 中间件先行
+  // Moteur de flux de transactions (IAW passation 3-1..3-4, nouveau domaine de l'hôte) : routes guarded auto-enregistrées /api/flow/*, dépendent aussi du middleware console en amont
   await ctx.plugin(flowCore)
-  // 执行中枢（ybkk-MATRIX 目标四「干活中枢」）：目标血缘/任务执行锁/心跳唤醒/例行调度，
-  // /api/exec/* 自注册 guarded 路由——依赖 console 中间件、resourceCore/agentRegistry/modelgw/flow 先行
+  // Centre d'exécution (ybkk-MATRIX objectif quatre « hub d'exécution ») : lignée d'objectifs/verrous d'exécution de tâches/réveils par heartbeat/ordonnancement de routines,
+  // routes guarded auto-enregistrées /api/exec/* — dépendent du middleware console et de resourceCore/agentRegistry/modelgw/flow en amont
   await ctx.plugin(execHub)
-  // 数字员工域（员工/任用/permit/受控调用/交付验收）：/api/workforce/* guarded 路由依赖 console 中间件，
-  // 员工工作路径依赖 exec-hub 先行——须在其后、钉钉桥接之前装配；装配完成后经 platform-core 的
-  // workforcePolicy 窄端口登记策略实现（artifact staging 与 SQLite 同底座，数据目录复用 options.dataDir）
+  // Domaine des employés numériques (employés/affectations/permit/appels contrôlés/réception des livrables) : routes guarded /api/workforce/* dépendant du middleware console,
+  // le parcours de travail des employés dépend d'exec-hub en amont — à monter après lui et avant le pont DingTalk ; une fois assemblé, enregistre l'implémentation de stratégie via le
+  // point d'entrée étroit workforcePolicy de platform-core (artifact staging et SQLite sur la même base, répertoire de données réutilisant options.dataDir)
   await ctx.plugin(workforce, { dataDir: options.dataDir })
-  // 钉钉桥接（群桥/出向投递/审批推送/告警通道）：订阅 panel.message.created 与 audit.alert.fired
+  // Pont DingTalk (pont de groupe/distribution sortante/poussée des approbations/canal d'alertes) : s'abonne à panel.message.created et audit.alert.fired
   await ctx.plugin(dingtalkBridge)
-  // UHP 执行驱动（协作方案 §7）：/v1/uhp 协议面 + /api/uhp/* guarded 路由——依赖 console 中间件与
-  // modelgw 先行；订阅 a2a.task.dispatch/cancel，发布 a2a.task.progress
+  // Pilotage d'exécution UHP (plan de collaboration §7) : facette protocole /v1/uhp + routes guarded /api/uhp/* — dépendent du middleware console et
+  // de modelgw en amont ; s'abonne à a2a.task.dispatch/cancel, publie a2a.task.progress
   await ctx.plugin(uhp)
-  // A2A 协作平面（协作方案 §5/§6）：well-known 卡片/目录/JSON-RPC 方法面/治理五查/协商引擎/
-  // 验收/巡检——依赖 skillhub/mcp/agent 先行（卡片授权集投影），派发与执行只走事件总线
+  // Plan de collaboration A2A (plan de collaboration §5/§6) : carte well-known/annuaire/facette méthodes JSON-RPC/cinq contrôles de gouvernance/moteur de négociation/
+  // recette/inspections — dépend de skillhub/mcp/agent en amont (projection des ensembles d'autorisation de cartes), distribution et exécution passent uniquement par le bus d'événements
   await ctx.plugin(a2a)
-  // 装配后体检：必须在全部 await ctx.plugin 之后（此刻 fiber 都应 ACTIVE）；
-  // 必需服务不可达或存在拦启动的卡死 fiber 时直接拒绝启动，禁止降级为告警放行
-  // （FAILED fiber 仅在声明 provide 已被其他 ACTIVE fiber 接管时豁免，见 boot-probe.ts）
+  // Diagnostic post-assemblage : doit s'exécuter après tous les await ctx.plugin (à cet instant tous les fiber doivent être ACTIVE) ;
+  // si un service requis est inaccessible ou qu'un fiber bloqué empêche le démarrage, on refuse directement le démarrage — jamais de simple alerte en mode dégradé
+  // (les fiber FAILED sont exemptés uniquement si le provide déclaré a déjà été repris par un autre fiber ACTIVE, voir boot-probe.ts)
   const health = probeTree(ctx, ['opsStorage', 'platformBus', 'httpServer', 'iam', 'authn', 'usage', 'audit'])
   if (!health.ok) {
     throw new Error(formatTreeHealth(health))

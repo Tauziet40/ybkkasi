@@ -1,11 +1,11 @@
 /**
- * ToolRuntime-lite：dsh ToolRuntime 的独立宿主实现（服务键与 dsh 相同：`tools`）。
+ * ToolRuntime-lite : implémentation hôte autonome du ToolRuntime de dsh (même clé de service que dsh : `tools`).
  *
- * - 注册契约对齐 dsh：ToolDefinition = { name, description, parameters(JSON Schema),
- *   output: { schema, render }, execute(args, exec) }，注册时校验 output 声明。
- * - execute() 冻结参数快照、运行 guard 链、校验规范值、经 render 产出内容块。
- * - 在完整 dsh 运行时中，本服务不加载（provideToolRuntime=false），
- *   同一批插件定义直接注册到真正的 ToolRuntime，模型即可调用。
+ * - Contrat d'enregistrement aligné sur dsh : ToolDefinition = { name, description, parameters(JSON Schema),
+ *   output: { schema, render }, execute(args, exec) } ; la déclaration output est validée à l'enregistrement.
+ * - execute() fige l'instantané des paramètres, exécute la chaîne de guards, valide la valeur canonique, produit les blocs de contenu via render.
+ * - Dans un runtime dsh complet, ce service n'est pas chargé (provideToolRuntime=false),
+ *   les définitions des mêmes plugins s'enregistrent directement dans le vrai ToolRuntime, où le modèle peut les appeler.
  */
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
@@ -16,14 +16,14 @@ export interface ContentBlock {
   text: string
 }
 
-/** 调用者身份（由入口从令牌解析后注入，工具内禁止从 args 读取身份）。 */
+/** Identité de l'appelant (résolue par le point d'entrée depuis le jeton puis injectée ; interdiction pour un outil de lire l'identité depuis args). */
 export interface ToolPrincipal {
   kind: 'human' | 'machine'
   principalId: string
   userId?: string
-  /** D01（additive）：machine 专属——凭证关联资源类型（refType=agent 时可反查数字员工绑定）。 */
+  /** D01 (additif) : spécifique machine — type de ressource liée à l'identifiant (refType=agent : permet de reconnaître l'employé numérique lié). */
   refType?: string
-  /** D01（additive）：machine 专属——凭证关联资源 ID。 */
+  /** D01 (additif) : spécifique machine — id de la ressource liée à l'identifiant. */
   refId?: string
   name: string
   permissions: string[]
@@ -36,14 +36,14 @@ export interface ToolRunContext {
   signal: AbortSignal
   agent?: unknown
   token?: symbol
-  /** 调用者身份；身份类工具在缺失时应 fail-closed 而非降级到共享身份。 */
+  /** Identité de l'appelant ; les outils liés à l'identité doivent fail-closed en cas d'absence, jamais retomber sur une identité partagée. */
   principal?: ToolPrincipal
 }
 
 export interface ToolDefinitionLite {
   name: string
   description: string
-  /** JSON Schema（object 根），与 dsh 原生注册的 parameters 字段一致。 */
+  /** JSON Schema (racine object), identique au champ parameters de l'enregistrement natif dsh. */
   parameters: Record<string, unknown>
   output: {
     schema: Record<string, unknown>
@@ -51,9 +51,9 @@ export interface ToolDefinitionLite {
   }
   execute: (args: any, exec: ToolRunContext) => Promise<unknown>
   timeoutMs?: number
-  /** 来源插件名（本运行时登记用）。 */
+  /** Nom du plugin d'origine (pour l'enregistrement de ce runtime). */
   plugin?: string
-  /** 调用所需的最小权限点（RBAC）。缺省视为无需额外权限（仅登录）。 */
+  /** Point de permission minimal requis pour l'appel (RBAC). Par défaut : aucune permission supplémentaire (simple login). */
   permission?: string
 }
 
@@ -70,14 +70,14 @@ export interface ToolExecutionResultLite {
 export type ToolGuardLite = (input: { name: string; arguments: unknown }) => string | undefined
 
 /**
- * 上下文型 guard（D02/D03 additive）：在旧 ToolGuardLite 之后运行，额外获得
- * 调用者身份（principal）与 callId——入口/网关继续负责权限与策略，guard 链由此
- * 获得身份可见性（缺身份 fail-closed 的工具可在此统一拦截）。旧 ToolGuardLite 不动。
- * 返回字符串＝拒绝原因；返回 undefined＝放行。
+ * Guard contextuel (D02/D03 additifs) : s'exécute après l'ancien ToolGuardLite, avec en plus
+ * l'identité de l'appelant (principal) et le callId — points d'entrée/passerelles continuent de gérer permissions et stratégie, la chaîne de guards
+ * gagne ici la visibilité d'identité (les outils fail-closed sans identité peuvent intercepter ici de façon unifiée). L'ancien ToolGuardLite reste inchangé.
+ * Renvoie une chaîne = motif de refus ; renvoie undefined = passage autorisé.
  */
 export type ContextualToolGuard = (input: { name: string; arguments: unknown; principal?: ToolPrincipal; callId: string }) => string | undefined
 
-/** 注册级拦截器（OPT-P1-03 正式扩展点）：所有 register 调用先过拦截链，返回（可替换的）定义。 */
+/** Intercepteur d'enregistrement (point d'extension officiel OPT-P1-03) : tout appel register passe d'abord par la chaîne d'interception, qui renvoie la (potentiellement remplacée) définition. */
 export type ToolInterceptor = (definition: ToolDefinitionLite) => ToolDefinitionLite
 
 export class ToolRuntimeLite extends Service {
@@ -99,7 +99,7 @@ export class ToolRuntimeLite extends Service {
     if (output === undefined || typeof output !== 'object' || typeof output.render !== 'function') {
       throw new TypeError(`工具 "${name}" 必须声明 output { schema, render }`)
     }
-    // OPT-P2-04：schema 强校验——契约强度对齐原报告叙述（此前只查 render 不查 schema）
+    // OPT-P2-04 : validation forte du schéma — force contractuelle alignée sur le récit du rapport initial (auparavant seul render était contrôlé, pas schema)
     if (output.schema === undefined || output.schema === null || typeof output.schema !== 'object' || Array.isArray(output.schema)) {
       throw new TypeError(`工具 "${name}" 必须声明 output.schema（非空对象根，JSON Schema）`)
     }
@@ -108,7 +108,7 @@ export class ToolRuntimeLite extends Service {
     try {
       this.ctx.platformBus?.emit('tools/change', { kind: 'register', name })
     } catch {
-      // platformBus 未注入当前 fiber 时跳过通知（cordis 严格服务访问）
+      // Si platformBus n'est pas injecté dans le fiber courant, on saute la notification (accès strict aux services cordis)
     }
     return () => {
       this.definitions.delete(name)
@@ -124,9 +124,9 @@ export class ToolRuntimeLite extends Service {
   }
 
   /**
-   * 上下文型 guard 注册器（D02/D03 additive）：注册的 guard 在旧 guard 链全部通过后
-   * 运行，按注册顺序执行并注入 principal/callId。任一返回拒绝原因即短路（与旧 guard
-   * 同款失败形态：isError + 中文拒绝文案）。返回注销函数。
+   * Enregistreur de guards contextuels (D02/D03 additifs) : les guards enregistrés s'exécutent après que toute l'ancienne chaîne a passé,
+   * dans l'ordre d'enregistrement, avec injection de principal/callId. Tout motif de refus court-circuite (même forme d'échec que
+   * l'ancien guard : isError + libellé de refus en chinois). Renvoie la fonction de désinscription.
    */
   guardContext(guard: ContextualToolGuard): () => void {
     if (typeof guard !== 'function') throw new TypeError('[tools] guardContext 的 guard 必须是函数')
@@ -138,8 +138,8 @@ export class ToolRuntimeLite extends Service {
   }
 
   /**
-   * 注册级拦截器（OPT-P1-03 正式扩展点）：此后所有 register 先经拦截链再入表。
-   * 供 connect 远程转发等横切能力挂在契约上，取代原型猴补丁。返回注销函数。
+   * Intercepteur d'enregistrement (point d'extension officiel OPT-P1-03) : à partir de là, tout register passe par la chaîne d'interception avant la table.
+   * Permet de greffer des capacités transversales comme le transfert distant connect sur le contrat, en remplacement du monkey-patch de prototype. Renvoie la fonction de désinscription.
    */
   intercept(fn: ToolInterceptor): () => void {
     if (typeof fn !== 'function') throw new TypeError('[tools] intercept 的拦截器必须是函数')
@@ -151,9 +151,9 @@ export class ToolRuntimeLite extends Service {
   }
 
   /**
-   * 已注册工具的执行体包扎（OPT-P1-03 正式扩展点）：用 wrap 替换当前 execute，
-   * wrap 收到原执行体、返回新执行体。返回还原函数（按包扎时的现场逆向恢复）。
-   * 工具不存在抛 TypeError（不静默）。
+   * Habillage des exécuteurs des outils enregistrés (point d'extension officiel OPT-P1-03) : remplace l'execute courant par wrap,
+   * wrap reçoit l'exécuteur original et renvoie le nouvel exécuteur. Renvoie la fonction de restauration (inverse de l'état au moment de l'habillage).
+   * Outil inexistant : lève TypeError (pas de silence).
    */
   decorate(name: string, wrap: (execute: ToolDefinitionLite['execute']) => ToolDefinitionLite['execute']): () => void {
     const definition = this.definitions.get(name)
@@ -196,7 +196,7 @@ export class ToolRuntimeLite extends Service {
         return { ...base, isError: true, content: [{ type: 'text', text: `调用被拒绝：${reason}` }], error: { message: reason }, durationMs: Date.now() - started }
       }
     }
-    // 上下文型 guard（D02/D03）：旧 guard 链之后运行，注入身份可见性（principal/callId）
+    // Guards contextuels (D02/D03) : s'exécutent après l'ancienne chaîne de guards, injectent la visibilité d'identité (principal/callId)
     for (const guard of this.contextualGuards) {
       const reason = guard({ name, arguments: args, ...(input.principal ? { principal: input.principal } : {}), callId })
       if (reason) {
@@ -226,8 +226,8 @@ function safeRender(definition: ToolDefinitionLite, args: unknown, value: unknow
 }
 
 // ---------------------------------------------------------------------------
-// 平台工具定义辅助：扁平参数说明 → JSON Schema，输出默认 pretty JSON 渲染。
-// 该形态与 dsh 原生 ToolRuntime 的注册契约一致，可原样注册到两种宿主。
+// Aides aux définitions d'outils plateforme : description de paramètres à plat → JSON Schema, sortie rendue en JSON pretty par défaut.
+// Cette forme correspond au contrat d'enregistrement du ToolRuntime natif dsh, enregistrable tel quel sur les deux hôtes.
 // ---------------------------------------------------------------------------
 
 export interface ToolParamSpec {
@@ -241,15 +241,15 @@ export interface ToolParamSpec {
 export interface PlatformToolSpec {
   name: string
   description: string
-  /** 插件名（登记来源用）。 */
+  /** Nom du plugin (pour l'origine d'enregistrement). */
   plugin?: string
   parameters: Record<string, ToolParamSpec>
-  /** 输出 JSON Schema 根节点。 */
+  /** Nœud racine du JSON Schema de sortie. */
   output: Record<string, unknown>
-  /** 自定义模型可见渲染（默认 JSON pretty print）。 */
+  /** Rendu visible du modèle personnalisé (JSON pretty print par défaut). */
   render?: (args: unknown, value: unknown) => ContentBlock[]
   timeoutMs?: number
-  /** 调用所需的最小权限点（RBAC）。缺省视为无需额外权限（仅登录）。 */
+  /** Point de permission minimal requis pour l'appel (RBAC). Par défaut : aucune permission supplémentaire (simple login). */
   permission?: string
   execute: (args: any, exec: ToolRunContext) => Promise<unknown>
 }

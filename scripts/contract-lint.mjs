@@ -1,25 +1,25 @@
 /**
- * 契约↔实现双向一致性比对引擎（OPT-P0-01，2026-09-12）。
+ * Moteur de comparaison bidirectionnelle contrat↔implémentation (OPT-P0-01, 2026-09-12).
  *
- * 目标：把 manifest 五面清单从"文档"升级为"可检查工件"——代码注册面（guarded 路由 /
- * http.register 路由 / 工具名 / 权限点引用）与清单声明面（api.yaml endpoints+tools、
- * permissions.yaml points、plugin.yaml permissions）双向比对，任一方向漂移即红。
+ * Objectif : faire passer le manifeste à cinq facettes de « document » à « artefact vérifiable » — la surface d'enregistrement du code (routes guarded /
+ * routes http.register / noms d'outils / références de points de permission) comparée bidirectionnellement à la surface déclarative du manifeste (api.yaml endpoints+tools,
+ * permissions.yaml points, plugin.yaml permissions) ; toute dérive dans un sens = rouge.
  *
- * 规范语法（endpoints 摘要行的可解析子集）：
- *   fragment := METHODS ' ' PATH [ '?query' 剥离 ] [ （注解）| '# 注释' 剥离 ]
- *   METHODS  := METHOD ( '/' METHOD )*            —— GET/PUT 展开为多条
- *   PATH     := 以 / 起始的绝对路径；段内 '|' 展开候选；'[/seg]' 可选段展开；
- *               ':param' 泛化为 ':*' 后比对
- *   相对片段（首段以 ':' 起始，如 'DELETE /:id'）继承同一行上一个绝对片段的全路径。
- *   以 '#' 起始的条目为纯注解，跳过不报。
+ * Syntaxe normalisée (sous-ensemble analysable des lignes de résumé endpoints) :
+ *   fragment := METHODS ' ' PATH [ '?query' retirée ] [ (annotation) | '# commentaire' retirés ]
+ *   METHODS  := METHOD ( '/' METHOD )*            — GET/PUT déployés en plusieurs entrées
+ *   PATH     := chemin absolu commençant par / ; '|' dans un segment déployé en candidates ; '[/seg]' segment optionnel déployé ;
+ *               ':param' généralisé en ':*' avant comparaison
+ *   fragment relatif (premier segment commençant par ':', comme 'DELETE /:id') hérite du chemin complet du fragment absolu précédent sur la même ligne.
+ *   les entrées commençant par '#' sont de pures annotations, sautées sans rapport.
  *
- * 豁免：scripts/contract-lint.exemptions.json（{exemptions:[{kind,key,reason}]}），
- * 仅用于"结构性无法字面量提取"的少数面（如 portal 单 handler 内部前缀分发），
- * 每条豁免必须写明销账条件；lint 输出豁免条目保持透明。
+ * Exemptions : scripts/contract-lint.exemptions.json ({exemptions:[{kind,key,reason}]}),
+ * réservées aux rares facettes « structurellement non extractibles en littéraux » (p. ex. le dispatch de préfixes interne du handler unique de portal),
+ * chaque exemption doit indiquer sa condition de radiation ; les exemptions restent transparentes dans la sortie du lint.
  *
- * 用法：
- *   - CLI：由 scripts/lint-manifests.mjs 调 runContractLint(root)；
- *   - 测试：scripts/contract-lint.test.mjs 直接 import 本模块，对合成夹具做构造性红/绿断言。
+ * Usage :
+ *   - CLI : runContractLint(root) appelé par scripts/lint-manifests.mjs ;
+ *   - tests : scripts/contract-lint.test.mjs importe directement ce module, assertions constructives rouge/vert sur des fixtures synthétiques.
  */
 import { readdir, readFile } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
@@ -27,7 +27,7 @@ import { parseYaml } from '../packages/platform-core/src/yaml.ts'
 
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'])
 
-/** 段内 '|' 候选展开：/a/:id/disable|enable → [/a/:id/disable, /a/:id/enable] */
+/** Déploiement des candidates '|' dans un segment : /a/:id/disable|enable → [/a/:id/disable, /a/:id/enable] */
 export function expandAlternatives(path) {
   const segs = path.split('/').filter((seg) => seg !== '')
   let acc = ['']
@@ -38,7 +38,7 @@ export function expandAlternatives(path) {
   return acc
 }
 
-/** '[/seg]' 可选段展开：/a/:id[/guide] → [/a/:id, /a/:id/guide]（递归处理多个可选段） */
+/** Déploiement du segment optionnel '[/seg]' : /a/:id[/guide] → [/a/:id, /a/:id/guide] (récursif sur plusieurs segments optionnels) */
 export function expandOptionalSegments(path) {
   const match = path.match(/^(.*?)\[(\/[^\]]*)\](.*)$/)
   if (!match) return [path]
@@ -46,14 +46,14 @@ export function expandOptionalSegments(path) {
   return [...expandOptionalSegments(head + tail), ...expandOptionalSegments(head + optional + tail)]
 }
 
-/** ':param' 泛化为 ':*'，消除两侧参数命名差异 */
+/** ':param' généralisé en ':*', élimine les différences de nommage des paramètres des deux côtés */
 export function generalizePath(path) {
   return path.replace(/:[^/]+/g, ':*')
 }
 
 /**
- * 单条 endpoints 摘要行 → 规范 (METHOD, 泛化路径) 列表。
- * 返回 { routes: [{ method, path }], unparseable: [string], notes: [string] }。
+ * Ligne de résumé endpoints individuelle → liste normalisée de (METHOD, chemin généralisé).
+ * Renvoie { routes: [{ method, path }], unparseable: [string], notes: [string] }.
  */
 export function parseEndpointLine(line, previousAbsolutePath = undefined) {
   const routes = []
@@ -69,10 +69,10 @@ export function parseEndpointLine(line, previousAbsolutePath = undefined) {
       notes.push(fragment)
       continue
     }
-    // 剥离行内 '# 注释' 尾巴、全角注解（（...））与半角查询串
+    // Retire la queue '# commentaire' en ligne, les annotations pleine largeur ((…)) et la chaîne de requête demi-largeur
     fragment = fragment.replace(/\s+#.*$/, '')
     fragment = fragment.replace(/（[^）]*）/g, '').replace(/\([^)]*\)/g, '').replace(/\?.*$/, '').trim()
-    // 剥离行尾可能残留的逗号/分号
+    // Retire la virgule/point-virgule éventuellement résiduelle en fin de ligne
     fragment = fragment.replace(/[,;。]+$/, '').trim()
     const methodMatch = fragment.match(/^([A-Za-z/]+)\s+(\/.*)$/)
     if (!methodMatch) {
@@ -85,7 +85,7 @@ export function parseEndpointLine(line, previousAbsolutePath = undefined) {
       continue
     }
     let path = methodMatch[2].trim()
-    // 相对片段（首段 ':param'）继承同一行上一个绝对路径
+    // Fragment relatif (premier segment ':param') : hérite du chemin absolu précédent sur la même ligne
     if (path.startsWith('/:')) {
       if (!prevAbsolute) {
         unparseable.push(rawFragment.trim())
@@ -119,9 +119,9 @@ async function walkTsFiles(dir) {
 }
 
 /**
- * 从 api.yaml 原始文本提取 endpoints 列表项（字符串字面量行）。
- * 不走 parseYaml：子集解析器会把摘要行里的 ':param' 误切为键值对（OPT-P0-01 实测），
- * 而摘要行是给人看的事实源，必须按原文逐条取出。
+ * Extrait de l'api.yaml brut les entrées de la liste endpoints (lignes de littéraux de chaîne).
+ * Sans passer par parseYaml : l'analyseur du sous-ensemble coupe à tort le ':param' des lignes de résumé en paires clé-valeur (constaté OPT-P0-01),
+ * or les lignes de résumé sont la source de faits destinée aux humains, à extraire une à une selon le texte original.
  */
 export function extractEndpointLines(apiYamlText) {
   const items = []
@@ -142,7 +142,7 @@ export function extractEndpointLines(apiYamlText) {
   return items
 }
 
-/** 从单个 ts 源文件提取：guarded 路由 / http.register 路由 / 工具名 / 权限点引用（均要求字符串字面量） */
+/** Extrait d'un fichier source ts : routes guarded / routes http.register / noms d'outils / références de points de permission (littéraux de chaîne obligatoires) */
 export function extractCodeSurface(text) {
   const lines = text.split(/\r?\n/)
   const routes = []
@@ -155,27 +155,27 @@ export function extractCodeSurface(text) {
   for (let i = 0; i < lines.length; i++) {
     for (const match of lines[i].matchAll(routeRe)) {
       routes.push({ method: match[1].toUpperCase(), path: generalizePath(match[2]), permission: match[3], line: i + 1 })
-      // guarded 第三参即权限点引用：与 permission: 字面量同口径计入已用集合
+      // Le troisième argument de guarded est la référence du point de permission : compté dans l'ensemble des utilisés, même périmètre que les littéraux permission:
       for (const part of match[3].split(',')) {
         const perm = part.trim()
         if (perm !== '') perms.push(perm)
       }
     }
-    // http.register 的 OPTIONS（CORS 预检）/HEAD 不属契约面，跳过
+    // OPTIONS (préflight CORS) et HEAD de http.register sont hors facette de contrat, sautés
     for (const match of lines[i].matchAll(httpRe)) {
       const method = match[1].toUpperCase()
       if (method === 'OPTIONS' || method === 'HEAD') continue
       routes.push({ method, path: generalizePath(match[2]), permission: '', line: i + 1 })
     }
     for (const match of lines[i].matchAll(permRe)) {
-      // 权限字面量支持逗号多值（'a.b,c.d' = 任一即可）——逐个拆开参与声明比对
+      // Les littéraux de permission acceptent plusieurs valeurs séparées par virgules ('a.b,c.d' = l'une suffit) — décomposés un à un pour la comparaison déclarative
       for (const part of match[1].split(',')) {
         const perm = part.trim()
         if (perm !== '') perms.push(perm)
       }
     }
   }
-  // 工具名允许跨行（defineTool({ 换行 name: 'x'）——对整文匹配，行号取 name 所在行
+  // Le nom d'outil peut être sur plusieurs lignes (defineTool({ retour ligne name: 'x') — correspondance sur le fichier entier, numéro de ligne pris à la ligne du name
   const nameLineOf = (name) => {
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].includes(`name: '${name}'`)) return i + 1
@@ -188,7 +188,7 @@ export function extractCodeSurface(text) {
   return { routes, tools, perms }
 }
 
-/** 从 PUBLIC_PATHS 集合字面量提取公开路径（method=ANY，路径泛化后参与 ANY 匹配） */
+/** Extrait les chemins publics du littéral d'ensemble PUBLIC_PATHS (method=ANY, chemins généralisés participant à la correspondance ANY) */
 export function extractPublicPaths(text) {
   const start = text.indexOf('PUBLIC_PATHS = new Set([')
   if (start < 0) return []
@@ -216,8 +216,8 @@ async function loadExemptions(root) {
 }
 
 /**
- * 全量比对入口。root 为仓库根（含 packages/）。
- * 返回 { ok, diffs: [{severity: 'red'|'warn'|'exempt', kind, message}], stats }。
+ * Entrée de la comparaison intégrale. root est la racine du dépôt (contient packages/).
+ * Renvoie { ok, diffs: [{severity: 'red'|'warn'|'exempt', kind, message}], stats }.
  */
 export async function runContractLint(root) {
   const packagesDir = join(root, 'packages')
@@ -228,7 +228,7 @@ export async function runContractLint(root) {
     codeTools: 0, manifestTools: 0, unparseable: 0, exempted: 0,
   }
 
-  // 红项统一发射口：命中豁免清单 → 降级为 exempt（保持透明，不计红）
+  // Port d'émission unifié des rouges : entrée figurant dans la liste d'exemptions → dégradée en exempt (transparence conservée, sans compter rouge)
   const pushRed = (kind, key, message) => {
     const hit = exemptions.get(`${kind}::${key}`)
     if (hit) {
@@ -242,7 +242,7 @@ export async function runContractLint(root) {
   const codeRouteMap = new Map() // 'GET /a/:*' -> [{pkg, ref}]
   const publicPathSet = new Set()
   const manifestRouteMap = new Map() // 'GET /a/:*' -> [apiRel]
-  const manifestPathSet = new Set() // 泛化路径（ANY 方法匹配用）
+  const manifestPathSet = new Set() // chemins généralisés (pour la correspondance ANY)
   const toolDeclsByPkg = new Map() // pkg -> Map(name -> {file})
   const toolManifestByPkg = new Map() // pkg -> Set(name)
   const usedPerms = new Map() // perm -> [{pkg, ref}]
@@ -257,7 +257,7 @@ export async function runContractLint(root) {
     const pkgDir = join(packagesDir, pkg)
     const srcDir = join(pkgDir, 'src')
 
-    // -- 代码面提取 --
+    // -- Extraction de la surface code --
     const tsFiles = await walkTsFiles(srcDir)
     const toolDecls = new Map()
     for (const file of tsFiles) {
@@ -284,13 +284,13 @@ export async function runContractLint(root) {
       : []
     for (const path of publicPaths) publicPathSet.add(generalizePath(path))
 
-    // -- 清单面提取 --
+    // -- Extraction de la surface manifeste --
     const pluginYaml = await readYamlOrNull(join(pkgDir, 'plugin.yaml'))
     const apiYaml = await readYamlOrNull(join(pkgDir, 'manifest', 'api.yaml'))
     const hasManifest = pluginYaml !== null && apiYaml !== null
     if (hasManifest) stats.withManifest++
 
-    // 权限声明面独立于 api.yaml：仅落 plugin.yaml + permissions.yaml 的包也可声明权限点
+    // La déclaration de permissions est indépendante de api.yaml : les paquets portant seulement plugin.yaml + permissions.yaml peuvent aussi déclarer des points
     const permissionsYaml = await readYamlOrNull(join(pkgDir, 'manifest', 'permissions.yaml'))
     for (const source of [pluginYaml?.permissions, permissionsYaml?.points]) {
       for (const perm of source ?? []) {
@@ -330,8 +330,8 @@ export async function runContractLint(root) {
     toolDeclsByPkg.set(pkg, toolDecls)
   }
 
-  // -- 权限声明补充源：iam PermissionCatalog（运行时 RBAC 注册权威，代码级事实源） --
-  // 清单 permissions.yaml 是文档面；真正注册进 RBAC 的是该目录。已用权限点命中任一_source 即为已声明。
+  // -- Source complémentaire des déclarations de permissions : PermissionCatalog d'iam (autorité d'enregistrement RBAC à l'exécution, source de faits au niveau code) --
+  // Le permissions.yaml du manifeste est la face documentaire ; ce qui est réellement enregistré dans le RBAC est ce catalogue. Un point utilisé touchant l'une des _sources est réputé déclaré.
   const catalogText = await readFile(join(packagesDir, 'plugin-iam', 'src', 'index.ts'), 'utf8').catch(() => '')
   for (const match of catalogText.matchAll(/point:\s*'([^']+)'/g)) {
     const perm = match[1]
@@ -339,7 +339,7 @@ export async function runContractLint(root) {
     if (!declaredPerms.get(perm).includes('plugin-iam#PermissionCatalog')) declaredPerms.get(perm).push('plugin-iam#PermissionCatalog')
   }
 
-  // -- 双向比对：路由 --
+  // -- Comparaison bidirectionnelle : routes --
   for (const [key, refs] of codeRouteMap) {
     if (!manifestRouteMap.has(key)) {
       pushRed('route_undeclared', key, `代码注册路由未见于任何清单：${key}（${refs.map((item) => item.ref).join('，')}）`)
@@ -348,7 +348,7 @@ export async function runContractLint(root) {
   for (const [key, refs] of manifestRouteMap) {
     if (codeRouteMap.has(key)) continue
     const path = key.slice(key.indexOf(' ') + 1)
-    if (publicPathSet.has(path)) continue // 公开路径以 ANY 方法匹配
+    if (publicPathSet.has(path)) continue // les chemins publics se comparent en méthode ANY
     pushRed('endpoint_ghost', key, `清单声明路由无代码实现（幽灵 endpoint）：${key}（${refs.join('，')}）`)
   }
   for (const path of publicPathSet) {
@@ -357,10 +357,10 @@ export async function runContractLint(root) {
     if (!covered) diffs.push({ severity: 'warn', kind: 'public_path_undeclared', message: `公开路径未见于任何清单（先行登记/路由未合入时允许）：${path}` })
   }
 
-  // -- 双向比对：工具（逐包） --
+  // -- Comparaison bidirectionnelle : outils (paquet par paquet) --
   for (const [pkg, decls] of toolDeclsByPkg) {
     const manifestTools = toolManifestByPkg.get(pkg)
-    if (!manifestTools) continue // 无清单包的覆盖缺口走 warn 汇总（P2-04 补齐后转红）
+    if (!manifestTools) continue // l'angle de couverture des paquets sans manifeste passe en warn résumé (rouge après le complément P2-04)
     for (const [name, loc] of decls) {
       if (!manifestTools.has(name)) pushRed('tool_undeclared', `${pkg}::${name}`, `代码注册工具未见于清单 api.yaml tools：${pkg}::${name}（${loc.file}）`)
     }
@@ -369,7 +369,7 @@ export async function runContractLint(root) {
     }
   }
 
-  // -- 双向比对：权限点 --
+  // -- Comparaison bidirectionnelle : points de permission --
   for (const [perm, refs] of usedPerms) {
     if (!declaredPerms.has(perm)) {
       pushRed('perm_undeclared', perm, `代码引用权限点未在清单声明：${perm}（${[...new Set(refs.map((item) => `${item.pkg}/${item.ref}`))].slice(0, 4).join('，')}${refs.length > 4 ? ' 等' : ''}）`)

@@ -1,14 +1,14 @@
 /**
- * @dsh-ops/platform-core —— 行业场景图谱（scenegraph）模型与加载（review-dsh-agent-panel-v2 Phase 2）。
+ * @dsh-ops/platform-core —— modèle et chargement du graphe de scénarios sectoriels (scenegraph) (review-dsh-agent-panel-v2 Phase 2).
  *
- * 「一图四清单」数据底座（工信部《场景化、图谱化推进重点行业数字化转型的参考指引（2025版）》映射）：
- *   1 条主线（chains 行业链条）+ 5 类业务活动（activities，研发设计/生产制造/供应链/运维服务/数字营销/
- *   经营管理/法财税与成本）+ N 个场景（scene 卡：编号/现状评级/价值标签/痛点）+ 4 类数字化要素
- *   （工具软件 tools / 知识模型 models / 数据要素 data / 人才技能 talent）。
+ * Socle de données « un graphe, quatre listes » (en écho aux Référentiels du MIIT pour la transformation numérique des industries clés par scénarios et graphes, édition 2025) :
+ *   1 fil principal (chains, filières sectorielles) + 5 types d'activités métier (activities, R&D et conception/production/fourniture/exploitation-maintenance/marketing numérique/
+ *   gestion d'entreprise/juridique-fiscal-financier et coûts) + N scénarios (cartes scene : numéro/notation de l'existant/étiquettes de valeur/points de douleur) + 4 types d'éléments numériques
+ *   (logiciels-outils tools / modèles de connaissance models / données data / compétences talent).
  *
- * 与 cardpacks 同款裁决（评审 D5/D6）：v1 走内置资产通道（默认目录 packages/platform-core/scenegraphs/，
- * 可经 SCENEGRAPH_DIR 覆盖），市场上架（content.scenegraph 契约扩展）留待 Phase 4；校验器 lint 与
- * 运行时双端共用；热刷新 = reloadFromDir + PlatformEvents.ScenegraphUpdated。
+ * Même arbitrage que cardpacks (revue D5/D6) : v1 passe par le canal d'actifs intégrés (répertoire par défaut packages/platform-core/scenegraphs/,
+ * remplaçable via SCENEGRAPH_DIR), la mise en place marketplace (extension du contrat content.scenegraph) attend la Phase 4 ; le lint du validateur et
+ * l'exécution partagent les deux bouts ; rafraîchissement à chaud = reloadFromDir + PlatformEvents.ScenegraphUpdated.
  */
 import { readdir, readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
@@ -18,13 +18,13 @@ import { Service } from '@deepseek-ai/cordis'
 import { t } from '../../platform-i18n/src/index.ts'
 
 /**
- * 价值标签（交接 F 清单 M 节，2026-09-11）：工信部原文口径为 降本/提质/增效/增收/安全/环保/新模式；
- * 「节能」为既有 qb01 包兼容保留（原文无此标签，存量图谱零改动照常过校验）。
+ * Étiquettes de valeur (liste de passation F, section M, 2026-09-11) : le périmètre du texte original du MIIT est réduction des coûts/qualité/efficacité/revenus/sécurité/écologie/nouveaux modes ;
+ * « économie d'énergie » est conservé pour compatibilité avec le paquet qb01 existant (absent du texte original, les graphes existants passent la validation sans aucun changement).
  */
 export const SCENE_TAGS = ['提质', '降本', '增效', '节能', '新模式', '增收', '安全', '环保'] as const
 export type SceneTag = (typeof SCENE_TAGS)[number]
 
-/** 业务活动键（ACT 映射：研发设计 rd / 生产制造 mfg / 供应链 scm / 运维服务 svc / 数字营销 mkt / 经营管理 mgmt / 法财税 fin）。 */
+/** Clés d'activités métier (mapping ACT : R&D-conception rd / production mfg / fourniture scm / exploitation-maintenance svc / marketing numérique mkt / gestion d'entreprise mgmt / juridique-fiscal fin). */
 export const SCENE_ACTIVITIES = ['rd', 'mfg', 'scm', 'svc', 'mkt', 'mgmt', 'fin'] as const
 export type SceneActivity = (typeof SCENE_ACTIVITIES)[number]
 
@@ -39,11 +39,11 @@ export const ACTIVITY_LABELS: Record<SceneActivity, string> = {
 }
 
 export interface ScenegraphScene {
-  /** 场景编号（如 QB01-A-2-5），全图唯一。 */
+  /** Numéro de scénario (p. ex. QB01-A-2-5), unique dans tout le graphe. */
   code: string
   name: string
   type: '主场景' | '细分场景'
-  /** 现状评级 1-5 星（企业自评，改造优先级依据：低于 3 星建议优先改造）。 */
+  /** Notation de l'existant 1-5 étoiles (auto-évaluation de l'entreprise, base de priorité de transformation : en dessous de 3 étoiles, transformation prioritaire recommandée). */
   s: number
   tags: SceneTag[]
   pain: string
@@ -54,25 +54,25 @@ export interface ScenegraphScene {
 }
 
 export interface ScenegraphPack {
-  /** 行业代码（工信部《参考指引（2025 版）》图谱编码，如 QB01 家电 / JB01 工程机械）。 */
+  /** Code sectoriel (codage des graphes du « Référentiel (édition 2025) » du MIIT, p. ex. QB01 électroménager / JB01 engins de chantier). */
   code: string
   name: string
   icon: string
-  /** 图谱包版本（数据更新经 reloadFromDir + scenegraph.updated 热刷新）。 */
+  /** Version du paquet de graphe (mises à jour de données via reloadFromDir + rafraîchissement à chaud scenegraph.updated). */
   version: string
-  /** 行业主线链条（一条主线）。 */
+  /** Filière principale sectorielle (un seul fil conducteur). */
   chains: string
   /**
-   * 行业环节链（交接 F 清单 M 节，2026-09-11，可选）：原文图谱按行业环节组织（如钢铁 A 铁前/B 炼铁…），
-   * chains 单字符串无法结构化消费。缺位时前端从场景编号第三段反推（既有 qb01 包无需改动）。
-   * 校验器不对该字段做强校验（生产方契约）。
+   * Chaîne des maillons sectoriels (liste de passation F, section M, 2026-09-11, optionnel) : le graphe original est organisé par maillon sectoriel (p. ex. acier A amont du haut fourneau/B fonte…) ;
+   * une chaîne chains en simple chaîne ne se consomme pas de façon structurée. En cas d'absence, le frontend déduit du troisième segment du numéro de scénario (le paquet qb01 existant n'a pas besoin de changement).
+   * Le validateur ne contrôle pas fortement ce champ (contrat du producteur).
    */
   links?: Array<{ key: string; name: string }>
-  /** 业务活动 → 场景清单（5 类业务活动到 N 个场景的挂载）。 */
+  /** Activité métier → liste de scénarios (rattachement des 5 types d'activités métier à N scénarios). */
   activities: Partial<Record<SceneActivity, ScenegraphScene[]>>
 }
 
-/** 校验单包：返回全部问题（不抛错），lint:manifests 与装载期共用。 */
+/** Valide un paquet : renvoie tous les problèmes (sans lever), partagé par lint:manifests et le chargement. */
 export function validateScenegraph(input: unknown, source = 'scenegraph'): string[] {
   const errors: string[] = []
   const pack = input as ScenegraphPack
@@ -108,9 +108,9 @@ export function validateScenegraph(input: unknown, source = 'scenegraph'): strin
       if (!scene?.name || typeof scene.name !== 'string') errors.push(t('{at}.name 必填', { at }))
       if (scene?.type !== '主场景' && scene?.type !== '细分场景') errors.push(t('{at}.type 非法（主场景/细分场景）', { at }))
       if (!Number.isInteger(scene?.s) || scene.s < 1 || scene.s > 5) errors.push(t('{at}.s 现状评级须为 1-5 整数', { at }))
-      // tags 可为空数组（交接 F 清单 M 节，2026-09-11）：原文相当比例场景未显式标注价值标签
-      // （实测 807 场景中 504 个无标注）——此前唯一合规做法是虚构标签，违反「不造假数据」红线；
-      // 放宽后按原文如实装载，按标签筛选的场景视图自然排除无标注场景
+      // tags peut être un tableau vide (liste de passation F, section M, 2026-09-11) : une proportion notable des scénarios du texte original n'a pas d'étiquette de valeur explicite
+      // (mesuré : 504 scénarios sans étiquette sur 807) — la seule conformité possible auparavant était d'inventer des étiquettes, violant la ligne rouge « pas de fausses données » ;
+      // après assouplissement, chargement fidèle au texte original ; les vues de scénarios filtrées par étiquette excluent naturellement les scénarios sans étiquette
       if (!Array.isArray(scene?.tags) || scene.tags.some((tag) => !SCENE_TAGS.includes(tag))) {
         errors.push(t('{at}.tags 非法（应为 {expected} 的子集，可为空数组）', { at, expected: SCENE_TAGS.join('/') }))
       }
@@ -126,7 +126,7 @@ export function validateScenegraph(input: unknown, source = 'scenegraph'): strin
   return errors
 }
 
-/** 默认图谱目录：本包同级 scenegraphs/（源码形态与安装形态均成立）。 */
+/** Répertoire de graphes par défaut : scenegraphs/ au même niveau que ce paquet (valable en forme source comme en forme installée). */
 export function defaultScenegraphDir(): string {
   return join(dirname(fileURLToPath(import.meta.url)), '..', 'scenegraphs')
 }
@@ -142,7 +142,7 @@ export class ScenegraphService extends Service {
     void this.loadFromDir(config.dir ?? process.env.SCENEGRAPH_DIR ?? defaultScenegraphDir())
   }
 
-  /** 装载目录内全部 *.json：单文件非法跳过并记录（不阻断启动），lint:manifests 负责红线。 */
+  /** Charge tous les *.json du répertoire : fichier invalide sauté et consigné (ne bloque pas le démarrage), lint:manifests garde la ligne rouge. */
   async loadFromDir(dir: string): Promise<void> {
     const errors: string[] = []
     const packs: ScenegraphPack[] = []
@@ -172,7 +172,7 @@ export class ScenegraphService extends Service {
     if (errors.length > 0) this.ctx.logger('scenegraphs').warn(`场景图谱装载存在被跳过的文件：${errors.join('；')}`)
   }
 
-  /** 热刷新：重载目录后发 scenegraph.updated（面板据此刷新场景页；review Phase 2 第 11 条）。 */
+  /** Rafraîchissement à chaud : rechargement du répertoire puis émission de scenegraph.updated (le panneau rafraîchit sa page de scénarios ; review Phase 2 point 11). */
   async reloadFromDir(dir?: string): Promise<{ packs: number; problems: string[] }> {
     await this.loadFromDir(dir ?? process.env.SCENEGRAPH_DIR ?? defaultScenegraphDir())
     this.ctx.platformBus.emit(PlatformEvents_ScenegraphUpdated, { packs: this.packs.length, problems: this.loadErrors.length })
@@ -187,7 +187,7 @@ export class ScenegraphService extends Service {
     return this.packs.find((pack) => pack.code === code)
   }
 
-  /** 场景编号反查（会话引用沉淀回图谱：如 QB01-A-2-5）。 */
+  /** Recherche inverse par numéro de scénario (références de session reversées dans le graphe : p. ex. QB01-A-2-5). */
   findScene(code: string): { pack: ScenegraphPack; activity: SceneActivity; scene: ScenegraphScene } | undefined {
     for (const pack of this.packs) {
       for (const [activity, scenes] of Object.entries(pack.activities)) {
@@ -198,13 +198,13 @@ export class ScenegraphService extends Service {
     return undefined
   }
 
-  /** 装载期被跳过文件的问题清单，观测用。 */
+  /** Liste des problèmes des fichiers sautés au chargement, pour l'observation. */
   loadProblems(): string[] {
     return this.loadErrors
   }
 }
 
-/** 独立常量避免与 index.ts 导出顺序耦合（值与 PlatformEvents.ScenegraphUpdated 一致）。 */
+/** Constante indépendante pour éviter le couplage à l'ordre d'export de index.ts (valeur identique à PlatformEvents.ScenegraphUpdated). */
 const PlatformEvents_ScenegraphUpdated = 'scenegraph.updated'
 
 declare module '@deepseek-ai/cordis' {

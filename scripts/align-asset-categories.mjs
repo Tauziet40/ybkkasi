@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
- * 资产分类对齐迁移（2026-10-28 各资产板块标签分类统一）：
- * 把 skill~skills.json 里遗留分类（办公提效/研发效能/通用/合作方·…等）对齐到平台
- * 标准 11 项（财务/行政/人事/销售/运营/战略/生产/研发/质量/制造/其他），
- * 原分类值保留进 tags（不丢信息）。
+ * Migration d'alignement des classifications d'actifs (unification des classifications par étiquette des volets d'actifs, 2026-10-28) :
+ * aligne dans skill~skills.json les classifications héritées (efficacité bureautique/efficacité R&D/générale/Partenaires·… etc.) vers les
+ * 11 items standard de la plateforme (finance/administration/RH/ventes/opérations/stratégie/production/R&D/qualité/fabrication/autres),
+ * la valeur d'origine étant conservée dans tags (sans perte d'information).
  *
- * 口径与 platform-core/src/taxonomy.ts 的 alignAssetCategory 一致（此处内联同表，
- * 因运行脚本为纯 Node 无法直接 import TS；改表时两处同步）。
+ * Même périmètre que alignAssetCategory de platform-core/src/taxonomy.ts (table dupliquée ici,
+ * car un script d'exécution en Node pur ne peut pas importer de TS ; les deux endroits à synchroniser en cas de modification).
  *
- * 用法：node scripts/align-asset-categories.mjs [dataDir ...]（缺省 data data-demo）
- * 幂等：已是标准分类的记录原样跳过；重复执行无副作用。
+ * Usage : node scripts/align-asset-categories.mjs [dataDir ...] (défaut data data-demo)
+ * Idempotent : les enregistrements déjà en classification standard sont sautés tels quels ; exécutions répétées sans effet de bord.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -17,7 +17,7 @@ import { join, resolve } from 'node:path'
 const ASSET_CATEGORIES = ['财务', '行政', '人事', '销售', '运营', '战略', '生产', '研发', '质量', '制造', '其他']
 
 const LEGACY_CATEGORY_MAP = {
-  // 旧 Skill 市场内置分类
+  // Classifications intégrées de l'ancien marketplace de Skills
   '办公提效': '行政',
   '研发效能': '研发',
   '客户服务': '销售',
@@ -26,7 +26,7 @@ const LEGACY_CATEGORY_MAP = {
   '市场情报': '销售',
   '法务合规': '行政',
   '通用': '其他',
-  // 外部 Skill 目录导入分类
+  // Classifications importées du catalogue de Skills externe
   '人力资源': '人事',
   'HR': '人事',
   '组织建设': '人事',
@@ -59,7 +59,7 @@ const LEGACY_CATEGORY_MAP = {
   '税务': '财务',
 }
 
-/** 与 normalizeAssetCategory 同口径：标准值原样；遗留值查表；合作方前缀/未知值落「其他」。 */
+/** Même périmètre que normalizeAssetCategory : valeur standard telle quelle ; valeur héritée → table ; préfixe partenaire/valeur inconnue → « autres ». */
 function normalizeCategory(raw) {
   const text = String(raw ?? '').trim()
   if (!text) return '其他'
@@ -100,7 +100,7 @@ function alignSkillsFile(file) {
 
 const dirs = process.argv.slice(2).length ? process.argv.slice(2) : ['data', 'data-demo']
 for (const dir of dirs) {
-  // Skill：遗留分类 → 标准分类（原值保留进 tags）
+  // Skill : classification héritée → classification standard (valeur d'origine conservée dans tags)
   const file = join(resolve(dir), 'skill~skills.json')
   try {
     readFileSync(file)
@@ -110,7 +110,7 @@ for (const dir of dirs) {
   }
   alignSkillsFile(file)
 
-  // MCP 服务：存量记录无 category 字段 → 补「其他」（记录显式化，读侧不再依赖兜底）
+  // Services MCP : enregistrements existants sans champ category → compléter « autres » (explicite, la lecture ne dépend plus du repli)
   const mcpFile = join(resolve(dir), 'mcp~services.json')
   try {
     const payload = JSON.parse(readFileSync(mcpFile, 'utf8'))

@@ -1,10 +1,10 @@
 /**
- * 定时器卫生扫描（OPT-P3-02，2026-09-12）：
- * packages 下每个 setInterval( 调用必须满足其一，否则违规：
- *   a) 就近（其后 3 行内）跟随 .unref() / .unref?.()；
- *   b) 所在文件存在 clearInterval（生命周期有登记）；
- *   c) 就近带「keepalive」注释（显式保活豁免，须写明理由）。
- * 违规即红（exit 1）——嵌入/测试形态不允许隐式挂起事件循环。
+ * Scan d'hygiène des minuteurs (OPT-P3-02, 2026-09-12) :
+ * chaque appel setInterval( sous packages doit satisfaire l'une des conditions suivantes, sinon infraction :
+ *   a) suivi proche (dans les 3 lignes suivantes) de .unref() / .unref?.() ;
+ *   b) le fichier contient clearInterval (cycle de vie enregistré) ;
+ *   c) commentaire « keepalive » proche (exemption explicite de maintien en vie, motif obligatoire).
+ * Toute infraction = rouge (exit 1) — les formes embarquées/test n'admettent pas de suspension implicite de la boucle d'événements.
  */
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'

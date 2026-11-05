@@ -1,9 +1,9 @@
 /**
- * 最小 YAML 子集解析器（无外部依赖）。
- * 支持第三方插件契约五面（plugin.yaml / manifest/*.yaml）所需的语法：
- *   缩进映射 / 序列（- 项，含行内映射项与「- 独占一行」块项）/ 标量（字符串、数字、
- *   布尔、null、空流式集合 [] {}）/ # 整行注释。
- * 不支持锚点、多文档、非空流式集合——契约面刻意保持最小。
+ * Analyseur du sous-ensemble YAML minimal (sans dépendance externe).
+ * Couvre la syntaxe requise par les cinq facettes de contrat des plugins tiers (plugin.yaml / manifest/*.yaml) :
+ *   mappings/séquences indentés (- items, y compris items de mapping en ligne et blocs « - seul sur sa ligne ») / scalaires (chaînes, nombres,
+ *   booléens, null, collections fluides vides [] {}) / # commentaires pleine ligne.
+ * Pas d'ancres, pas de multi-documents, pas de collections fluides non vides — la facette de contrat reste volontairement minimale.
  */
 
 export function parseYaml(text: string): unknown {
@@ -36,7 +36,7 @@ export function parseYaml(text: string): unknown {
       const rest = (match[2] ?? '').trim()
       pos++
       if (rest === '|' || rest === '>' || rest === '|-' || rest === '>-' || rest === '|+' || rest === '>+') {
-        // 块标量：后续更深缩进行为内容（| 字面 / > 折叠；- 去尾换行）
+        // Scalaire en bloc : les lignes suivantes plus indentées en sont le contenu (| littéral / > plié ; - retire la fin de ligne)
         const blockIndent = pos < lines.length ? indentOf(lines[pos]!) : -1
         const collected: string[] = []
         if (blockIndent > ind) {
@@ -52,7 +52,7 @@ export function parseYaml(text: string): unknown {
       } else if (rest !== '' && !rest.startsWith('#')) {
         result[key] = parseScalar(rest)
       } else if (pos < lines.length && indentOf(lines[pos]!) > ind) {
-        // key 下嵌套行是空流式集合（如 permissions:\n  []）——消费为空集合
+        // Les lignes imbriquées sous la clé sont une collection fluide vide (p. ex. permissions:\n  []) — consommée comme collection vide
         if (lines[pos]!.trim() === '[]' || lines[pos]!.trim() === '{}') {
           result[key] = lines[pos]!.trim() === '[]' ? [] : {}
           pos++
@@ -82,9 +82,9 @@ export function parseYaml(text: string): unknown {
       if (rest === '') {
         result.push(pos < lines.length && indentOf(lines[pos]!) > ind ? parseBlock(indentOf(lines[pos]!)) : null)
       } else if (/^[^:]+:(\s|$)/.test(rest) && !rest.startsWith('"') && !rest.startsWith("'")) {
-        // 行内映射项判定（E-05）：冒号后必须跟空白或行尾才算映射键（YAML 惯例）——
-        // 「12:34:56」这类无空格冒号串（时间/比例）保持标量，不再误判为映射后报「[object Object]」。
-        // 以更深缩进注入虚拟行后按映射解析
+        // Détection des items de mapping en ligne (E-05) : après les deux-points, un espace ou une fin de ligne est requis pour valider une clé de mapping (convention YAML) —
+        // les chaînes à deux-points sans espace comme « 12:34:56 » (heures/proportions) restent scalaires, au lieu d'être prises à tort pour un mapping puis de lever « [object Object] ».
+        // Injecte une ligne virtuelle à indentation plus profonde puis analyse comme mapping
         const virtualIndent = ind + 2
         lines.splice(pos, 0, ' '.repeat(virtualIndent) + rest)
         result.push(parseMap(virtualIndent))

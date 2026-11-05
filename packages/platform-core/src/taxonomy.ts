@@ -1,28 +1,28 @@
 /**
- * 平台资产统一业务分类（2026-10-28 各资产板块对齐）。
+ * Classification métier unifiée des actifs plateforme (alignement des volets d'actifs, 2026-10-28).
  *
- * Skill 市场 / Agent 本体 / AI 应用 / MCP 服务 / A2A 协作目录共用同一套业务域分类，
- * 让业务成员按「我在哪个部门、要解决哪类问题」检索资产，而不是按技术形态。
- * 口径固定为 11 项：财务 / 行政 / 人事 / 销售 / 运营 / 战略 / 生产 / 研发 / 质量 / 制造 / 其他。
+ * Marketplace de Skills / Agents / Applications IA / services MCP / annuaire de collaboration A2A partagent la même classification de domaines métier,
+ * pour que les métiers retrouvent les actifs selon « mon département, mon type de problème » plutôt que selon la forme technique.
+ * Périmètre fixé à 11 items : finance / administration / RH / ventes / opérations / stratégie / production / R&D / qualité / fabrication / autres.
  *
- * 遗留分类（旧 Skill 市场的「办公提效/研发效能/…」、外部导入的「人力资源/合作方·…」等）
- * 经 LEGACY_CATEGORY_MAP 对齐到标准项；对齐时原分类值保留进 tags，不丢信息
- * （迁移脚本 scripts/align-asset-categories.mjs 与写入侧 normalize 共用本表）。
+ * Les classifications héritées (« efficacité bureautique/efficacité R&D/… » de l'ancien marketplace de Skills, « ressources humaines/partenaires·… » importées de l'extérieur, etc.)
+ * sont alignées vers les items standard via LEGACY_CATEGORY_MAP ; à l'alignement, la valeur d'origine est conservée dans tags, sans perte d'information
+ * (le script de migration scripts/align-asset-categories.mjs et la normalize côté écriture partagent cette table).
  */
 
 export const ASSET_CATEGORIES = ['财务', '行政', '人事', '销售', '运营', '战略', '生产', '研发', '质量', '制造', '其他'] as const
 
 export type AssetCategory = (typeof ASSET_CATEGORIES)[number]
 
-/** 未声明 / 无法对齐时的兜底分类。 */
+/** Classification de repli en cas d'absence de déclaration ou d'alignement impossible. */
 export const DEFAULT_ASSET_CATEGORY: AssetCategory = '其他'
 
 /**
- * 遗留分类 → 标准分类对齐表。键为历史上出现过的分类原值（精确匹配，去首尾空白）；
- * 「合作方·xxx」等带前缀的伙伴分类按前缀规则统一落「其他」（见 normalizeAssetCategory）。
+ * Table d'alignement classifications héritées → classifications standard. Les clés sont les valeurs d'origine historiquement apparues (correspondance exacte, sans espaces d'extrémité) ;
+ * les classifications partenaires préfixées comme « Partenaire·xxx » tombent uniformément dans « autres » par règle de préfixe (voir normalizeAssetCategory).
  */
 export const LEGACY_CATEGORY_MAP: Readonly<Record<string, AssetCategory>> = {
-  // 旧 Skill 市场内置分类
+  // Classifications intégrées de l'ancien marketplace de Skills
   '办公提效': '行政',
   '研发效能': '研发',
   '客户服务': '销售',
@@ -31,7 +31,7 @@ export const LEGACY_CATEGORY_MAP: Readonly<Record<string, AssetCategory>> = {
   '市场情报': '销售',
   '法务合规': '行政',
   '通用': '其他',
-  // 外部 Skill 目录导入分类
+  // Classifications importées du catalogue de Skills externe
   '人力资源': '人事',
   'HR': '人事',
   '组织建设': '人事',
@@ -64,14 +64,14 @@ export const LEGACY_CATEGORY_MAP: Readonly<Record<string, AssetCategory>> = {
   '税务': '财务',
 }
 
-/** 是否标准分类值。 */
+/** Est-ce une valeur de classification standard. */
 export function isAssetCategory(value: unknown): value is AssetCategory {
   return typeof value === 'string' && (ASSET_CATEGORIES as readonly string[]).includes(value)
 }
 
 /**
- * 把任意分类输入对齐到标准分类：标准值原样返回；遗留值查表；「合作方·…」统一落「其他」；
- * 其余（空值 / 未知自定义值）回落 DEFAULT_ASSET_CATEGORY。
+ * Aligne n'importe quelle entrée de classification vers la classification standard : valeur standard renvoyée telle quelle ; valeur héritée → consultation de table ; « Partenaire·… » → « autres » uniformément ;
+ * le reste (valeurs vides / personnalisées inconnues) retombe sur DEFAULT_ASSET_CATEGORY.
  */
 export function normalizeAssetCategory(value: unknown): AssetCategory {
   const text = String(value ?? '').trim()
@@ -83,8 +83,8 @@ export function normalizeAssetCategory(value: unknown): AssetCategory {
 }
 
 /**
- * 分类对齐（写入侧 / 迁移共用）：返回对齐后的分类，以及需要并入 tags 的原值
- * （仅当原值非空且不是标准分类时才保留，避免 tags 里出现与分类重复的词）。
+ * Alignement de classification (partagé écriture/migration) : renvoie la classification alignée, ainsi que la valeur d'origine à fusionner dans tags
+ * (conservée seulement si la valeur d'origine est non vide et non standard, pour éviter un doublon entre tags et classification).
  */
 export function alignAssetCategory(value: unknown, tags: readonly string[] = []): { category: AssetCategory; tags: string[] } {
   const original = String(value ?? '').trim()
@@ -94,7 +94,7 @@ export function alignAssetCategory(value: unknown, tags: readonly string[] = [])
   return { category, tags: nextTags }
 }
 
-/** 标准分类列表（标准项在前）外加数据里仍存在的遗留值（保证旧记录在筛选条可见）。 */
+/** Liste des classifications standard (items standard en tête) plus les valeurs héritées encore présentes dans les données (garantit la visibilité des anciens enregistrements dans les filtres). */
 export function withLegacyCategories(found: Iterable<unknown>): string[] {
   const extras: string[] = []
   for (const item of found) {

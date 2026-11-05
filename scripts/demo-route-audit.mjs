@@ -1,14 +1,14 @@
 /**
- * 演示只读面审计（2026-10-17 演示模式批次）。
+ * Audit de la facette en lecture seule du mode démo (lot mode démo 2026-10-17).
  *
- * 静态枚举全仓 `guarded(` 路由声明，对「GET/HEAD 路由 → 所需权限点」与演示只读白名单
- * DEMO_READONLY_PERMISSIONS（plugin-console/src/demo-mode.ts）求差集：
- *   - 差集点属只读语义（`.read` 结尾 / console.login 登录点）→ 判红：
- *     演示态访客打开对应页面将 403，须评审补白名单或改路由声明点；
- *   - 差集点属写语义（.write/.approve/.invoke/.admin 等）→ 预期行为（演示态 403），不判红。
- * 同时复核白名单自身卫生：findWritePermissionLeaks 必须为空（无写点混入）。
+ * Énumère statiquement toutes les déclarations de routes `guarded(` du dépôt, calcule la différence entre « routes GET/HEAD → point de permission requis » et la liste blanche
+ * de lecture seule démo DEMO_READONLY_PERMISSIONS (plugin-console/src/demo-mode.ts) :
+ *   - points de la différence à sémantique de lecture (finissant par `.read` / point console.login) → rouge :
+     un visiteur du mode démo prendra un 403 sur la page correspondante ; à passer en revue pour compléter la liste blanche ou changer le point déclaré de la route ;
+ *   - points de la différence à sémantique d'écriture (.write/.approve/.invoke/.admin etc.) → comportement attendu (403 en mode démo), pas de rouge.
+ * Contre-vérifie en même temps l'hygiène de la liste blanche elle-même : findWritePermissionLeaks doit être vide (aucun point d'écriture mélangé).
  *
- * 用法：node scripts/demo-route-audit.mjs（selftest 亦拉起本脚本，退出码非 0 即红）
+ * Usage : node scripts/demo-route-audit.mjs (le selftest lance aussi ce script ; code de sortie non nul = rouge)
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, dirname, relative } from 'node:path'
@@ -26,8 +26,8 @@ function* walkTs(dir) {
   }
 }
 
-// 字面量三元组（method, path, permission）；换行/空白宽容。变量形态调用无法静态解析，
-// 计入 unmatched 清单供人工复核（不判红——动态注册须走代码评审）。
+// Triplets de littéraux (method, path, permission) ; tolérant aux retours à la ligne/espaces. Les appels sous forme de variables ne se résolvent pas statiquement,
+// comptés dans la liste unmatched pour revue humaine (pas de rouge — l'enregistrement dynamique doit passer par la revue de code).
 const callRe = /\bguarded\(\s*['"]([A-Z]+)['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]/
 
 const routes = []
@@ -43,8 +43,8 @@ for (const file of walkTs(packagesDir)) {
   }
 }
 const matchedCount = routes.length
-// guarded( 也出现在类型声明/注释中（rest-gate.ts 接口、注释示例），按行过滤后不相等属正常；
-// 只对「含 guarded( 调用但零匹配」的文件提示人工复核
+// guarded( apparaît aussi dans les déclarations de types/commentaires (interfaces de rest-gate.ts, exemples en commentaires) ; une inégalité après filtrage par ligne est normale ;
+// seuls les fichiers « contenant des appels guarded( mais zéro correspondance » donnent lieu à un rappel de revue humaine
 const filesWithCalls = new Set()
 for (const file of walkTs(packagesDir)) {
   const text = readFileSync(file, 'utf8')

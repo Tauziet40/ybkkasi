@@ -1,25 +1,25 @@
 #!/usr/bin/env node
 /**
- * register-dsh-agent.mjs —— 平台自营 dsh Agent 一键资产登记（docs/internal/dev-plan-agent-host-unification.md M3）。
+ * register-dsh-agent.mjs — enregistrement d'actif en un clic de l'Agent dsh auto-géré par la plateforme (docs/internal/dev-plan-agent-host-unification.md M3).
  *
- * 对宿主平台执行 agent-onboarding 全流程（docs/agent-onboarding.md），幂等可重跑：
- *   ① 注册 Agent（按名称幂等：已存在则复用，不换名重复注册）
- *   ② 机器凭证落盘 data/dsh-agent-credential.json（0600；secret 只在下发时出现一次，丢失走轮换不重注册）
- *   ③ 机器身份 PATCH 治理属性（entryUrl / dataClass）
- *   ④ 首次运营数据提报（metrics-report，"发一句话"接入义务）
- *   ⑤ 签发 Agent 关联 OIDC 客户端（redirect_uri=<entry>/auth/oidc/callback；已签发则复用）
+ * Exécute le flux complet agent-onboarding sur la plateforme hôte (docs/agent-onboarding.md), idempotent et réexécutable :
+ *   ① enregistre l'Agent (idempotent par nom : réutilise s'il existe, pas de double enregistrement sous un autre nom)
+ *   ② écrit les identifiants machine dans data/dsh-agent-credential.json (0600 ; le secret n'apparaît qu'une fois à la délivrance, en cas de perte on passe par la rotation, pas par un ré-enregistrement)
+ *   ③ PATCH des attributs de gouvernance de l'identité machine (entryUrl / dataClass)
+ *   ④ première remontée de données opérationnelles (metrics-report, devoir d'intégration « envoyer une phrase »)
+ *   ⑤ émet le client OIDC associé à l'Agent (redirect_uri=<entry>/auth/oidc/callback ; réutilisé si déjà émis)
  *
- * 用法：
+ * Usage :
  *   node scripts/register-dsh-agent.mjs --url http://192.168.0.7:3080 --entry http://192.168.0.7:3080/
- *   （管理员凭证：DSHCTL_USER/DSHCTL_PASS 或 --user/--pass；已有令牌可直接给 DSHCTL_TOKEN）
+ *   (identifiants administrateur : DSHCTL_USER/DSHCTL_PASS ou --user/--pass ; un jeton existant peut être passé directement via DSHCTL_TOKEN)
  *
- * 登记完成后仍需人工治理闭环：控制台「Agent 本体 → 状态流转」走试运行/L4 上线审批（不绕过）。
+ * Après l'enregistrement, la clôture de gouvernance reste humaine : console « corps de l'Agent → transitions d'état » via l'essai/L4 d'approbation de mise en ligne (sans contournement).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { chmodSync } from 'node:fs'
 
-// ---- 参数 ----------------------------------------------------------------
+// ---- Paramètres ----------------------------------------------------------------
 const argv = process.argv.slice(2)
 const arg = (flag, fallback) => {
   const i = argv.indexOf(flag)
@@ -50,7 +50,7 @@ async function api(method, path, { token, body } = {}) {
   return { status: response.status, ok: payload?.ok !== false && response.status < 400, data: payload?.data, error: payload?.error }
 }
 
-// ---- ① 管理员身份 ----------------------------------------------------------
+// ---- ① Identité administrateur ----------------------------------------------------------
 let adminToken = process.env.DSHCTL_TOKEN ?? ''
 if (adminToken) log('使用 DSHCTL_TOKEN 环境变量令牌')
 if (!adminToken) {
@@ -63,7 +63,7 @@ if (!adminToken) {
   log(`管理员 ${user} 登录成功`)
 }
 
-// ---- ② 注册（幂等） --------------------------------------------------------
+// ---- ② Enregistrement (idempotent) --------------------------------------------------------
 const list = await api('GET', `/api/agents?q=${encodeURIComponent(AGENT_NAME)}`, { token: adminToken })
 if (!list.ok) fail(`读取 Agent 台账失败：${list.error?.message ?? list.status}`)
 let agent = (list.data?.agents ?? []).find((item) => item.name === AGENT_NAME)
@@ -81,7 +81,7 @@ if (agent) {
   log(`注册成功：${agent.id}；机器凭证已下发（clientId=${credential.clientId}）`)
 }
 
-// ---- ③ 凭证落盘（0600；增量合并，绝不覆盖已有 secret 为空值） ----------------
+// ---- ③ Écriture des identifiants (0600 ; fusion incrémentale, ne jamais écraser un secret existant par une valeur vide) ----------------
 mkdirSync(DATA_DIR, { recursive: true })
 let stored = {}
 if (existsSync(CRED_FILE)) {
@@ -99,10 +99,10 @@ if (credential) {
   log('⚠ 本机凭证文件中没有该 Agent 的 clientSecret（注册非本次发起）——机器登录与提报步骤将跳过，请补齐后重跑')
 }
 writeFileSync(CRED_FILE, JSON.stringify(stored, null, 2))
-try { chmodSync(CRED_FILE, 0o600) } catch { /* Windows 文件权限语义不同，尽力而为 */ }
+try { chmodSync(CRED_FILE, 0o600) } catch { /* la sémantique des permissions de fichiers Windows diffère, au mieux */ }
 log(`凭证已写入 ${CRED_FILE}`)
 
-// ---- ④ 机器身份 PATCH 治理属性 + 首次提报 -----------------------------------
+// ---- ④ PATCH des attributs de gouvernance de l'identité machine + première remontée -----------------------------------
 let machineToken = ''
 if (stored.clientId && stored.clientSecret) {
   const cc = await api('POST', '/api/auth/client-credentials', { body: { clientId: stored.clientId, clientSecret: stored.clientSecret } })
@@ -125,7 +125,7 @@ if (stored.clientId && stored.clientSecret) {
   log('首次运营数据提报完成（metrics.sessions ≥ 1 即接入验收口径）')
 }
 
-// ---- ⑤ Agent 关联 OIDC 客户端（已签发则复用） -------------------------------
+// ---- ⑤ Client OIDC associé à l'Agent (réutilisé si déjà émis) -------------------------------
 const detail = await api('GET', `/api/agents/${agent.id}`, { token: adminToken })
 if (!detail.ok) fail(`读取 Agent 详情失败：${detail.error?.message ?? detail.status}`)
 if (detail.data.sso) {
@@ -145,7 +145,7 @@ if (detail.data.sso) {
   log(`OIDC 客户端已签发：${issued.data.clientId}（redirect_uri=${redirectUri}；secret 已入凭证文件，仅此一次）`)
 }
 
-// ---- 完成回报 ----------------------------------------------------------------
+// ---- Rapport d'achèvement ----------------------------------------------------------------
 console.log(`
 ──────────────────────────────────────────────
 登记完成 ✅

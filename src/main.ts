@@ -1,6 +1,6 @@
 /**
- * 独立宿主入口：以 cordis 插件树启动整个平台。
- * 用法：node src/main.ts [--port 7300] [--data ./data]
+ * Point d'entrée de l'hôte autonome : démarre toute la plateforme comme arbre de plugins cordis.
+ * Usage : node src/main.ts [--port 7300] [--data ./data]
  */
 import { Context } from '@deepseek-ai/cordis'
 import { bootAll } from './boot-all.ts'

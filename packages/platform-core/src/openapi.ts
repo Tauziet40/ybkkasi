@@ -1,23 +1,23 @@
 /**
- * OpenAPI 接口面投影（issue #6）：把 httpServer 的全量路由台账（declaredRoutes，交接清单 H5）
- * 生成为 OpenAPI 3.0.3 文档，让 Agent / 第三方客户端能机器可读地发现 REST 接口面与鉴权要求。
+ * Projection de la facette API en OpenAPI (issue #6) : transforme le registre complet des routes du httpServer (declaredRoutes, liste de passation H5)
+ * en document OpenAPI 3.0.3, pour que les Agents/clients tiers découvrent de façon lisible par machine la facette REST et ses exigences d'authentification.
  *
- * 台账是唯一事实源——每个 register() 都落一条，文档随路由注册自动同步，不另维护第二份接口清单
- * （口径与 /api/platform/route-matrix 一致）。路由声明只有 method / path / 鉴权 profile，没有逐端点的
- * 参数与响应 schema，因此文档刻画的是「接口面 + 鉴权要求 + 统一信封」，逐字段契约仍以各插件
- * manifest（api.yaml）为准；两者由 lint:manifests 对账，不在此重复建模。
+ * Le registre est l'unique source de vérité — chaque register() y écrit une entrée, la documentation se synchronise automatiquement avec l'enregistrement des routes, sans seconde liste d'interfaces à maintenir
+ * (même périmètre que /api/platform/route-matrix). Les déclarations de routes ne portent que method / path / profil d'authentification, sans schéma de
+ * paramètres ni de réponses par point ; la documentation décrit donc « facette d'interfaces + exigences d'authentification + enveloppe unifiée », le contrat champ par champ reste régi par le
+ * manifest de chaque plugin (api.yaml) ; les deux sont réconciliés par lint:manifests, sans modélisation dupliquée ici.
  */
 import type { RouteLedgerEntry } from './http.ts'
 import { t } from '../../platform-i18n/src/index.ts'
 
 export interface OpenApiBuildOptions {
-  /** 平台版本（info.version，取 platformVersionInfo().version）。 */
+  /** Version de la plateforme (info.version, issue de platformVersionInfo().version). */
   version: string
-  /** 对外挂载前缀（'' 或 '/rq'，见 HttpServerConfig.externalBase），映射为 servers[0].url。 */
+  /** Préfixe de montage externe ('' ou '/rq', voir HttpServerConfig.externalBase), projeté en servers[0].url. */
   externalBase?: string
 }
 
-/** `/api/iam/users/:id` → `/api/iam/users/{id}`，并返回路径参数名列表。 */
+/** `/api/iam/users/:id` → `/api/iam/users/{id}`, et renvoie la liste des noms de paramètres de chemin. */
 export function toOpenApiPath(pattern: string): { path: string; params: string[] } {
   const params: string[] = []
   const path = pattern.split('/').map((segment) => {
@@ -29,14 +29,14 @@ export function toOpenApiPath(pattern: string): { path: string; params: string[]
   return { path: path || '/', params }
 }
 
-/** 分组标签：/api/<域>/… 取域名；/api 之外的协议面（/mcp、/oauth、/docs…）取首段。 */
+/** Étiquette de groupe : /api/<domaine>/… → nom de domaine ; facettes de protocole hors /api (/mcp, /oauth, /docs…) → premier segment. */
 function tagOf(pattern: string): string {
   const segments = pattern.split('/').filter(Boolean)
   if (segments[0] === 'api') return segments[1] ?? 'api'
   return segments[0] ?? 'root'
 }
 
-/** operationId：method + 路径的标识符化（`{id}` 等参数段保留参数名）。 */
+/** operationId : identifiantisation de method + chemin (les segments paramètres comme `{id}` conservent le nom du paramètre). */
 function operationIdOf(method: string, openApiPath: string): string {
   const slug = openApiPath.replace(/[{}]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')
   return `${method.toLowerCase()}_${slug || 'root'}`
@@ -45,7 +45,7 @@ function operationIdOf(method: string, openApiPath: string): string {
 export function buildOpenApiDocument(routes: readonly RouteLedgerEntry[], options: OpenApiBuildOptions): Record<string, unknown> {
   const paths: Record<string, Record<string, unknown>> = {}
   const tags = new Set<string>()
-  // 稳定输出：按路径、方法排序；同 method+path 多次登记（幂等重复注册）只保留首条
+  // Sortie stable : triée par chemin puis méthode ; en cas d'enregistrements multiples du même method+path (réenregistrement idempotent), seule la première entrée est conservée
   const sorted = [...routes].sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method))
   for (const route of sorted) {
     const { path, params } = toOpenApiPath(route.path)
@@ -74,8 +74,8 @@ export function buildOpenApiDocument(routes: readonly RouteLedgerEntry[], option
           },
         }
         : { default: { description: t('协议面响应（OAuth / MCP JSON-RPC / 文档页等，不走统一信封）') } },
-      // 精确鉴权声明（与 route-matrix 同口径）：guarded=权限点保护；authenticated=仅 Bearer；
-      // public=免鉴权（selfValidated=处理器自带凭证校验）；outside-api=协议面自管鉴权
+      // Déclaration d'authentification précise (même périmètre que route-matrix) : guarded=protégé par point de permission ; authenticated=Bearer seul ;
+      // public=sans authentification (selfValidated=le handler valide lui-même les identifiants) ; outside-api=authentification auto-gérée par la facette protocole
       'x-auth': { ...auth },
     }
     if (auth.access === 'guarded') {

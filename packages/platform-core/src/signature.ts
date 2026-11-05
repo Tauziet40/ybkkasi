@@ -1,13 +1,13 @@
 /**
- * Ed25519 签名基建（M2 平台级筑基，自 plugin-market 抽升）：
- *   - 第三方插件市场五面清单验签（plugin-market.submit）
- *   - 平台自更新发布清单验签（plugin-update，供应链敞口 T5 收口）
- * 共用同一套密钥/签名语义：SPKI DER base64 公钥 + PKCS8 PEM 私钥，对指纹字节做 Ed25519。
- * 私钥只在持有方（开发者 / 发布流水线）本地，平台任何集合只存公钥。
+ * Infrastructure de signature Ed25519 (fondation plateforme M2, extraite de plugin-market) :
+ *   - vérification des signatures des cinq facettes de manifest du marketplace de plugins tiers (plugin-market.submit)
+ *   - vérification des manifest de publication de l'auto-mise à jour plateforme (plugin-update, clôture de l'exposition chaîne d'approvisionnement T5)
+ * Les deux partagent la même sémantique de clés/signature : clé publique SPKI DER base64 + clé privée PKCS8 PEM, Ed25519 sur les octets de l'empreinte.
+ * La clé privée reste uniquement chez le détenteur (développeur / pipeline de publication) ; la plateforme ne stocke que des clés publiques, dans toutes ses collections.
  */
 import { createPrivateKey, createPublicKey, generateKeyPairSync, sign as edSign, verify as edVerify } from 'node:crypto'
 
-/** Ed25519 验签：指纹必须由登记公钥签出。任一输入非法一律 false（不抛错，调用方按验签失败处理）。 */
+/** Vérification Ed25519 : l'empreinte doit être signée par la clé publique enregistrée. Toute entrée invalide → false (sans lever ; l'appelant traite comme un échec de vérification). */
 export function verifyEd25519(publicKeyBase64: string, fingerprint: string, signatureBase64: string): boolean {
   try {
     const publicKey = createPublicKey({ key: Buffer.from(publicKeyBase64, 'base64'), format: 'der', type: 'spki' })
@@ -17,7 +17,7 @@ export function verifyEd25519(publicKeyBase64: string, fingerprint: string, sign
   }
 }
 
-/** Ed25519 密钥对生成（脚手架/发布流水线自助用；私钥只在调用方持有）。 */
+/** Génération de paire de clés Ed25519 (auto-service échafaudage/pipeline de publication ; la clé privée reste chez l'appelant). */
 export function generateEd25519KeyPair(): { publicKeyBase64: string; privateKeyPem: string } {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519')
   return {
@@ -26,13 +26,13 @@ export function generateEd25519KeyPair(): { publicKeyBase64: string; privateKeyP
   }
 }
 
-/** Ed25519 签名（私钥 PEM → 对指纹字节签名，base64）。私钥非法时抛错（发布侧应响亮失败）。 */
+/** Signature Ed25519 (clé privée PEM → signature des octets de l'empreinte, base64). Lève si la clé privée est invalide (le côté publication doit échouer bruyamment). */
 export function signEd25519(privateKeyPem: string, fingerprint: string): string {
   const privateKey = createPrivateKey(privateKeyPem)
   return edSign(null, Buffer.from(fingerprint), privateKey).toString('base64')
 }
 
-/** 公钥登记格式校验：必须是可解析的 SPKI DER base64（settings 写入口防呆用）。 */
+/** Validation du format d'enregistrement de clé publique : doit être un SPKI DER base64 analysable (garde-fou du point d'écriture settings). */
 export function isValidEd25519PublicKeyBase64(value: string): boolean {
   try {
     createPublicKey({ key: Buffer.from(value, 'base64'), format: 'der', type: 'spki' })

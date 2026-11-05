@@ -1,13 +1,13 @@
 /**
- * @dsh-ops/plugin-app —— AI 应用本体管理（方案 §六）。
+ * @dsh-ops/plugin-app —— gestion du corps des Applications IA (plan §6).
  *
- * 复用 resource-core 底座与生命周期，差异部分以扩展 schema 实现：
- * 应用形态/访问入口/发布渠道/Agent 编排拓扑（应用 → Agent → MCP/Skill 一图穿透）。
- * 应用层指标：DAU/MAU、会话深度、留存；成本链路：应用 → Agent → MCP/模型 穿透归集。
+ * Réutilise le socle et le cycle de vie de resource-core ; les différences sont portées par un schema d'extension :
+ * forme d'application/points d'accès/canaux de publication/topologie d'orchestration d'Agents (application → Agent → MCP/Skill, un graphe traversable).
+ * Métriques de la couche application : DAU/MAU, profondeur de session, rétention ; chaîne de coûts : application → Agent → MCP/modèle, consolidation traversante.
  *
- * W2-T4（MCP 治理契约 §10）：应用能力绑定——App ↔ MCP 服务挂载（app:capabilities）、
- * 上线能力门禁（CAPABILITY_GATE_FAILED）、下架/删除生命周期联动、resource-core
- * capability 依赖边（app→mcp），使拓扑 app→agent→mcp 可穿透。
+ * W2-T4 (contrat de gouvernance MCP §10) : liaison des capacités d'application — montage App ↔ services MCP (app:capabilities),
+ * portes de mise en ligne des capacités (CAPABILITY_GATE_FAILED), cascades de retrait/suppression du cycle de vie, arêtes de dépendance capability
+ * resource-core (app→mcp), rendant la topologie app→agent→mcp traversable.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -18,16 +18,16 @@ import {
 } from '../../platform-core/src/index.ts'
 import { t } from '../../platform-i18n/src/index.ts'
 import { OidcService } from '../../plugin-authn/src/oidc.ts'
-// W2-T4（契约 §10）：MCP 服务记录为 type-only 导入（零运行时耦合，供恢复/归档 additive
-// 字段写入的类型断言）；sensitiveHeaderKeys 为纯函数助手（与 console maskServiceHeaders
-// 同口径，/authorization|token|secret|key/i），共享契约明确允许跨包导入纯函数。
+// W2-T4 (contrat §10) : les enregistrements de services MCP sont importés en type-only (aucun couplage à l'exécution, pour les assertions de type de l'écriture
+// des champs additifs de restauration/archivage) ; sensitiveHeaderKeys est une aide en fonction pure (même périmètre que maskServiceHeaders de console,
+// /authorization|token|secret|key/i), le contrat partagé autorise explicitement l'import de fonctions pures entre paquets.
 import type { McpServiceRecord } from '../../plugin-mcp/src/index.ts'
 import { sensitiveHeaderKeys } from '../../plugin-mcp/src/secret-broker.ts'
 import * as appTools from './tools.ts'
 import { APP_TYPE_SPEC } from './schema.ts'
 import { buildAppOnboardingPrompt, type AppOnboardingCredential } from './onboarding.ts'
 import { AppCredentialService } from './credentials.ts'
-// REST 层消费 404 映射（console routes/apps.ts）：随包单一出口转导
+// Consommation du mappage 404 par la couche REST (console routes/apps.ts) : transduction par la sortie unique embarquée
 export { AppCredentialMissingError } from './credentials.ts'
 
 export interface AppUsageRecord extends RecordBase {
@@ -37,59 +37,59 @@ export interface AppUsageRecord extends RecordBase {
   sessions: number
   avgDepth: number
   retention7: number
-  /** 页面浏览量（同日多次上报累加；接入方主动上报口径）。 */
+  /** Pages vues (cumul sur plusieurs remontées du même jour ; périmètre de remontée proactive de l'intégrateur). */
   pv?: number
-  /** 日独立访客（同日多次上报取最大，与 DAU 同语义的 UV 口径）。 */
+  /** Visiteurs uniques du jour (maximum sur plusieurs remontées du même jour, périmètre UV de même sémantique que DAU). */
   uv?: number
 }
 
 /**
- * 平台侧自动折算的当日访客底册（trackVisit 维护，与接入方主动上报的 usage 行分离）：
- * 同日 DAU/UV = 集合规模（只增不减），PV 每次到访 +1，汇入 usage 行时经 max/累加语义天然合并。
+ * Registre de visiteurs du jour calculé automatiquement côté plateforme (tenu par trackVisit, séparé des lignes usage remontées proactivement par l'intégrateur) :
+ * DAU/UV du même jour = taille de l'ensemble (croissant seulement), PV = +1 par visite ; la fusion dans la ligne usage se fait naturellement via les sémantiques max/cumul.
  */
 export interface AppVisitRecord extends RecordBase {
   appId: string
   date: string
-  /** 当日经平台身份到访的去重用户（entry-ticket 兑换 / OIDC 发码折算 DAU）。 */
+  /** Utilisateurs dédupliqués ayant visité le jour même sous identité plateforme (conversion échange entry-ticket / émission de code OIDC en DAU). */
   userIds: string[]
-  /** 当日浏览器匿名访客标识（beacon 折算 UV；缺失时平台按 IP+UA 哈希兜底）。 */
+  /** Identifiants de visiteurs anonymes du navigateur du jour (conversion beacon en UV ; en cas d'absence, la plateforme retombe sur un hash IP+UA). */
   vids: string[]
 }
 
-/** SSO 管理授权的调用方快照（human 用户或机器凭证；与控制台 CallerInfo 对齐的最小面）。 */
+/** Instantané de l'appelant autorisé à la gestion SSO (utilisateur humain ou identifiant machine ; surface minimale alignée sur le CallerInfo console). */
 export interface AppRegistryServiceSsoCaller {
   kind: 'human' | 'machine'
-  /** machine 专属：凭证主体 ID（ownerId 以此登记时视为绑定）。 */
+  /** Spécifique machine : id du sujet d'identifiant (ownerId enregistré avec cette valeur = lié). */
   principalId?: string
-  /** machine 专属：凭证关联资源（refType='app'|'agent' 且 refId 命中即绑定）。 */
+  /** Spécifique machine : ressource liée à l'identifiant (refType='app'|'agent' avec refId correspondant = lié). */
   refType?: string
   refId?: string
-  /** human 专属：平台用户 ID（与资源 ownerId 比对）。 */
+  /** Spécifique human : id d'utilisateur plateforme (comparé au ownerId de la ressource). */
   userId?: string
   permissions: string[]
 }
 
 /**
- * 应用能力绑定记录（W2-T4，MCP 治理契约 §10，集合 app:capabilities）：
- * App ↔ MCP 服务挂载关系。required=true 的能力参与上线门禁与执行期复核；
- * exposure 钉死 gateway（服务级数据面 §7 的事实暴露形态；服务侧 exposureMode 才是暴露配置）。
+ * Enregistrements de liaison des capacités d'application (W2-T4, contrat de gouvernance MCP §10, collection app:capabilities) :
+ * relation de montage App ↔ services MCP. Les capacités required=true participent aux portes de mise en ligne et à la revérification en exécution ;
+ * exposure est verrouillé sur gateway (forme d'exposition de fait du plan de données au niveau service §7 ; c'est exposureMode côté service qui porte la configuration d'exposition).
  */
 export interface AppCapabilityLink extends RecordBase {
   appId: string
   serviceId: string
-  /** 参与上线门禁（true）/仅挂载展示（false）。 */
+  /** Participe aux portes de mise en ligne (true) / montage et affichage seulement (false). */
   required: boolean
-  /** 暴露形态（契约 §10 钉死 gateway）。 */
+  /** Forme d'exposition (verrouillée sur gateway par le contrat §10). */
   exposure: 'gateway'
-  /** 绑定状态（解绑即删记录，现仅 active）。 */
+  /** État de la liaison (délier = supprimer l'enregistrement ; seul active actuellement). */
   status: string
   boundAt: string
   boundBy: string
-  /** W2-T4 下架联动留痕：联动置 offline 时记录的前置状态，应用重上线时按此恢复。 */
+  /** Trace de la cascade de retrait W2-T4 : état préalable enregistré lors de l'arrêt en cascade, restauré à la remise en ligne de l'application. */
   offlineRestore?: { status: string; grayPercent: number; at: string }
 }
 
-/** 能力绑定归属冲突（服务 ownerEntity 已归属其他主体）：REST 层映射 409 OWNER_CONFLICT。 */
+/** Conflit de propriété d'une liaison de capacité (ownerEntity du service déjà attribué à un autre sujet) : mappé en 409 OWNER_CONFLICT à la couche REST. */
 export class CapabilityOwnerConflictError extends Error {}
 
 export class AppRegistryService extends Service {
@@ -133,8 +133,8 @@ export class AppRegistryService extends Service {
         name: `app:${(app as any).slug}`,
         refType: 'app',
         refId: app.id,
-        // app.read/app.write：注册后凭自身凭证即可完成接入验证（读自身）与指标提报/资料更新
-        //   （metrics-report、PATCH /api/apps/:id 均要求 app.write）；usage.write：直连消耗自推计量
+        // app.read/app.write : après enregistrement, l'application vérifie son intégration avec son propre identifiant (lecture de soi) et remonte métriques/informations
+        //   (metrics-report et PATCH /api/apps/:id exigent tous deux app.write) ; usage.write : consommation en direct auto-déclarée en mesure
         scopes: ['mcp.invoke', 'agent.read', 'skill.read', 'app.read', 'app.write', 'usage.write'],
       })
     }
@@ -151,9 +151,9 @@ export class AppRegistryService extends Service {
   }
 
   /**
-   * 生成接入提示词（注册同款模板，平台侧单一事实源）：
-   * rotate=true 时轮换机器凭证 secret（旧值立即失效、存量令牌吊销）并随提示词返回；
-   * rotate=false 仅含 client_id，secret 以占位符呈现（密钥丢失场景必须 rotate 才能拿到可用凭证）。
+   * Génère le prompt d'intégration (même gabarit qu'à l'enregistrement, source de vérité unique côté plateforme) :
+   * rotate=true renouvelle le secret de l'identifiant machine (ancienne valeur invalidée, jetons existants révoqués) et le renvoie avec le prompt ;
+   * rotate=false n'inclut que client_id, le secret apparaît en placeholder (en cas de perte de clé, il faut rotate pour obtenir des identifiants utilisables).
    */
   buildOnboardingPrompt(appId: string, origin: string, opts: { rotate?: boolean } = {}): {
     appName: string
@@ -177,7 +177,7 @@ export class AppRegistryService extends Service {
     return { appName: app.name, prompt: buildAppOnboardingPrompt(app, credential, origin), credential, rotated }
   }
 
-  /** 应用 → Agent 依赖图维护（编排拓扑数据源）。 */
+  /** Maintenance du graphe de dépendances application → Agent (source de données de la topologie d'orchestration). */
   private syncAgentDependencies(appId: string, agentIds: string[]): void {
     const existing = this.ctx.resourceCore.dependencies().find((record) => record.fromType === 'app' && record.fromId === appId && record.kind === 'agent')
     const keep = new Set(agentIds)
@@ -193,30 +193,30 @@ export class AppRegistryService extends Service {
     }
   }
 
-  /** 依赖拓扑可视化：应用 → Agent → MCP/Skill 一图穿透，异常节点可标注。 */
+  /** Visualisation de la topologie de dépendances : application → Agent → MCP/Skill, un graphe traversable, nœuds anormaux annotables. */
   topology(appId: string): TopologyNode {
     return this.ctx.resourceCore.topology('app', appId, 3)
   }
 
-  // -- 能力绑定（W2-T4，MCP 治理契约 §10） ----------------------------------
+  // -- Liaison des capacités (W2-T4, contrat de gouvernance MCP §10) ----------------------------------
 
-  /** 应用能力绑定集合（App ↔ MCP 服务挂载关系，模式照 app:usage 等既有集合）。 */
+  /** Collection des liaisons de capacités d'application (montages App ↔ services MCP, même modèle que les collections existantes app:usage etc.). */
   capabilities(): Collection<AppCapabilityLink> {
     return this.ctx.opsStorage.collection<AppCapabilityLink>('app:capabilities')
   }
 
-  /** 本 app 全部能力绑定（按绑定时间稳定排序）。 */
+  /** Toutes les liaisons de capacités de cet app (tri stable par date de liaison). */
   listCapabilities(appId: string): AppCapabilityLink[] {
     return this.capabilities().find((item) => item.appId === appId)
       .sort((a, b) => a.boundAt.localeCompare(b.boundAt) || a.id.localeCompare(b.id))
   }
 
   /**
-   * 绑定能力服务：服务必须存在；绑定同步把服务 ownerEntity 回写为 {type:'app', id:appId}——
-   * 仅当服务当前归属为 platform 占位（无 id，治理待办 unowned）或已是本 app 时允许回写，
-   * 已归属其他主体一律抛 CapabilityOwnerConflictError（REST 层映射 409 OWNER_CONFLICT）。
-   * 重复绑定幂等返回现态（不改 required 现值）；同步维护 resource-core 依赖边
-   * {app→mcp, kind:'capability'}（契约 §10，拓扑 app→agent→mcp 可穿透）。
+   * Lie un service de capacité : le service doit exister ; la liaison réécrit en synchronie l'ownerEntity du service en {type:'app', id:appId} —
+   * la réécriture n'est permise que si le service appartient actuellement au placeholder platform (sans id, tâche de gouvernance unowned) ou déjà à cet app ;
+   * toute propriété d'un autre sujet lève CapabilityOwnerConflictError (mappé en 409 OWNER_CONFLICT à la couche REST).
+   * Reliaison idempotente renvoyant l'état courant (valeur required inchangée) ; maintenance en synchronie de l'arête de dépendance resource-core
+   * {app→mcp, kind:'capability'} (contrat §10, topologie app→agent→mcp traversable).
    */
   bindCapability(appId: string, input: { serviceId: string; required?: boolean; boundBy: string }): { link: AppCapabilityLink; created: boolean } {
     const app = this.ctx.resourceCore.get('app', appId)
@@ -224,8 +224,8 @@ export class AppRegistryService extends Service {
     const service = this.ctx.mcpRegistry.services().get(input.serviceId)
     if (!service) throw new Error(t('MCP 服务不存在：{id}', { id: input.serviceId }))
     const existing = this.capabilities().findOne((item) => item.appId === appId && item.serviceId === input.serviceId)
-    if (existing) return { link: existing, created: false } // 幂等：重复绑定返回现态
-    // 归属回写闸门（fail-closed）：platform 占位（无 id）可认领；已被其他主体认领即冲突
+    if (existing) return { link: existing, created: false } // idempotence : reliaison renvoie l'état courant
+    // Porte de réécriture de propriété (fail-closed) : le placeholder platform (sans id) peut être revendiqué ; revendiqué par un autre sujet = conflit
     const owner = service.ownerEntity
     const claimable = !owner || (owner.type === 'platform' && !owner.id) || (owner.type === 'app' && owner.id === appId)
     if (!claimable) {
@@ -247,8 +247,8 @@ export class AppRegistryService extends Service {
   }
 
   /**
-   * 解绑能力服务：删除绑定记录与 capability 依赖边；服务归属若已回写为本 app，
-   * 联动还原为 {type:'platform'} 占位（回到治理待办 unowned；解绑联动由 REST 层 changeLog 注明）。
+   * Délie un service de capacité : supprime l'enregistrement de liaison et l'arête capability ; si la propriété du service avait été réécrite à cet app,
+   * restauration en cascade du placeholder {type:'platform'} (retour à la tâche de gouvernance unowned ; la cascade de déliaison est notée par le changeLog de la couche REST).
    */
   unbindCapability(appId: string, serviceId: string): { removed: boolean; ownerRestored: boolean } {
     const link = this.capabilities().findOne((item) => item.appId === appId && item.serviceId === serviceId)
@@ -265,12 +265,12 @@ export class AppRegistryService extends Service {
   }
 
   /**
-   * 上线能力门禁（W2-T4，契约 §10）：对本 app 全部 required 能力逐条校验，返回不满足原因
-   * 清单（空数组=通过；文案面向管理员，列明服务名+原因）。逐项口径：
-   *   ① 服务 status ∈ {online, gray}；② 已完成 verify（health 非 unknown 或有 lastProbeAt）；
-   *   ③ 工具清单非空；④ 无未决高危风险（write/admin 且 pending 的风险登记——风险登记服务
-   *   缺席（独立单测宿主，同插件 apply() 直连装配口径）时跳过该项）；
-   *   ⑤ 已配置 credential 或无敏感头需求（sensitiveHeaderKeys 与 maskServiceHeaders 同判）。
+   * Portes de mise en ligne des capacités (W2-T4, contrat §10) : vérifie une à une toutes les capacités required de cet app, renvoie la liste des motifs d'insatisfaction
+   * (tableau vide = passage ; libellés destinés aux administrateurs, nom du service + motif). Périmètre point par point :
+   *   ① status du service ∈ {online, gray} ; ② verify achevé (health ≠ unknown ou lastProbeAt présent) ;
+   *   ③ liste d'outils non vide ; ④ aucun haut risque en attente (write/admin et risque pending dans le registre — registre de risques
+   *   absent (hôte de test unitaire autonome, même périmètre d'assemblage en direct que le apply() du plugin) → ce point est sauté) ;
+   *   ⑤ credential configuré ou aucune exigence d'en-têtes sensibles (même jugement que sensitiveHeaderKeys et maskServiceHeaders).
    */
   capabilityGateFailures(appId: string): string[] {
     const failures: string[] = []
@@ -292,9 +292,9 @@ export class AppRegistryService extends Service {
       if (service.tools.length === 0) {
         failures.push(t('{label}：工具清单为空，请先完成工具发现/登记', { label }))
       }
-      // ④ 风险登记取用（W1/V11 同款结构化取用；独立单测宿主缺席=无生效登记口径可查，跳过）
+      // ④ Accès au registre de risques (même accès structuré que W1/V11 ; hôte de test unitaire autonome absent = aucun registre effectif consultable, saut)
       if (riskRegistry) {
-        // findOne：集合 find 返回数组（空数组亦为真值），取单条须用 findOne
+        // findOne : le find de la collection renvoie un tableau (un tableau vide est truthy), pour prendre une seule entrée il faut findOne
         const pendingHigh = riskRegistry.records().findOne((item) => item.serviceId === service.id
           && (item.status === 'pending_domain' || item.status === 'pending_security')
           && (item.risk === 'write' || item.risk === 'admin'))
@@ -309,24 +309,24 @@ export class AppRegistryService extends Service {
     return failures
   }
 
-  // -- 生命周期（同 Agent：L4 审批） --------------------------------------
+  // -- Cycle de vie (comme Agent : approbation L4) --------------------------------------
 
   requestOnline(appId: string, requester: { id: string; name: string }) {
     const app = this.ctx.resourceCore.get('app', appId)
     if (!app) throw new Error(t('应用不存在：{id}', { id: appId }))
     const errors = this.ctx.resourceCore.validateAttrs('app', app.attrs, 'online')
     if (errors.length > 0) throw new Error(t('上线条件不满足：{errors}', { errors: errors.join('；') }))
-    // 上线门禁（点 1，早反馈）：门禁形态（默认 web,h5）必须有 active SSO 客户端
+    // Porte de mise en ligne (point 1, retour anticipé) : la forme sous porte (défaut web,h5) doit avoir un client SSO active
     const ssoClientId = this.checkSsoGate(app)
-    // W2-T4 能力门禁（契约 §10，validateAttrs/SSO gate 之后）：required 能力逐条校验——
-    // 在线 / 已验证 / 工具非空 / 无未决高危 / 凭证就绪；任一不满足即拒绝并列明服务名+原因
+    // Portes de capacités W2-T4 (contrat §10, après validateAttrs/SSO gate) : vérification une à une des capacités required —
+    // en ligne / vérifié / outils non vides / aucun haut risque en attente / identifiants prêts ; un seul manquement = refus avec nom du service + motif
     const capabilityFailures = this.capabilityGateFailures(appId)
     if (capabilityFailures.length > 0) {
       throw new Error(t('CAPABILITY_GATE_FAILED：能力门禁未通过（{count} 项）——{reasons}', { count: capabilityFailures.length, reasons: capabilityFailures.join('；') }))
     }
     return this.ctx.audit.createApproval({
       kind: 'app.online',
-      // WP-10/L1：L4 高危操作统一高风险——通过需二次确认，通过即落公司级终审标记
+      // WP-10/L1 : les opérations L4 à haut risque sont uniformément à haut risque — validation exige une double confirmation, l'approbation inscrit la marque de revue finale au niveau entreprise
       riskLevel: 'high',
       title: t('AI 应用上线：{name}', { name: app.name }),
       payload: { appId, requesterId: requester.id, ...(ssoClientId !== undefined ? { ssoClientId } : {}) },
@@ -335,7 +335,7 @@ export class AppRegistryService extends Service {
     })
   }
 
-  /** SSO 门禁校验：返回 active 客户端 clientId（供审批单快照），违规抛错并指路。 */
+  /** Contrôle de la porte SSO : renvoie le clientId du client active (pour l'instantané du dossier d'approbation), lève en indiquant la voie en cas d'infraction. */
   private checkSsoGate(app: { id: string; name: string; attrs: Record<string, unknown> }): string | undefined {
     const enforce = AppRegistryService.ssoEnforceTypes()
     if (enforce.length === 0) return this.activeSsoClient(app.id)?.clientId
@@ -354,7 +354,7 @@ export class AppRegistryService extends Service {
     if (!reason?.trim()) throw new Error(t('下架必须填写原因（护栏要求）'))
     return this.ctx.audit.createApproval({
       kind: 'app.offline',
-      // WP-10/L1：L4 高危操作统一高风险——通过需二次确认，通过即落公司级终审标记
+      // WP-10/L1 : les opérations L4 à haut risque sont uniformément à haut risque — validation exige une double confirmation, l'approbation inscrit la marque de revue finale au niveau entreprise
       riskLevel: 'high',
       title: t('AI 应用下架：{name}', { name: app.name }),
       payload: { appId, reason },
@@ -371,19 +371,19 @@ export class AppRegistryService extends Service {
 
   offline(appId: string, actor: string, reason: string) {
     const result = this.ctx.resourceCore.transition('app', appId, 'offline', actor, reason)
-    // W2-T4 下架联动（契约 §10）：能力服务随应用一起退出服务——app.offline 执行器与
-    // requestOffline 完成路径均经本方法收口，联动实现单点化
+    // Cascade de retrait W2-T4 (contrat §10) : les services de capacités quittent le service avec l'application — l'exécuteur app.offline et
+    // le chemin d'achèvement de requestOffline convergent tous deux vers cette méthode, l'implémentation de cascade est en point unique
     this.linkageOfflineCapabilityServices(appId)
     this.ctx.platformBus.emit(PlatformEvents.AppOfflined, { id: appId, name: result.entity.name, actor, reason, type: 'app', slug: result.entity.slug })
     return result.entity
   }
 
   /**
-   * 下架联动（W2-T4，契约 §10）：本 app 全部能力对应服务（ownerEntity 已回写为本 app 的，
-   * 含非 required）执行下线。系统联动走直下路径（直调 offlineService——审批语义仅适用于
-   * 人工操作），actor 标记 app-offline-linkage；服务下线经 plugin-mcp 既有管道发 McpOfflined
-   * 事件，changeLog/审计自动跟随。恢复前置状态记录在绑定记录 offlineRestore 供重上线恢复。
-   * 单服务失败不阻断应用下架主流程（warn 留痕，可经治理摘要/能力视图发现）。
+   * Cascade de retrait (W2-T4, contrat §10) : met hors ligne les services correspondant à toutes les capacités de cet app (ceux dont ownerEntity a été réécrit à cet app,
+   * non required inclus). La cascade système passe par l'arrêt direct (appel direct d'offlineService — la sémantique d'approbation ne s'applique qu'aux
+   * opérations humaines), actor marqué app-offline-linkage ; la mise hors ligne du service émet McpOfflined via le pipeline existant de plugin-mcp,
+   * changeLog/audit suivent automatiquement. L'état préalable de restauration est conservé dans offlineRestore de l'enregistrement de liaison pour la remise en ligne.
+   * L'échec d'un seul service ne bloque pas le retrait principal de l'application (trace warn, découvrable via le résumé de gouvernance/vue des capacités).
    */
   private linkageOfflineCapabilityServices(appId: string): void {
     const app = this.ctx.resourceCore.get('app', appId)
@@ -404,10 +404,10 @@ export class AppRegistryService extends Service {
   }
 
   /**
-   * 重上线恢复（W2-T4）：应用重新上线成功后，把曾联动下线的能力服务恢复到下线前状态。
-   * plugin-mcp deployService 不接受 offline 起点（仅 draft/verifying/gray/online/unhealthy，
-   * 见其状态白名单），故经 services() 公开 getter 直写恢复前置 status/grayPercent，
-   * 并落 change 审计留痕；版本/versions 不动（恢复不是新版本发布，不发 McpDeployed 事件）。
+   * Restauration à la remise en ligne (W2-T4) : après une remise en ligne réussie de l'application, les services de capacités arrêtés en cascade reviennent à leur état préalable.
+   * deployService de plugin-mcp n'accepte pas le point de départ offline (seulement draft/verifying/gray/online/unhealthy,
+   * voir sa liste blanche d'états), d'où l'écriture directe du status/grayPercent préalables via le getter public services(),
+   * avec trace d'audit change ; version/versions intacts (la restauration n'est pas une publication de nouvelle version, pas d'événement McpDeployed).
    */
   restoreCapabilityServices(appId: string): void {
     for (const link of this.listCapabilities(appId)) {
@@ -415,7 +415,7 @@ export class AppRegistryService extends Service {
       const restore = link.offlineRestore
       const service = this.ctx.mcpRegistry.services().get(link.serviceId)
       if (service && service.status === 'offline') {
-        // W2-T4 重上线恢复：deployService 不收 offline 起点，直写回前置状态（类型收窄断言）
+        // Restauration à la remise en ligne W2-T4 : deployService refuse le départ offline, écriture directe de l'état préalable (assertion de resserrement de type)
         this.ctx.mcpRegistry.services().update(link.serviceId, {
           status: restore.status as McpServiceRecord['status'],
           grayPercent: restore.grayPercent,
@@ -427,20 +427,20 @@ export class AppRegistryService extends Service {
             resourceName: service.name, result: 'ok',
             detail: t('应用重上线联动恢复能力服务：status={status} gray={gray}%', { status: restore.status, gray: restore.grayPercent }),
           })
-        } catch { /* 最小宿主无审计服务时不阻断恢复 */ }
+        } catch { /* sans service d'audit chez l'hôte minimal, la restauration n'est pas bloquée */ }
       }
       this.capabilities().update(link.id, { offlineRestore: undefined })
     }
   }
 
-  /** 归档（终态）：下架后的应用彻底退出运营；关联 SSO 客户端经 app.archived 事件联动禁用。 */
+  /** Archivage (état final) : l'application retirée quitte définitivement l'exploitation ; le client SSO associé est désactivé en cascade via l'événement app.archived. */
   archive(appId: string, actor: string) {
     const result = this.ctx.resourceCore.transition('app', appId, 'archive', actor)
     this.ctx.platformBus.emit(PlatformEvents.AppArchived, { id: appId, name: result.entity.name, actor, type: 'app', slug: result.entity.slug })
     return result.entity
   }
 
-  /** 删除后的关联清理：编排依赖边清除、SSO 客户端与机器凭证禁用；客户端记录与用量/审计数据保留。 */
+  /** Nettoyage des liens après suppression : arêtes d'orchestration effacées, client SSO et identifiants machine désactivés ; enregistrements clients et données d'usage/audit conservés. */
   purge(appId: string): void {
     for (const record of this.ctx.resourceCore.dependencies().find((item) => item.fromType === 'app' && item.fromId === appId)) {
       this.ctx.resourceCore.dependencies().remove(record.id)
@@ -450,18 +450,18 @@ export class AppRegistryService extends Service {
     }
     const principal = this.ctx.authn.principals().findOne((item) => item.refType === 'app' && item.refId === appId)
     if (principal && principal.status === 'active') this.ctx.authn.disablePrincipal(principal.id, '应用删除联动')
-    // 外部凭证托管（issue #19）联动清库：应用不存在则凭证无归属，整个密钥文件删除（删除即销毁）
+    // Hébergement d'identifiants externes (issue #19) effacement en cascade : sans application, les identifiants n'ont plus de propriétaire, fichier de clés entier supprimé (supprimer = détruire)
     this.ctx.appCredentials.purge(appId)
-    // W2-T4 归档联动（契约 §10）：能力服务保持 offline（不触碰状态、不复活），补 archivedBy
-    // 标记（additive 字段，W3 拓扑/治理消费可读）；归属若为本 app 则还原 platform 占位
-    // （防悬挂引用，同解绑语义）；绑定记录清除——capability 依赖边/凭证文件/OIDC/机器凭证
-    // 联动均由上方既有逻辑覆盖，此处不重复。
+    // Cascade d'archivage W2-T4 (contrat §10) : les services de capacités restent offline (état intact, pas de résurrection), marquage archivedBy
+    // (champ additif, lisible par la topologie/gouvernance W3) ; la propriété, si elle est à cet app, retourne au placeholder platform
+    // (anti-référence pendante, même sémantique que la déliaison) ; effacement des enregistrements de liaison — arêtes capability/fichiers d'identifiants/OIDC/identifiants machine
+    // les cascades sont déjà couvertes par la logique existante ci-dessus, pas de duplication ici.
     for (const link of this.listCapabilities(appId)) {
       const service = this.ctx.mcpRegistry.services().get(link.serviceId)
       if (service) {
         const owner = service.ownerEntity
         this.ctx.mcpRegistry.services().update(link.serviceId, {
-          archivedBy: appId, // W2-T4 归档联动
+          archivedBy: appId, // cascade d'archivage W2-T4
           ...(owner.type === 'app' && owner.id === appId ? { ownerEntity: { type: 'platform' as const } } : {}),
         } as unknown as Partial<McpServiceRecord>)
       }
@@ -469,16 +469,16 @@ export class AppRegistryService extends Service {
     }
   }
 
-  // -- SSO 客户端（应用 ↔ 平台身份源打通；owner 自助签发） ----------------------
+  // -- Clients SSO (branchement application ↔ source d'identité plateforme ; auto-émission par le owner) ----------------------
 
-  /** 上线门禁覆盖的应用形态（APP_SSO_ENFORCE，默认 web,h5；空串可关闭门禁）。 */
+  /** Formes d'application couvertes par la porte de mise en ligne (APP_SSO_ENFORCE, défaut web,h5 ; chaîne vide = porte désactivée). */
   static ssoEnforceTypes(): string[] {
     return String(process.env.APP_SSO_ENFORCE ?? 'web,h5').split(',').map((item) => item.trim()).filter(Boolean)
   }
 
   /**
-   * owner-based 授权（全库首例，非 permission-point 制）：
-   * human 且 app.ownerId === userId，或持 authn.oidc.write（管理员兜底）；机器 principal 一律 403。
+   * Autorisation owner-based (première du dépôt, hors système de points de permission) :
+   * human et app.ownerId === userId, ou détention d'authn.oidc.write (filet administrateur) ; tout principal machine → 403.
    */
   assertSsoManage(app: { id: string; name: string; ownerId: string }, caller: { kind: string; userId?: string; permissions: string[] }): void {
     if (caller.kind !== 'human' || !caller.userId) {
@@ -492,9 +492,9 @@ export class AppRegistryService extends Service {
   }
 
   /**
-   * 回跳地址护栏：https 任意主机；http 仅限内网（环回 / RFC1918 私网 / 链路本地 / IPv6 ULA）。
-   * 纯内网部署可用 APP_SSO_ALLOW_HTTP=1 放开全部 http 主机（公网明文回调仍建议 https）。
-   * 公共静态：plugin-console 的管理端 OIDC 客户端路由复用同一份口径。
+   * Garde des adresses de retour : https toute machine ; http réservé à l'intranet (boucle locale / RFC1918 privé / lien local / IPv6 ULA).
+   * Un déploiement purement intranet peut ouvrir toutes les machines http avec APP_SSO_ALLOW_HTTP=1 (retours en clair sur Internet : https recommandé).
+   * Statique public : les routes de gestion des clients OIDC de plugin-console réutilisent le même périmètre.
    */
   static assertRedirectUris(uris: string[]): void {
     if (!Array.isArray(uris) || uris.length === 0) throw new Error(t('redirectUris 必填（至少一个回调地址）'))
@@ -508,18 +508,18 @@ export class AppRegistryService extends Service {
     }
   }
 
-  /** 内网主机判定：环回、RFC1918 私网、链路本地、IPv6 ULA。 */
+  /** Jugement d'hôte intranet : boucle locale, privé RFC1918, lien local, IPv6 ULA. */
   private static isIntranetHost(hostname: string): boolean {
     const host = hostname.toLowerCase().replace(/^\[|\]$/g, '')
     if (host === 'localhost' || host === '::1' || host === '0.0.0.0') return true
     if (host.includes(':')) return host.startsWith('f') || host.startsWith('fd') // fc00::/7 ULA
     const parts = host.split('.')
-    if (parts.length !== 4 || parts.some((part) => !/^\d+$/.test(part))) return false // 非点分 IPv4 一律按公网处理
+    if (parts.length !== 4 || parts.some((part) => !/^\d+$/.test(part))) return false // tout ce qui n'est pas un IPv4 pointé est traité comme public
     const [a, b] = parts.map(Number) as [number, number]
     return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254)
   }
 
-  /** 环回主机判定（本机回调）：localhost / *.localhost / 127.0.0.0/8 / ::1 / 0.0.0.0。 */
+  /** Jugement d'hôte en boucle locale (retours locaux) : localhost / *.localhost / 127.0.0.0/8 / ::1 / 0.0.0.0. */
   static isLoopbackHost(hostname: string): boolean {
     const host = hostname.toLowerCase().replace(/^\[|\]$/g, '')
     if (host === 'localhost' || host === '::1' || host === '0.0.0.0' || host.endsWith('.localhost')) return true
@@ -527,7 +527,7 @@ export class AppRegistryService extends Service {
     return false
   }
 
-  /** 回调地址全集是否均为环回（空集不算——机器自助必须显式登记环回回调）。 */
+  /** L'ensemble des adresses de callback est-il entièrement en boucle locale (ensemble vide exclu — l'auto-service machine doit enregistrer explicitement des callbacks en boucle locale). */
   static isLoopbackOnlyCallback(uris: string[] | undefined): boolean {
     if (!Array.isArray(uris) || uris.length === 0) return false
     return uris.every((uri) => {
@@ -536,21 +536,21 @@ export class AppRegistryService extends Service {
   }
 
   /**
-   * 机器身份环回自助开关（默认开，APP_SSO_MACHINE_LOOPBACK=0 关闭）：
-   * 应用/Agent 的机器凭证（或登记 owner principal）可自行签发/管理回调地址全为环回的 SSO 客户端——
-   * 本机回调不跨机，授权码 + 强制 PKCE 下第三者截码无利可图（RFC 8252 loopback 口径）；
-   * 非环回回调（内网 IP / 公网域名）仍须 human owner 或管理员操作。
+   * Interrupteur d'auto-service en boucle locale des identités machine (ouvert par défaut, APP_SSO_MACHINE_LOOPBACK=0 pour fermer) :
+   * l'identifiant machine d'une application/d'un Agent (ou le principal owner enregistré) peut s'auto-émettre/gérer un client SSO dont les callbacks sont tous en boucle locale —
+   * un callback local ne traverse pas de machine, avec code d'autorisation + PKCE forcé l'interception par un tiers n'a aucun intérêt (périmètre loopback RFC 8252) ;
+   * les callbacks hors boucle locale (IP intranet / domaine public) exigent toujours un owner humain ou un administrateur.
    */
   static machineSsoSelfServiceEnabled(): boolean {
     return String(process.env.APP_SSO_MACHINE_LOOPBACK ?? '1') !== '0'
   }
 
   /**
-   * SSO 管理授权决策（app/agent 两侧控制台路由共用口径）：
-   * - human：资源 owner（ownerId === userId）或持 authn.oidc.write（管理员兜底）→ 放行；
-   * - machine：开关开启时，绑定本资源的凭证（refType/refId 命中或 ownerId === principalId）可放行——
-   *   create/update 按本次生效回调集判定，rotate/enable 按现存回调集判定，disable（纯降险）恒放行；
-   *   回调集必须全为环回（isLoopbackOnlyCallback），否则仅 human 可操作。
+   * Décision d'autorisation de gestion SSO (périmètre partagé par les routes console des côtés app/agent) :
+   * - human : owner de la ressource (ownerId === userId) ou détenteur d'authn.oidc.write (filet administrateur) → passage ;
+   * - machine : interrupteur ouvert, l'identifiant lié à cette ressource (refType/refId correspondant ou ownerId === principalId) peut passer —
+   *   create/update jugent sur l'ensemble de callbacks effectif de la requête, rotate/enable sur l'ensemble existant, disable (pure réduction de risque) passe toujours ;
+   *   l'ensemble de callbacks doit être intégralement en boucle locale (isLoopbackOnlyCallback), sinon seul human peut opérer.
    */
   static ssoManageDecision(
     resource: { id: string; name: string; ownerId: string },
@@ -567,7 +567,7 @@ export class AppRegistryService extends Service {
       if (!bound) {
         return { allowed: false, reason: t('机器身份仅可管理自身绑定资源的 SSO 客户端（「{name}」须为凭证 refType/refId 命中或登记 owner）', { name: resource.name }) }
       }
-      if (op === 'disable') return { allowed: true } // 禁用纯降险，恒放行
+      if (op === 'disable') return { allowed: true } // la désactivation ne fait que réduire le risque, passage toujours
       if (!AppRegistryService.isLoopbackOnlyCallback([...effective.redirectUris, ...effective.postLogoutUris])) {
         return { allowed: false, reason: t('机器身份自助仅限环回回调地址（http://127.0.0.1:PORT、http://localhost:PORT、0.0.0.0）；非环回回调请由应用 owner 或管理员在控制台操作') }
       }
@@ -582,8 +582,8 @@ export class AppRegistryService extends Service {
   }
 
   /**
-   * owner-based 授权（全库首例，非 permission-point 制）+ 机器环回自助例外（ssoManageDecision）。
-   * 服务层兜底校验：控制台路由层已先行调用 ssoManageDecision 并 403，此处保持同口径防绕行。
+   * Autorisation owner-based (première du dépôt, hors système de points de permission) + exception d'auto-service en boucle locale machine (ssoManageDecision).
+   * Validation filet en couche service : la couche de routes console a déjà appelé ssoManageDecision et renvoyé 403 ; ici même périmètre anti-contournement.
    */
   static assertSsoManage(
     app: { id: string; name: string; ownerId: string },
@@ -599,7 +599,7 @@ export class AppRegistryService extends Service {
     return this.ctx.oidc.clientsForApp(appId).find((client) => OidcService.isClientActive(client))
   }
 
-  /** 签发应用关联 OIDC 客户端（name=应用名，回填 refType/refId）；secret 仅本次返回。 */
+  /** Émet le client OIDC associé à l'application (name=nom de l'application, refType/refId renseignés en retour) ; le secret n'est renvoyé qu'une fois. */
   createSsoClient(appId: string, input: {
     redirectUris: string[]
     clientType?: 'confidential' | 'public'
@@ -649,17 +649,17 @@ export class AppRegistryService extends Service {
     return clients[0]!
   }
 
-  // -- 组织架构同步（应用自助复用平台组织模块） -----------------------------
+  // -- Synchronisation d'organigramme (auto-service des applications via le module organisation de la plateforme) -----------------------------
 
   /**
-   * 组织架构快照（REST /api/apps/:id/org-sync，应用自助通道）：
-   * 接入应用凭自身绑定机器凭证（或 owner 身份）拉取平台组织树与在职成员，
-   * 在应用内复刻/关联平台组织架构功能（组织树、部门成员、负责人识别）。
-   * 关联键：users[].id 即 OIDC userinfo 的 sub，登录身份直接挂到部门/负责人。
-   * PII 最小化：不含手机号/邮箱/角色/三方绑定（更全字段走 /api/iam/roster，
-   * 须管理员追加 iam.roster.read）；已注销（deactivated）账号不出现。
-   * version 为内容哈希（排序后稳定）：组织/成员任一变更即变，
-   * 接入方以 ?ifNoneMatch= 轮询实现零载荷变更检测；快照即事实，变更后全量对齐覆盖本地副本。
+   * Instantané d'organigramme (REST /api/apps/:id/org-sync, canal en libre-service de l'application) :
+   * l'application intégrée tire avec son propre identifiant machine lié (ou l'identité owner) l'arbre organisationnel de la plateforme et les membres en poste,
+   * pour répliquer/associer la fonction d'organigramme plateforme dans l'application (arbre d'organisation, membres par département, identification des responsables).
+   * Clé d'association : users[].id est le sub du userinfo OIDC, l'identité de connexion s'accroche directement au département/au responsable.
+   * Minimisation PII : sans téléphone/e-mail/rôles/liens tiers (champs plus complets via /api/iam/roster,
+   * exigeant l'ajout administrateur d'iam.roster.read) ; les comptes désactivés (deactivated) n'apparaissent pas.
+   * version = hash de contenu (stable après tri) : tout changement d'organisation/membre le change,
+   * l'intégrateur implémente la détection de changement à charge nulle par polling ?ifNoneMatch= ; l'instantané fait foi, après changement on réaligne intégralement la copie locale.
    */
   orgSnapshot(appId: string, opts: { ifNoneMatch?: string } = {}): {
     unchanged: boolean
@@ -697,7 +697,7 @@ export class AppRegistryService extends Service {
         updatedAt: user.updatedAt,
       }))
       .sort((a, b) => a.displayName.localeCompare(b.displayName, 'zh-Hans-CN') || a.id.localeCompare(b.id))
-    // 内容哈希（16 位足内网规模碰撞无虞）：含全部对外字段与 updatedAt，插入顺序不参与
+    // Hash de contenu (16 caractères suffisent, collisions improbables à l'échelle intranet) : inclut tous les champs exposés et updatedAt, l'ordre d'insertion n'intervient pas
     const version = createHash('sha256')
       .update(JSON.stringify({ orgs, users }))
       .digest('hex')
@@ -706,19 +706,19 @@ export class AppRegistryService extends Service {
     return { unchanged: false, version, generatedAt: new Date().toISOString(), orgs, users }
   }
 
-  // -- 应用层指标 ---------------------------------------------------------
+  // -- Métriques de la couche application ---------------------------------------------------------
 
   /**
-   * 记录应用层指标（外部应用主动上报通道：REST /api/apps/:id/metrics-report、
-   * 工具 app_metrics_report、CLI app report 均汇入此方法）。
-   * 语义：同日 DAU/UV 取最大、会话数/PV 累加；可指定 date 补录历史（YYYY-MM-DD）。
+   * Enregistre les métriques de la couche application (canal de remontée proactive des applications externes : REST /api/apps/:id/metrics-report,
+   * outil app_metrics_report et CLI app report convergent tous vers cette méthode).
+   * Sémantique : même jour, DAU/UV au maximum, sessions/PV cumulés ; date possible pour compléter l'historique (YYYY-MM-DD).
    */
   recordUsage(appId: string, usage: { dau?: number; sessions?: number; avgDepth?: number; retention7?: number; pv?: number; uv?: number; date?: string }): void {
     if (!this.ctx.resourceCore.get('app', appId)) throw new Error(t('应用不存在：{id}', { id: appId }))
     const date = usage.date ?? new Date().toISOString().slice(0, 10)
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(t('date 格式非法：{date}（应为 YYYY-MM-DD）', { date }))
-    // REL-04：指标入参校验（对照 beacon 侧 trackVisit 的非负钳制口径）——负数 pv/uv/dau/sessions
-    // 可刷减累计/取大口径，retention7 越界会污染留存口径，一律 400 拒收
+    // REL-04 : validation des entrées de métriques (même périmètre d'écrêtage des non-négatifs que trackVisit côté beacon) — pv/uv/dau/sessions négatifs
+    // peuvent fausser les cumuls/les maxima, un retention7 hors bornes pollue le périmètre de rétention → 400 refus systématique
     for (const [key, value] of [['pv', usage.pv], ['uv', usage.uv], ['dau', usage.dau], ['sessions', usage.sessions]] as const) {
       if (value !== undefined && (!Number.isInteger(value) || value < 0)) throw new Error(t('{key} 必须是非负整数（收到：{value}）', { key, value }))
     }
@@ -751,11 +751,11 @@ export class AppRegistryService extends Service {
   }
 
   /**
-   * 平台侧自动折算访客指标（区别于接入方主动上报 recordUsage）：
-   *   - entry-ticket 兑换 / OIDC 发码 → 平台身份访客（按 userId 去重，折算 DAU）；
-   *   - 浏览器 beacon → 匿名访客（按 vid 去重，折算 UV）+ PV 逐次累加。
-   * 同一日集合只增不减，DAU/UV 以集合规模经 recordUsage 的 max 语义汇入、PV 走累加；
-   * 未知应用静默忽略（公开 beacon 端点不得向调用方泄露应用存在性）。
+   * Calcul automatique côté plateforme des métriques visiteurs (distinct de la remontée proactive recordUsage des intégrateurs) :
+   *   - échange entry-ticket / émission de code OIDC → visiteur sous identité plateforme (dédupliqué par userId, converti en DAU) ;
+   *   - beacon navigateur → visiteur anonyme (dédupliqué par vid, converti en UV) + PV cumulé à chaque visite.
+   * L'ensemble du même jour ne fait que croître ; DAU/UV entrent via la sémantique max de recordUsage selon la taille de l'ensemble, PV en cumul ;
+   * application inconnue ignorée silencieusement (le point beacon public ne doit pas divulguer l'existence d'une application à l'appelant).
    */
   trackVisit(appId: string, visitor: { userId?: string; vid?: string; pv?: number }): void {
     if (!this.ctx.resourceCore.get('app', appId)) return
@@ -766,7 +766,7 @@ export class AppRegistryService extends Service {
     const date = new Date().toISOString().slice(0, 10)
     const record = this.visits().findOne((item) => item.appId === appId && item.date === date)
       ?? this.visits().insert({ id: newId('apv'), appId, date, userIds: [], vids: [] })
-    // 单应用单日底册封顶（公开端点写入面，防异常膨胀；正常内网流量远达不到）
+    // Plafond du registre par application et par jour (surface d'écriture de point public, anti-gonflement anormal ; le trafic intranet normal en est très loin)
     const CAP = 10_000
     const userIds = record.userIds ?? []
     const vids = record.vids ?? []
@@ -781,7 +781,7 @@ export class AppRegistryService extends Service {
     })
   }
 
-  /** 访客底册保留 31 天（仅服务当日折算与对账，久置无价值）。 */
+  /** Registre des visiteurs conservé 31 jours (sert seulement à la conversion du jour et à la réconciliation, sans valeur au-delà). */
   private pruneVisits(): void {
     const cutoff = new Date(Date.now() - 31 * 86_400_000).toISOString().slice(0, 10)
     for (const record of this.visits().find((item) => item.date < cutoff)) this.visits().remove(record.id)
@@ -821,7 +821,7 @@ export class AppRegistryService extends Service {
     }
   }
 
-  /** 成本穿透：应用 → Agent → MCP/模型。 */
+  /** Traversée des coûts : application → Agent → MCP/modèle. */
   costBreakdown(appId: string): Array<{ agentName: string; llmTokens: number; toolCalls: number; costYuan: number }> {
     const rows: Array<{ agentName: string; llmTokens: number; toolCalls: number; costYuan: number }> = []
     const deps = this.ctx.resourceCore.dependencies().find((record) => record.fromType === 'app' && record.fromId === appId && record.kind === 'agent')
@@ -846,20 +846,20 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export const name = 'app'
-// W2-T4：mcpRegistry 直访注入——两个宿主装配序列中 plugin-mcp 均先于本插件装配
-// （boot-all.ts mcp→app、cordis.yml ops-mcp→ops-app），check-boot-order [A] 机器可校验；
-// 能力绑定/门禁/联动因此走直接 ctx 访问（fail-closed），无需 console 注入回调。
-// appCredentials 为本插件自供服务（apply 内先于消费装配，purge 经 registry 联动）。
+// W2-T4 : accès direct au mcpRegistry injecté — dans les deux séquences d'assemblage hôte, plugin-mcp est assemblé avant ce plugin
+// (boot-all.ts mcp→app, cordis.yml ops-mcp→ops-app), vérifiable machine par check-boot-order [A] ;
+// liaison des capacités/portes/cascades passent donc par l'accès ctx direct (fail-closed), sans callback injecté par console.
+// appCredentials est un service auto-fourni par ce plugin (assemblé avant consommation dans apply, purge en cascade via registry).
 export const inject = ['opsStorage', 'platformBus', 'resourceCore', 'authn', 'oidc', 'audit', 'iam', 'mcpRegistry']
 
 export function apply(ctx: Context) {
   const registry = new AppRegistryService(ctx)
-  // 外部凭证托管（issue #19 方向 A 最小闭环）：AES-256-GCM 静态加密密钥文件，
-  // 取值独立权限点 app.credential.fetch + 逐次审计；purge 经 registry 删除联动清库
+  // Hébergement d'identifiants externes (issue #19 direction A, boucle minimale) : fichier de clés chiffré au repos AES-256-GCM,
+  // lecture via le point de permission dédié app.credential.fetch + audit à chaque occurrence ; purge efface en cascade via la suppression registry
   new AppCredentialService(ctx)
   ctx.plugin(appTools)
-  // 平台侧自动折算（指标口径补全）：SSO 身份到访 → 应用 DAU，经事件总线解耦（不直连 authn/console）。
-  // entry-ticket 兑换（console 发射）与 OIDC 发码（authn OidcService 发射）都代表用户已带平台身份进入应用。
+  // Calcul automatique côté plateforme (complément du périmètre de métriques) : visite sous identité SSO → DAU d'application, découplé par le bus d'événements (pas de connexion directe authn/console).
+  // L'échange entry-ticket (émis par console) et l'émission de code OIDC (émise par OidcService authn) signifient tous deux que l'utilisateur est entré dans l'application sous identité plateforme.
   ctx.platformBus.on(PlatformEvents.EntryTicketRedeemed, (payload) => {
     const p = payload as { refType?: string; refId?: string; userId?: string }
     if (p.refType === 'app' && p.refId && p.userId) {
@@ -874,7 +874,7 @@ export function apply(ctx: Context) {
     }
   })
   ctx.effect(() => ctx.audit.registerExecutor('app.online', async (payload) => {
-    // 上线门禁（点 2，兜底）：审批挂单期间客户端可能被禁用——执行前复核，失效则执行失败留痕
+    // Porte de mise en ligne (point 2, filet) : pendant l'examen du dossier, le client peut être désactivé — revérification avant exécution, échec = échec d'exécution avec trace
     const appId = String(payload['appId'])
     const app = ctx.resourceCore.get('app', appId)
     if (app) {
@@ -884,14 +884,14 @@ export function apply(ctx: Context) {
         throw new Error(t('执行期复核失败：审批期间 SSO 客户端已失效（{appType} 形态门禁），请重新签发后再发起上线', { appType }))
       }
     }
-    // W2-T4 执行期复核（契约 §10）：挂单期间 required 能力可能被下线/降级——
-    // 逐条复核（在线/已验证/工具非空/无未决高危/凭证就绪），不满足则执行失败留痕
+    // Revérification en exécution W2-T4 (contrat §10) : pendant l'examen du dossier, les capacités required peuvent avoir été mises hors ligne/dégradées —
+    // revérification une à une (en ligne/vérifié/outils non vides/aucun haut risque en attente/identifiants prêts), échec = échec d'exécution avec trace
     const capabilityFailures = registry.capabilityGateFailures(appId)
     if (capabilityFailures.length > 0) {
       throw new Error(t('执行期复核失败：审批期间能力服务状态变化（CAPABILITY_GATE_FAILED）——{reasons}', { reasons: capabilityFailures.join('；') }))
     }
     const entity = registry.online(appId, 'approval-center')
-    // W2-T4 重上线恢复：曾随应用下架联动下线的能力服务自动恢复前置状态
+    // Restauration à la remise en ligne W2-T4 : les services de capacités arrêtés en cascade avec l'application retrouvent leur état préalable automatiquement
     registry.restoreCapabilityServices(appId)
     return entity
   }))
@@ -901,7 +901,7 @@ export function apply(ctx: Context) {
   migrateAppCredentialScopes(ctx)
 }
 
-/** 一次性迁移：为存量应用机器凭证补 app.read/app.write/usage.write（接入验证与指标提报/资料更新能力对齐）。 */
+/** Migration unique : complète app.read/app.write/usage.write sur les identifiants machine des applications existantes (alignement de la vérification d'intégration et de la remontée de métriques/informations). */
 function migrateAppCredentialScopes(ctx: Context): void {
   const markers = ctx.opsStorage.collection<{ id: string; doneAt: string }>('app:migrations')
   const MARK = 'app-scopes-self-serve-v1'

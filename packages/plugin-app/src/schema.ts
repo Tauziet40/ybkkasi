@@ -1,10 +1,10 @@
 /**
- * AI 应用本体属性表（方案 §6.1）：在 Agent 属性模型上扩展应用特有字段。
+ * Table d'attributs du corps des Applications IA (plan §6.1) : extension des champs propres à l'application sur le modèle d'attributs d'Agent.
  */
 import type { ResourceTypeSpec } from '../../platform-core/src/index.ts'
 import { ASSET_CATEGORIES } from '../../platform-core/src/index.ts'
 
-/** 各资产板块统一业务分类选项（口径见 platform-core/src/taxonomy.ts）。 */
+/** Options de classification métier unifiées de tous les volets d'actifs (périmètre : voir platform-core/src/taxonomy.ts). */
 const CATEGORY_OPTIONS = ASSET_CATEGORIES.map((value) => ({ value, label: value }))
 
 export const APP_TYPE_SPEC: ResourceTypeSpec = {

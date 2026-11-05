@@ -1,14 +1,14 @@
 /**
- * 发布清单签名工具（M2 技术债 T5 收口——平台自更新供应链校验的发布侧配套）。
+ * Outil de signature du manifeste de publication (clôture de la dette technique T5 de M2 — volet publication de la validation de chaîne d'approvisionnement de l'auto-mise à jour plateforme).
  *
- * 生成 release-manifest.json（随仓库根发布，plugin-update 升级时按目标 commit 拉取验签）：
- *   node scripts/release-manifest.mjs --generate-key --key-file release-key.pem   # 首次：生成发布密钥对
- *   node scripts/release-manifest.mjs --key-file release-key.pem                  # 发布时：生成签名清单
- *   node scripts/release-manifest.mjs --check --out release-manifest.json --pubkey <base64>  # 管理员侧校验
+ * Génère release-manifest.json (publié à la racine du dépôt ; plugin-update tire et vérifie la signature selon le commit cible à la mise à niveau) :
+ *   node scripts/release-manifest.mjs --generate-key --key-file release-key.pem   # première fois : génère la paire de clés de publication
+ *   node scripts/release-manifest.mjs --key-file release-key.pem                  # à la publication : génère le manifeste signé
+ *   node scripts/release-manifest.mjs --check --out release-manifest.json --pubkey <base64>  # validation côté administrateur
  *
- * 私钥只在发布方（--key-file 或 env RELEASE_SIGNING_KEY），绝不入库/入平台；
- * 公钥由管理员登记进平台更新设置（POST /api/update/settings.releasePublicKey）。
- * 签名对象 = 目标 commit 全长 SHA（版本钉扎已解析出该值，验「commit 被发布密钥签过」即供应链校验）。
+ * La clé privée reste chez l'éditeur (--key-file ou env RELEASE_SIGNING_KEY), jamais en base ni sur la plateforme ;
+ * la clé publique est enregistrée par l'administrateur dans les paramètres de mise à jour de la plateforme (POST /api/update/settings.releasePublicKey).
+ * Objet signé = SHA pleine longueur du commit cible (le verrouillage de version a résolu cette valeur ; vérifier « le commit a été signé par la clé de publication » revient à la validation de chaîne d'approvisionnement).
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
@@ -27,7 +27,7 @@ const fail = (message) => { console.error(`✘ ${message}`); process.exit(1) }
 const keyFile = argOf('--key-file')
 const out = argOf('--out') ?? 'release-manifest.json'
 
-// --check 只需公钥（管理员侧复核产物；私钥不必在场）
+// --check n'a besoin que de la clé publique (contre-vérification du produit côté administrateur ; la clé privée n'a pas besoin d'être présente)
 if (process.argv.includes('--check')) {
   const publicKey = process.env.RELEASE_SIGNING_PUBKEY ?? argOf('--pubkey')
   if (!publicKey) fail('--check 需要 --pubkey <base64> 或 env RELEASE_SIGNING_PUBKEY（登记进平台的那个公钥）')

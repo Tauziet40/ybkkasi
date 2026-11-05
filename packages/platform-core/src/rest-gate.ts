@@ -1,27 +1,27 @@
 /**
- * REST 鉴权门共享模块（R5 鉴权样板收敛，REFACTOR-2026-10-13，2026-10-13）。
+ * Module partagé de la porte d'authentification REST (convergence des gabarits d'authentification R5, REFACTOR-2026-10-13, 2026-10-13).
  *
- * 此前 CallerInfo + requirePermission + guarded + body + changeLog 在
+ * Auparavant, CallerInfo + requirePermission + guarded + body + changeLog existaient en
  * plugin-console / plugin-panel-core / plugin-flow-core / plugin-dingtalk-bridge
- * 四处近似重复（逐字同构的 guarded/body，字段窄化不一的 CallerInfo）——
- * 单点修复、单点审计收敛于此。principal 的构造仍在 console 鉴权中间件
- * （唯一权威写入点，见 plugin-console/src/index.ts），本模块只消费。
+ * quatre quasi-duplications (guarded/body isomorphes au mot près, CallerInfo aux réductions de champs divergentes) —
+ * la correction en point unique et l'audit en point unique convergent ici. La construction de principal reste dans le middleware
+ * d'authentification console (seul point d'écriture faisant autorité, voir plugin-console/src/index.ts) ; ce module ne fait que consommer.
  *
- * 依赖方向：platform-core 不反向依赖业务插件——audit 经最小结构类型注入
- * （调用方 ctx 结构化满足即可）；flow-core 等未注入 audit 的插件不得调用
- * changeLog（构造时缺 audit 则 changeLog 快速失败，防静默丢审计）。
+ * Direction des dépendances : platform-core ne dépend pas en retour des plugins métier — audit est injecté par type structurel minimal
+ * (il suffit que le ctx de l'appelant satisfasse la structure) ; les plugins sans audit injecté comme flow-core ne doivent pas appeler
+ * changeLog (en cas d'absence d'audit à la construction, changeLog échoue immédiatement, pour éviter une perte d'audit silencieuse).
  */
 import type { HttpExchange, HttpHandler, RouteAuthDecl } from './http.ts'
 import type { WorkCallerRef } from './workforce-port.ts'
 import { toWorkCallerRef, unifiedFromCaller } from './principal.ts'
 import { t } from '../../platform-i18n/src/index.ts'
 
-/** 调用方身份（console 鉴权中间件写入 exchange.principal 的完整结构） */
+/** Identité de l'appelant (structure complète écrite par le middleware d'authentification console dans exchange.principal) */
 export interface CallerInfo {
   kind: 'human' | 'machine'
   principalId: string
   userId?: string
-  /** machine 专属：凭证关联资源（refType=agent 时 modelgw 等调用以 agent:<refId> 为计量主体）。 */
+  /** Spécifique machine : ressource liée à l'identifiant (refType=agent : les appels modelgw etc. comptabilisent sous agent:<refId>). */
   refType?: string
   refId?: string
   name: string
@@ -29,7 +29,7 @@ export interface CallerInfo {
   actChain: Array<{ name: string; type: string }>
 }
 
-/** 最小结构宿主：业务插件的 ctx 均结构化满足（不引入对具体服务的类型依赖） */
+/** Hôte structurel minimal : le ctx des plugins métier satisfait tous la structure (pas de dépendance typée vers des services concrets) */
 export interface RestGateHost {
   httpServer: { register(method: string, pattern: string, handler: HttpHandler, auth?: RouteAuthDecl): unknown }
   platformBus: { emit(event: string, payload: unknown): unknown }
@@ -37,44 +37,44 @@ export interface RestGateHost {
 }
 
 export interface RestGate {
-  /** 取调用方身份（principal 由 console 鉴权中间件先行写入） */
+  /** Récupère l'identité de l'appelant (principal écrit au préalable par le middleware d'authentification console) */
   caller(exchange: HttpExchange): CallerInfo
-  /** 权限判定：缺权限 403 + audit.authz.denied 留痕（RBAC 探针的判定面） */
+  /** Décision de permission : 403 sans permission + trace audit.authz.denied (surface de décision de la sonde RBAC) */
   requirePermission(exchange: HttpExchange, point: string): boolean
-  /** 注册权限保护路由（H5：声明经 register 自动汇入路由×权限矩阵） */
+  /** Enregistre une route protégée par permission (H5 : la déclaration est fusionnée automatiquement par register dans la matrice routes×permissions) */
   guarded(method: string, path: string, permission: string, handler: (exchange: HttpExchange) => unknown | Promise<unknown>): void
-  /** 请求体解析（宽松转换） */
+  /** Analyse du corps de requête (conversion tolérante) */
   body<T extends Record<string, any>>(exchange: HttpExchange): T
-  /** 变更审计留痕（要求宿主注入 audit，缺审计时快速失败） */
+  /** Trace d'audit des modifications (exige l'injection d'audit par l'hôte ; échec immédiat sans audit) */
   changeLog(exchange: HttpExchange, action: string, resourceType: string, resourceId: string, resourceName: string, detail?: string): void
-  /** 审计主体 id（人类取 userId，机器取 principalId） */
+  /** id de sujet d'audit (userId pour les humains, principalId pour les machines) */
   actorOf(exchange: HttpExchange): string
 }
 
 /**
- * 权限点蕴含表（2026-10-17 演示模式批次）：键为业务点，值为蕴含它的基线点——
- * 持有基线点即视为持有业务点。
+ * Table d'implication des points de permission (lot mode démo 2026-10-17) : la clé est le point métier, la valeur le point de base qui l'implique —
+ * détenir le point de base vaut détenir le point métier.
  *
- *   console.read（控制台只读基线：工作台聚合/通知/平台信息/工具目录/最近调用）
- *     ← console.login（登录会话基线，所有可登录角色必持）
+ *   console.read (base de lecture seule de la console : agrégats de l'espace de travail/notifications/informations plateforme/catalogue d'outils/appels récents)
+ *     ← console.login (base de session connectée, détenue par tout rôle pouvant se connecter)
  *
- * 动机：这批纯读路由此前声明 console.login，「登录会话」语义与「可读工作台」
- * 并不精确对齐，且免登演示态（DEMO_MODE=1，见 plugin-console demo-mode.ts）
- * 的只读白名单不含登录级点，访客打不开工作台首屏。路由改声明 console.read 后，
- * 判定面补本蕴含规则，存量真实用户令牌（只签了 console.login，含升级前签发的旧令牌）
- * 无需重签即零感知通过——带 Bearer 的请求行为完全不变。
- * 前端 session.can()（plugin-console/public/js/api.js）有同款镜像规则，两处须同步改。
+ * Motivation : ce lot de routes en pure lecture déclarait auparavant console.login ; la sémantique « session connectée »
+ * ne correspond pas exactement à « espace de travail lisible », et la liste blanche en lecture du mode démo sans login (DEMO_MODE=1, voir plugin-console demo-mode.ts)
+ * ne contient pas de points de niveau login : les visiteurs ne pouvaient pas ouvrir le premier écran de l'espace de travail. Après bascule des routes vers console.read,
+ * la surface de décision complète cette règle d'implication ; les jetons des vrais utilisateurs existants (ne portant que console.login, y compris les anciens jetons émis avant la montée de version)
+ * passent sans re-signature, sans s'en apercevoir — le comportement des requêtes avec Bearer reste strictement identique.
+ * session.can() côté frontend (plugin-console/public/js/api.js) porte une règle miroir identique ; les deux endroits doivent être modifiés en synchronisation.
  */
 const IMPLIED_POINTS: Record<string, string> = { 'console.read': 'console.login' }
-// 蕴含表导出（W3-T5）：/mcp bridge tools/list 过滤等非 REST 面与 REST requirePermission
-// 单点同源（此前 platform-core 冻结期只能借桩 host 探针间接取布尔，现可直接消费）
+// Export de la table d'implication (W3-T5) : les facettes non REST comme le filtrage tools/list du bridge /mcp et le requirePermission REST
+// partagent une source unique (pendant la période de gel de platform-core, on ne pouvait obtenir le booléen qu'indirectement via une sonde host factice ; désormais consommation directe)
 export { IMPLIED_POINTS }
 
 /**
- * 权限点判定的共享纯函数（MCP 治理契约 §8/§11，W3-T5 导出）：与 requirePermission
- * 同一判定面（'*' 直通 / 点直持 / 蕴含表命中），供非 REST 面（如 /mcp bridge 的
- * tools/list 过滤探针）单点复用——蕴含表是本模块常量，导出后不再需要借
- * createRestGate 的桩 host 间接取布尔（platform-core 冻结期的过渡实现已可替换）。
+ * Fonction pure partagée de décision des points de permission (contrat de gouvernance MCP §8/§11, exportée en W3-T5) : même surface de décision que requirePermission
+ * ('*' passe / point détenu directement / correspondance dans la table d'implication), pour réutilisation en point unique par les facettes non REST (comme la sonde
+ * de filtrage tools/list du bridge /mcp) — la table d'implication est une constante de ce module, une fois exportée il n'est plus nécessaire de
+ * passer par un host factice de createRestGate pour obtenir le booléen (l'implémentation transitoire de la période de gel de platform-core peut être remplacée).
  */
 export function permissionPointAllows(permissions: string[], point: string): boolean {
   const impliedBy = IMPLIED_POINTS[point]
@@ -87,7 +87,7 @@ export function createRestGate(ctx: RestGateHost): RestGate {
 
   const requirePermission = (exchange: HttpExchange, point: string): boolean => {
     const info = caller(exchange)
-    // 判定面单点收敛（W3-T5）：蕴含表与布尔判定在上方 permissionPointAllows，本处只补副作用
+    // Convergence de la surface de décision en point unique (W3-T5) : table d'implication et décision booléenne dans permissionPointAllows ci-dessus, ici seulement les effets de bord
     if (permissionPointAllows(info.permissions, point)) return true
     ctx.platformBus.emit('audit.authz.denied', {
       actorId: info.userId ?? info.principalId,
@@ -141,15 +141,15 @@ export function createRestGate(ctx: RestGateHost): RestGate {
 }
 
 /**
- * 已验证主体 → 工作策略调用者引用（WorkCallerRef，D01 additive）。
+ * Sujet vérifié → référence d'appelant de la stratégie de travail (WorkCallerRef, D01 additif).
  *
- * 供各路由把 console 鉴权中间件写入的 exchange.principal（CallerInfo）交给
- * workforce 窄端口（ctx.workforcePolicy / gateManagedWork / workforce.claimWork）：
- * 身份一律取自令牌解析结果，禁止从请求体/查询参数组装。字段一一映射，
- * 缺省字段不产出（保持 WorkCallerRef 可选项语义）。不改动既有 RestGate 行为。
+ * Permet à chaque route de remettre exchange.principal (CallerInfo) écrit par le middleware d'authentification console au
+ * port étroit workforce (ctx.workforcePolicy / gateManagedWork / workforce.claimWork) :
+ * l'identité vient toujours du résultat de résolution du jeton, interdiction de l'assembler depuis le corps/les paramètres de requête. Mapping champ à champ,
+ * les champs absents ne sont pas produits (préserve la sémantique des champs optionnels de WorkCallerRef). Ne modifie pas le comportement RestGate existant.
  *
- * MCP 治理收敛（契约 §2）：映射实现单点迁至 principal.ts（toWorkCallerRef），
- * 本函数仅做 CallerInfo → 统一主体的形状对齐后委托，对外行为不变。
+ * Convergence de gouvernance MCP (contrat §2) : l'implémentation du mapping est déplacée en point unique vers principal.ts (toWorkCallerRef),
+ * cette fonction ne fait qu'aligner la forme CallerInfo → sujet unifié avant délégation, comportement externe inchangé.
  */
 export function workCallerOf(info: CallerInfo): WorkCallerRef {
   return toWorkCallerRef(unifiedFromCaller(info))

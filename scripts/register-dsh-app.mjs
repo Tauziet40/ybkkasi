@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 /**
- * register-dsh-app.mjs —— 本机 dsh 的 AI 应用一键登记（对齐 docs/app-onboarding.md 应用注册半）。
+ * register-dsh-app.mjs — enregistrement en un clic de l'Application IA du dsh local (aligné sur la moitié enregistrement d'application de docs/app-onboarding.md).
  *
- * 与 scripts/register-dsh-agent.mjs（Agent 台账）互补：本脚本登记「AI 应用」台账（app_ 前缀），
- * 代表本机 dsh web 宿主（dsh --profile web，入口 https://dsh.ybkkasi.com/）。幂等可重跑：
- *   ① 按 slug 幂等查重：已存在同名/同 slug 应用则复用，不换名重复注册
- *   ② 注册应用（draft 态；agentIds 编排仅接受已上线 Agent，DSH 宿主 Agent 上线后再补挂）
- *   ③ 应用机器凭证落盘 <data-dir>/dsh-app-credential.json（0600；secret 仅下发时出现一次）
- *   ④ 机器身份换牌自验（GET /api/apps/:id，app.read）
+ * Complémentaire de scripts/register-dsh-agent.mjs (registre des Agents) : ce script enregistre le registre « Applications IA » (préfixe app_),
+ * au nom de l'hôte web dsh local (dsh --profile web, entrée https://dsh.ybkkasi.com/). Idempotent et réexécutable :
+ *   ① dédoublonnage idempotent par slug : une application de même nom/slug existante est réutilisée, pas de double enregistrement sous un autre nom
+ *   ② enregistre l'application (état draft ; l'orchestration agentIds n'accepte que des Agents en ligne, à attacher après la mise en ligne de l'Agent de l'hôte DSH)
+ *   ③ écrit les identifiants machine de l'application dans <data-dir>/dsh-app-credential.json (0600 ; le secret n'apparaît qu'une fois à la délivrance)
+ *   ④ auto-vérification par échange d'identité machine (GET /api/apps/:id, app.read)
  *
- * 用法：
+ * Usage :
  *   node scripts/register-dsh-app.mjs --url http://127.0.0.1:7300 \
  *     --data-dir /Users/ybkk/ybkkasi/data
- *   （管理员凭证：DSHCTL_USER/DSHCTL_PASS 或 --user/--pass；已有令牌直接给 DSHCTL_TOKEN）
+ *   (identifiants administrateur : DSHCTL_USER/DSHCTL_PASS ou --user/--pass ; un jeton existant peut être passé directement via DSHCTL_TOKEN)
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -52,7 +52,7 @@ async function api(method, path, { token, body } = {}) {
   return { status: response.status, ok: payload?.ok !== false && response.status < 400, data: payload?.data, error: payload?.error }
 }
 
-// ---- ① 管理员身份 ----------------------------------------------------------
+// ---- ① Identité administrateur ----------------------------------------------------------
 let adminToken = process.env.DSHCTL_TOKEN ?? ''
 if (adminToken) log('使用 DSHCTL_TOKEN 环境变量令牌')
 if (!adminToken) {
@@ -65,7 +65,7 @@ if (!adminToken) {
   log(`管理员 ${user} 登录成功`)
 }
 
-// ---- ② 幂等注册 -------------------------------------------------------------
+// ---- ② Enregistrement idempotent -------------------------------------------------------------
 const list = await api('GET', `/api/apps?q=${encodeURIComponent(APP_SLUG)}`, { token: adminToken })
 if (!list.ok) fail(`读取应用台账失败：${list.error?.message ?? list.status}`)
 const existing = (list.data?.apps ?? []).find((item) => item.slug === APP_SLUG || item.name === APP_NAME)
@@ -99,7 +99,7 @@ if (app) {
   log(`注册成功：${app.id}（${app.name}，draft）${credential ? `；机器凭证已下发（clientId=${credential.clientId}）` : ''}`)
 }
 
-// ---- ③ 凭证落盘（0600；增量合并，绝不覆盖已有 secret 为空值） ----------------
+// ---- ③ Écriture des identifiants (0600 ; fusion incrémentale, ne jamais écraser un secret existant par une valeur vide) ----------------
 mkdirSync(DATA_DIR, { recursive: true })
 let stored = {}
 if (existsSync(CRED_FILE)) {
@@ -118,10 +118,10 @@ if (credential) {
   log('⚠ 本机凭证文件中没有该应用的 clientSecret（注册非本次发起）——自验步骤将跳过，请补齐后重跑')
 }
 writeFileSync(CRED_FILE, JSON.stringify(stored, null, 2))
-try { chmodSync(CRED_FILE, 0o600) } catch { /* 尽力而为 */ }
+try { chmodSync(CRED_FILE, 0o600) } catch { /* au mieux */ }
 log(`凭证已写入 ${CRED_FILE}`)
 
-// ---- ④ 机器身份自验 ----------------------------------------------------------
+// ---- ④ Auto-vérification de l'identité machine ----------------------------------------------------------
 if (stored.clientId && stored.clientSecret && stored.appId === app.id) {
   const cc = await api('POST', '/api/auth/client-credentials', { body: { clientId: stored.clientId, clientSecret: stored.clientSecret } })
   if (!cc.ok) fail(`机器换牌失败：${cc.error?.message ?? cc.status}（secret 可能已丢失/轮换，请管理员轮换后更新凭证文件）`)
@@ -130,7 +130,7 @@ if (stored.clientId && stored.clientSecret && stored.appId === app.id) {
   log(`自验通过：机器凭证可读自身（app.read）——metrics-report / PATCH 自助通道可用`)
 }
 
-// ---- 完成回报 ----------------------------------------------------------------
+// ---- Rapport d'achèvement ----------------------------------------------------------------
 console.log(`
 ──────────────────────────────────────────────
 登记完成 ✅

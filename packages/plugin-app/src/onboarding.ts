@@ -1,17 +1,17 @@
 /**
- * AI 应用接入提示词生成（方案：注册同款指引下沉平台侧，单一事实源）。
+ * Génération du prompt d'intégration des Applications IA (plan : le guide d'enregistrement descend côté plateforme, source de vérité unique).
  *
- * 控制台注册弹窗仍用前端模板（onboarding.js buildAppOnboardingText）；
- * 本模块服务「注册后随时重新生成」场景：
- *   - POST /api/apps/:id/onboarding-prompt {rotate} → 控制台详情页「生成接入提示词」按钮
- *   - 外部推送方（hermes asset-push 资产推送技能）注册成功后拉取全文并推送钉钉 connector webhook
- * 首行含「接入提示词」关键词：钉钉 connector 流程按该关键词触发记录。
+ * La fenêtre d'enregistrement de la console garde le gabarit frontend (buildAppOnboardingText de onboarding.js) ;
+ * ce module dessert le scénario « régénération à tout moment après enregistrement » :
+ *   - POST /api/apps/:id/onboarding-prompt {rotate} → bouton « générer le prompt d'intégration » de la page de détail console
+ *   - les pousseurs externes (skill de poussée d'actifs hermes asset-push) tirent le texte intégral après enregistrement réussi et le poussent au webhook connector DingTalk
+ * La première ligne contient le mot-clé `接入提示词` (prompt d'intégration) : le flux connector DingTalk déclenche l'enregistrement sur ce mot-clé.
  */
 import type { ResourceEntity } from '../../platform-core/src/index.ts'
 
 export interface AppOnboardingCredential {
   clientId: string
-  /** 仅 rotate 时返回；缺省时提示词内以占位符标注。 */
+  /** Renvoyé seulement si rotate ; par défaut, le prompt l'indique par un placeholder. */
   clientSecret?: string
 }
 

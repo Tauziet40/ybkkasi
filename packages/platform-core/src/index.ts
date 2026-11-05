@@ -1,11 +1,11 @@
 /**
- * @dsh-ops/platform-core —— 平台基础插件。
+ * @dsh-ops/platform-core —— plugin de base de la plateforme.
  *
- * 提供四个基础服务（一切皆插件：基础层同样是插件）：
- *   ctx.opsStorage      JSON 集合存储（原子落盘，可替换为 DB 实现）
- *   ctx.platformBus  平台事件总线（插件协作唯一胶水）
- *   ctx.tools        ToolRuntime-lite（独立宿主下提供；完整 dsh 下由真 ToolRuntime 提供）
- *   ctx.httpServer   HTTP 服务（控制台 REST API 与静态资源）
+ * Fournit quatre services de base (tout est plugin : la couche de base aussi) :
+ *   ctx.opsStorage      stockage de collections JSON (écriture atomique, remplaçable par une implémentation DB)
+ *   ctx.platformBus     bus d'événements de la plateforme (la seule couche de liaison entre plugins)
+ *   ctx.tools           ToolRuntime-lite (fourni en hôte autonome ; en dsh complet, fourni par le vrai ToolRuntime)
+ *   ctx.httpServer      serveur HTTP (API REST de la console et ressources statiques)
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { StorageService } from './storage.ts'
@@ -22,11 +22,11 @@ export * from './storage-sqlite.ts'
 export * from './bus.ts'
 export * from './tools-lite.ts'
 export * from './http.ts'
-// OpenAPI 接口面投影（issue #6）：由 declaredRoutes 台账生成 3.0.3 文档，/api/openapi.json 据此伺服
+// Projection de la facette API en OpenAPI (issue #6) : document 3.0.3 généré depuis le registre declaredRoutes, servi par /api/openapi.json
 export * from './openapi.ts'
 export * from './rest-gate.ts'
 export * from './principal.ts'
-// 策略决策点 + 全链 trace 基元（MCP 治理契约 §11/§14，W3-T5）
+// Point de décision de stratégie + primitives de trace de bout en bout (contrat de gouvernance MCP §11/§14, W3-T5)
 export * from './pdp.ts'
 export * from './trace.ts'
 export * from './ids.ts'
@@ -42,15 +42,15 @@ export * from './behavior.ts'
 export * from './scenegraph.ts'
 export * from './signature.ts'
 export * from './boot-probe.ts'
-// 平台资产统一业务分类（Skill/Agent/应用/MCP/A2A 各板块共用口径）
+// Classification métier unifiée des actifs plateforme (périmètre partagé par les volets Skill/Agent/Applications/MCP/A2A)
 export * from './taxonomy.ts'
 
 export interface PlatformCoreConfig {
   dataDir?: string
-  /** 独立宿主默认 true；挂载进完整 dsh 时设为 false，避免与真正 ToolRuntime 冲突。 */
+  /** true par défaut en hôte autonome ; false une fois monté dans dsh complet, pour éviter le conflit avec le vrai ToolRuntime. */
   provideToolRuntime?: boolean
   http?: { port?: number; host?: string; externalBase?: string }
-  /** 是否自动启动 HTTP 监听。 */
+  /** Faut-il démarrer automatiquement l'écoute HTTP. */
   startHttp?: boolean
 }
 
@@ -60,20 +60,20 @@ export async function apply(ctx: Context, config: PlatformCoreConfig = {}) {
   const storage = new StorageService(ctx, { dataDir: config.dataDir })
   ctx.plugin(PlatformBusService)
   ctx.plugin(SqliteTxnService, { dataDir: config.dataDir })
-  // 数字员工工作策略登记器（窄端口）：plugin-workforce ready 后登记实现，
-  // 资源网关/exec-hub 经 ctx.workforcePolicy 消费（装配顺序无关，防循环依赖）
+  // Enregistreur de stratégie de travail des employés numériques (port étroit) : plugin-workforce enregistre son implémentation une fois ready,
+  // les passerelles de ressources/exec-hub consomment via ctx.workforcePolicy (indépendant de l'ordre d'assemblage, anti-cycle de dépendances)
   ctx.plugin(WorkforcePolicyRegistry)
   if (config.provideToolRuntime !== false) {
     ctx.plugin(ToolRuntimeLite)
   }
   const http = new HttpServerService(ctx, config.http ?? {})
-  // 集合恢复必须先于一切业务集合读取（form B 教训：boot-all 的 restoreAll 在 loader
-  // 链路不存在，集合全空 → 演示种子重种撞幂等键 fatal）。apply 异步化，loader 会等待。
+  // La restauration des collections doit précéder toute lecture de collection métier (leçon forme B : le restoreAll de boot-all n'existait
+  // pas dans la chaîne loader → collections toutes vides → le ré-ensemencement de démo percutait une clé d'idempotence, fatal). apply asynchronisé, le loader attend.
   await storage.start()
   await storage.restoreAll()
-  // behavior 行为事件管道（WP-03/D6）：端点随基础层装配，鉴权依赖 console 中间件 + 本端点双层校验
+  // Pipeline d'événements comportementaux behavior (WP-03/D6) : points montés avec la couche de base, authentification dépendant du middleware console + double validation de ce point
   ctx.plugin(BehaviorService)
-  // 行业场景图谱服务（review-dsh-agent-panel-v2 Phase 2）：内置资产通道装载 + scenegraph.updated 热刷新
+  // Service de graphe de scénarios sectoriels (review-dsh-agent-panel-v2 Phase 2) : chargement via le canal d'actifs intégrés + rafraîchissement à chaud scenegraph.updated
   ctx.plugin(ScenegraphService)
   if (config.startHttp !== false) {
     void http.start().then(() => {

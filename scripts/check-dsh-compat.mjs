@@ -1,36 +1,36 @@
 #!/usr/bin/env node
 /**
- * dsh 兼容性断言（EXEC-CHECKLIST 3.3）。
+ * Assertions de compatibilité dsh (EXEC-CHECKLIST 3.3).
  *
- * 声明：本脚本是根 package.json `dsh.compatibility.dshReleases` 字段唯一的
- * 自动化验证来源；人工手改该字段视为无效声明——只有以下五项断言全部通过，
- * 对应版本的 "compatible" 才会由本脚本写入。
+ * Déclaration : ce script est l'unique source de validation automatisée du champ `dsh.compatibility.dshReleases` du package.json racine ;
+ * toute modification manuelle de ce champ est une déclaration invalide — le "compatible" d'une version donnée n'est écrit par ce script
+ * que si les cinq assertions ci-dessous passent toutes.
  *
- * 用法：node scripts/check-dsh-compat.mjs <dsh-version>
- *   例：node scripts/check-dsh-compat.mjs 0.1.0-rc.7
+ * Usage : node scripts/check-dsh-compat.mjs <dsh-version>
+ *   ex. : node scripts/check-dsh-compat.mjs 0.1.0-rc.7
  *
- * 五项断言（按序执行，任一步失败立即输出「卡在哪一步 + 证据」并退出非零）：
- *   ① 版本确认：npx --yes @deepseek-ai/dsh@<version> --version 输出含该版本号。
- *   ② 拉取 dsh 的 cordis 实体到临时目录，确认 vendor/cordis 存在（见下「来源链」）。
- *   ③ 临时项目副本内把 @deepseek-ai/cordis 解析指向该实体（POSIX ln -s /
- *      Windows junction），使后续装配全程跑在 dsh 侧 cordis 上。
- *   ④ 在该解析下装配最小插件树并跑 probeTree（packages/platform-core/src/
- *      boot-probe.ts，启动组并行交付；缺失时友好报错），断言 ok:true 且
- *      registry 无插件重复注册。
- *   ⑤ 全部通过后向根 package.json 的 dshReleases 写入 "<version>": "compatible"
- *      （fs 读改写，2 空格缩进；失败绝不写）。
+ * Cinq assertions (dans l'ordre ; au premier échec, affiche « où ça bloque + preuves » et sort en non-zéro) :
+ *   ① confirmation de version : la sortie de npx --yes @deepseek-ai/dsh@<version> --version contient le numéro de version.
+ *   ② tirage de l'entité cordis de dsh dans un répertoire temporaire, confirmation de la présence de vendor/cordis (voir « chaîne de provenance » plus bas).
+ *   ③ dans la copie temporaire du projet, la résolution de @deepseek-ai/cordis pointe vers cette entité (ln -s POSIX /
+ *      junction Windows), l'assemblage suivant tournant entièrement sur le cordis côté dsh.
+ *   ④ sous cette résolution, assemblage d'un arbre minimal de plugins et exécution de probeTree (packages/platform-core/src/
+ *      boot-probe.ts, livré en parallèle par l'équipe démarrage ; message d'erreur convivial si absent), assertion ok:true et
+      absence de double enregistrement de plugin dans le registry.
+ *   ⑤ après tout passant, écriture de "<version>": "compatible" dans dshReleases du package.json racine
+      (lecture-modification-écriture fs, indentation 2 espaces ; jamais d'écriture en cas d'échec).
  *
- * ② 的来源链（实测依据，2026-10-16）：
- *   - 首选 git clone deepseek-ai/deepseek-harness 对应 tag 的源码树，校验其
- *     vendor/cordis 实体目录（该仓库当前为私库/不可达时自动降级）；
- *   - 降级走 npm：@deepseek-ai/dsh 的 CLI 包本身不含 vendor/cordis（其 tarball
- *     只有 lib/config），但 @deepseek-ai/cordis 的 npm 包即 harness 仓库
- *     vendor/cordis 目录的发布构建（其 package.json repository.directory 字段
- *     为证）。脚本解析 dsh@<version> 所声明的 cordis 依赖范围，pack 该版本并
- *     校验来源字段后，等价充当 vendor/cordis 实体。
+ * Chaîne de provenance du ② (fondement mesuré, 2026-10-16) :
+ *   - de préférence : git clone de l'arbre source de deepseek-ai/deepseek-harness au tag correspondant, validation du répertoire d'entité
+ *     vendor/cordis (dégradation automatique si le dépôt est privé/inaccessible) ;
+ *   - repli par npm : le paquet CLI de @deepseek-ai/dsh ne contient pas vendor/cordis (son tarball
+ *     ne contient que lib/config), mais le paquet npm de @deepseek-ai/cordis est précisément le build de publication du répertoire
+ *     vendor/cordis du dépôt harness (attesté par son champ package.json repository.directory).
+ *     Le script résout la plage de dépendances cordis déclarée par dsh@<version>, pack la version et,
+ *     après validation des champs de provenance, sert d'entité vendor/cordis de manière équivalente.
  *
- * 退出码：0 = 已验证兼容；1 = 断言失败（不兼容/结构不符/探针缺失）；
- *         2 = 环境不可达，兼容性未验证（禁止在未验证时谎报兼容）。
+ * Codes de sortie : 0 = compatibilité vérifiée ; 1 = échec d'assertion (incompatible/structure non conforme/sonde manquante) ;
+ *         2 = environnement inaccessible, compatibilité non vérifiée (interdiction de prétendre compatible sans vérification).
  */
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
@@ -46,7 +46,7 @@ const NET_MARKERS = /ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNREFUSED|ECONNRESET|EPROT
 const IS_WIN = process.platform === 'win32'
 const EX_UNVERIFIED = 2
 
-/** 控制流信号：携带既定退出码抛出，由 main 统一收尾（保证临时目录清理后再退出）。 */
+/** Signal de flux de contrôle : lève avec le code de sortie prédéterminé, main fait la clôture unifiée (garantit le nettoyage du répertoire temporaire avant de sortir). */
 class ExitSignal extends Error {
   constructor(code) {
     super(`exit-${code}`)
@@ -71,7 +71,7 @@ function ok(step, message) {
   console.log(`[✓] 第 ${step} 步：${message}`)
 }
 
-/** 带超时的子进程执行；返回 {code, stdout, stderr, timedOut}。 */
+/** Exécution de sous-processus avec délai d'attente ; renvoie {code, stdout, stderr, timedOut}. */
 function run(cmd, args, { timeoutMs = 120_000, cwd, env } = {}) {
   return new Promise((resolvePromise) => {
     const child = spawn(cmd, args, {
@@ -99,13 +99,13 @@ function run(cmd, args, { timeoutMs = 120_000, cwd, env } = {}) {
   })
 }
 
-/** 创建目录符号链接；Windows 用 junction（无需特权、可指向目录）。 */
+/** Crée un lien symbolique de répertoire ; junction sous Windows (sans privilège, peut pointer un répertoire). */
 function symlinkDir(target, linkPath) {
   fs.mkdirSync(dirname(linkPath), { recursive: true })
   fs.symlinkSync(target, linkPath, IS_WIN ? 'junction' : 'dir')
 }
 
-/** 递归拷贝目录，跳过 node_modules / .git / data。 */
+/** Copie récursive de répertoire, en sautant node_modules / .git / data. */
 function copyTree(from, to) {
   fs.cpSync(from, to, {
     recursive: true,
@@ -113,7 +113,7 @@ function copyTree(from, to) {
   })
 }
 
-// ─── ① 版本确认 ────────────────────────────────────────────────────────────────
+// ─── ① Confirmation de version ────────────────────────────────────────────────────────────────
 async function assertVersion(version) {
   console.log(`\n[①] 版本确认：npx --yes @deepseek-ai/dsh@${version} --version`)
   const r = await run('npx', ['--yes', `@deepseek-ai/dsh@${version}`, '--version'], { timeoutMs: 480_000 })
@@ -128,12 +128,12 @@ async function assertVersion(version) {
   ok('①', `dsh CLI 版本确认输出含 ${version}`)
 }
 
-// ─── ② 拉取 dsh 的 cordis 实体（vendor/cordis）────────────────────────────────
+// ─── ② Tirage de l'entité cordis de dsh (vendor/cordis)────────────────────────────────
 async function acquireVendorCordis(version, tmpRoot) {
   console.log('\n[②] 拉取 dsh 源码树 / cordis 实体到临时目录')
 
-  // 链 A：源码树。仓库若可达且 tag 存在，直接校验 vendor/cordis 实体目录。
-  // GIT_TERMINAL_PROMPT=0：私库/不可达时快速失败，不做交互式凭据等待。
+  // Chaîne A : arbre source. Si le dépôt est accessible et le tag présent, validation directe du répertoire d'entité vendor/cordis.
+  // GIT_TERMINAL_PROMPT=0 : échec rapide si dépôt privé/inaccessible, sans attente d'identifiants interactive.
   const vendorRoot = join(tmpRoot, 'dsh', 'vendor', 'cordis')
   for (const tag of [`v${version}`, `dsh-v${version}`, `dsh@${version}`]) {
     const r = await run('git', ['clone', '--depth', '1', '--branch', tag,
@@ -151,8 +151,8 @@ async function acquireVendorCordis(version, tmpRoot) {
     console.log(`    git 链 ${tag} 未成功（${r.timedOut ? '超时' : `退出码 ${r.code}`}），尝试下一来源`)
   }
 
-  // 链 B：npm 发布构建。@deepseek-ai/cordis 即 harness 仓库 vendor/cordis 的发布产物，
-  // 以 package.json 的 repository.directory 字段证明来源。
+  // Chaîne B : build de publication npm. @deepseek-ai/cordis est précisément le produit de publication de vendor/cordis du dépôt harness,
+  // la provenance étant prouvée par le champ repository.directory du package.json.
   const rangeView = await run('npm', ['view', `@deepseek-ai/dsh@${version}`, 'dependencies.@deepseek-ai/cordis', '--json'], { timeoutMs: 60_000 })
   if (rangeView.code !== 0) {
     unreachable(`npm registry 不可达（无法解析 dsh@${version} 的 cordis 依赖范围）`, rangeView.stderr)
@@ -174,7 +174,7 @@ async function acquireVendorCordis(version, tmpRoot) {
   fs.mkdirSync(vendorRoot, { recursive: true })
   await run('tar', ['-xzf', tgz, '-C', vendorRoot, '--strip-components', '1'], { timeoutMs: 60_000 })
 
-  // 来源证明：该实体必须自证来自 harness 仓库 vendor/cordis 目录
+  // Preuve de provenance : cette entité doit attester d'elle-même qu'elle vient du répertoire vendor/cordis du dépôt harness
   const manifest = JSON.parse(fs.readFileSync(join(vendorRoot, 'package.json'), 'utf8'))
   const directory = manifest?.repository?.directory
   if (manifest?.name !== '@deepseek-ai/cordis' || directory !== 'vendor/cordis') {
@@ -186,7 +186,7 @@ async function acquireVendorCordis(version, tmpRoot) {
   return { vendorRoot, source: `npm:@deepseek-ai/cordis@${cordisVersion}`, cordisVersion }
 }
 
-// ─── ③ 临时项目副本 + node_modules 覆盖 ──────────────────────────────────────
+// ─── ③ Copie temporaire du projet + couverture node_modules ──────────────────────────────────────
 function buildOverlayProject(tmpRoot, vendorRoot) {
   console.log('\n[③] 临时副本内把 @deepseek-ai/cordis 解析指向 vendor/cordis')
   const proj = join(tmpRoot, 'project')
@@ -199,12 +199,12 @@ function buildOverlayProject(tmpRoot, vendorRoot) {
   const tmpNm = join(proj, 'node_modules')
   fs.mkdirSync(tmpNm, { recursive: true })
 
-  // 第三方依赖：整条链接真实安装（不含两个 scope，下面单独处理）
+  // Dépendances tierces : toute la chaîne installée réellement (hors les deux scopes, traités séparément ci-dessous)
   for (const entry of fs.readdirSync(realNm, { withFileTypes: true })) {
     if (entry.name === '@deepseek-ai' || entry.name === '@dsh-ops' || entry.name.startsWith('.')) continue
     symlinkDir(join(realNm, entry.name), join(tmpNm, entry.name))
   }
-  // workspace 包：指向临时副本内的包本体（保证其 cordis import 也走覆盖层）
+  // Paquets workspace : pointent vers le corps des paquets dans la copie temporaire (garantit que leurs imports cordis passent aussi par la couche de couverture)
   const wsScope = join(realNm, '@dsh-ops')
   if (fs.existsSync(wsScope)) {
     for (const entry of fs.readdirSync(wsScope, { withFileTypes: true })) {
@@ -215,7 +215,7 @@ function buildOverlayProject(tmpRoot, vendorRoot) {
       symlinkDir(target, join(tmpNm, '@dsh-ops', entry.name))
     }
   }
-  // 断言核心：cordis 一键切换到 dsh 侧实体；其依赖（cosmokit 等）落到 tmpRoot/node_modules 兜底
+  // Assertion centrale : cordis bascule en un clic vers l'entité côté dsh ; ses dépendances (cosmokit etc.) retombent dans tmpRoot/node_modules en filet
   symlinkDir(vendorRoot, join(tmpNm, '@deepseek-ai', 'cordis'))
   for (const dep of ['@deepseek-ai/cosmokit', '@standard-schema/spec']) {
     const real = join(realNm, dep)
@@ -225,11 +225,11 @@ function buildOverlayProject(tmpRoot, vendorRoot) {
   return proj
 }
 
-// ─── ④ probeTree 装配 + 重复注册断言 ─────────────────────────────────────────
-// 探针契约（boot-probe.ts 已交付，W2）：probeTree(ctx, required) → { ok, unreachable, stuck }，
-// 另有 assertSingleRoot(ctx) 双实例哨兵。最小树由本 runner 装配：
-//   provider 插件 apply 内 ctx.provide 注册服务，consumer 插件 inject 消费——
-//   接线在 vendor/cordis 解析下全通即证明双轨宿主共用一棵隔离树成立。
+// ─── ④ Assemblage probeTree + assertion de non-double-enregistrement ─────────────────────────────────────────
+// Contrat de sonde (boot-probe.ts déjà livré, W2) : probeTree(ctx, required) → { ok, unreachable, stuck },
+// plus assertSingleRoot(ctx) sentinelle de double instance. L'arbre minimal est assemblé par ce runner :
+//   le plugin provider enregistre le service dans ctx.provide au apply, le plugin consumer le consomme en inject —
+//   si le câblage passe intégralement sous la résolution vendor/cordis, l'arbre isolé partagé par les deux hôtes est prouvé.
 const RUNNER_SOURCE = String.raw`
 // 由 check-dsh-compat.mjs 生成，在临时副本内执行——③ 的解析覆盖只在此树内生效。
 import { realpathSync } from 'node:fs'
@@ -336,7 +336,7 @@ async function assertProbe(proj, vendorRoot) {
   ok('④', marker.replace('PROBE_OK ', '装配结论 '))
 }
 
-// ─── ⑤ 写入 dshReleases ──────────────────────────────────────────────────────
+// ─── ⑤ Écriture dans dshReleases ──────────────────────────────────────────────────────
 function recordCompatibility(version) {
   console.log('\n[⑤] 记录 dsh.compatibility.dshReleases')
   const pkgPath = join(PROJECT_ROOT, 'package.json')
@@ -359,7 +359,7 @@ function recordCompatibility(version) {
   ok('⑤', `已写入 "${version}": "compatible"`)
 }
 
-// ─── 主流程 ──────────────────────────────────────────────────────────────────
+// ─── Flux principal ──────────────────────────────────────────────────────────────────
 async function main() {
   const version = process.argv[2]
   if (!version || !VERSION_RE.test(version)) {

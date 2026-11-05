@@ -1,20 +1,20 @@
 /**
- * 应用能力绑定单元测试（W2-T4，MCP 治理契约 §10）。
+ * Tests unitaires de la liaison des capacités d'application (W2-T4, contrat de gouvernance MCP §10).
  *
- * 运行方式（Node 直接加载，进程内构造，参照 plugin-mcp governance.test.mjs 桩总线+StorageService 模式）：
+ * Exécution (chargement direct par Node, construction dans le processus, sur le modèle bus factice+StorageService de plugin-mcp governance.test.mjs) :
  *
  *     node packages/plugin-app/src/capabilities.test.mjs
  *
- * 覆盖面：
- *   - 绑定幂等（重复绑定返回现态，不改 required）与 ownerEntity 回写（platform 占位 → app 归属）；
- *   - 归属回写闸门：已归属其他 app / agent 的服务 409 OWNER_CONFLICT（CapabilityOwnerConflictError）；
- *   - 解绑：删记录与 capability 依赖边、归属联动还原 platform 占位、重复解绑幂等；
- *   - 上线能力门禁五条逐项拒绝（未在线/未验证/工具空/未决高危/明文敏感头）与全过；
- *   - requestOnline 早反馈拒绝（CAPABILITY_GATE_FAILED）与满足后出审批单；
- *   - 下架联动：app.offline 直下全部能力服务（含非 required、不动平台占位服务）并留恢复前置态；
- *   - 重上线恢复：restoreCapabilityServices 恢复前置状态 + change 审计留痕；
- *   - purge 归档联动：archivedBy 标记、归属还原、绑定记录清除、服务保持 offline 不复活；
- *   - resource-core 依赖边写入（app→mcp kind=capability，拓扑可穿透）。
+ * Couverture :
+ *   - liaison idempotente (reliaison renvoie l'état courant, sans toucher required) et réécriture ownerEntity (placeholder platform → propriété app) ;
+ *   - porte de réécriture de propriété : un service déjà attribué à un autre app/agent → 409 OWNER_CONFLICT (CapabilityOwnerConflictError) ;
+ *   - déliaison : suppression de l'enregistrement et de l'arête de dépendance capability, restauration du placeholder platform en cascade, déliaison répétée idempotente ;
+ *   - les cinq portes de mise en ligne des capacités, refusées une à une (hors ligne/non vérifié/outils vides/haut risque en attente/en-têtes sensibles en clair) et toutes passées ;
+ *   - refus à retour anticipé de requestOnline (CAPABILITY_GATE_FAILED) et émission du dossier d'approbation une fois satisfait ;
+ *   - cascade de retrait : app.offline arrête directement tous les services de capacités (y compris non required, sans toucher aux services placeholder platform) en gardant l'état préalable de restauration ;
+ *   - restauration à la remise en ligne : restoreCapabilityServices rétablit l'état préalable + trace d'audit change ;
+ *   - cascade d'archivage purge : marquage archivedBy, restauration de propriété, effacement des enregistrements de liaison, services maintenus offline sans résurrection ;
+ *   - écriture des arêtes de dépendance resource-core (app→mcp kind=capability, topologie traversable).
  */
 import assert from 'node:assert/strict'
 import { test, afterEach } from 'node:test'
@@ -29,7 +29,7 @@ import { McpToolRiskRegistry } from '../../plugin-mcp/src/risk-registry.ts'
 import { AppRegistryService, CapabilityOwnerConflictError } from './index.ts'
 import { AppCredentialService } from './credentials.ts'
 
-// -- 进程内构造宿主（桩总线 + 真实 StorageService/resource-core/mcpRegistry + 临时数据目录） --
+// -- Construction de l'hôte dans le processus (bus factice + vrais StorageService/resource-core/mcpRegistry + répertoire de données temporaire) --
 
 const cleanup = []
 afterEach(() => {
@@ -41,7 +41,7 @@ function makeHarness() {
   cleanup.push(() => rmSync(dataDir, { recursive: true, force: true }))
   const ctx = new Context()
   const events = []
-  // 桩总线：记录 emit 供联动断言（on 返回空注销函数）
+  // Bus factice : enregistre les emit pour les assertions de cascade (on renvoie une fonction de désinscription vide)
   ctx.platformBus = {
     on: () => () => {},
     emit: (name, payload) => events.push({ name, payload }),
@@ -49,7 +49,7 @@ function makeHarness() {
   new StorageService(ctx, { dataDir })
   const resourceCore = new ResourceCoreService(ctx)
   const mcpRegistry = new McpService(ctx)
-  // 风险登记（同插件 apply() 直连装配形态）：缺席时门禁第④项跳过，这里装配齐验证第④项
+  // Registre de risques (forme d'assemblage en direct comme le apply() du même plugin) : absent, le contrôle n° ④ est sauté ; ici assemblé pour valider le n° ④
   const riskRegistry = new McpToolRiskRegistry(ctx)
   mcpRegistry.attachRiskRegistry(riskRegistry)
   const auditRecords = []
@@ -65,7 +65,7 @@ function makeHarness() {
     costs: () => ({ find: () => [] }),
     query: () => ({ items: [] }),
   }
-  // 最小桩：能力绑定路径不触达 authn/oidc/iam（register 以 withCredential:false 跳过凭证签发）
+  // Factice minimal : le chemin de liaison des capacités ne touche pas authn/oidc/iam (register saute l'émission d'identifiants avec withCredential:false)
   ctx.authn = { principals: () => ({ findOne: () => null }) }
   ctx.oidc = { clientsForApp: () => [] }
   ctx.iam = {
@@ -73,7 +73,7 @@ function makeHarness() {
     orgs: () => ({ all: () => [], get: () => undefined }),
   }
   const registry = new AppRegistryService(ctx)
-  // 外部凭证托管（issue #19）：purge 联动清库经 ctx.appCredentials——同款真实装配（临时数据目录在位）
+  // Hébergement d'identifiants externes (issue #19) : l'effacement en cascade de purge passe par ctx.appCredentials — même assemblage réel (répertoire de données temporaire en place)
   const credentials = new AppCredentialService(ctx)
   const mkApp = (name, slug) => registry.register({
     name, slug, ownerId: 'u1', ownerName: '测试员', orgId: 'org-1', withCredential: false,
@@ -82,9 +82,9 @@ function makeHarness() {
   const mkService = (overrides = {}) => mcpRegistry.createService({
     name: `服务-${Math.random().toString(36).slice(2, 8)}`, orgId: 'org-1', owner: 'u1', ...overrides,
   })
-  /** 直写服务状态（测试专用：模拟「已上线但未验证」等非正常管道状态）。 */
+  /** Écriture directe de l'état d'un service (réservé aux tests : simule des états anormaux de pipeline comme « en ligne mais non vérifié »). */
   const setService = (id, patch) => mcpRegistry.services().update(id, patch)
-  /** 演示管道：验证 + 发布上线（demo exec，确定性模拟）。 */
+  /** Pipeline de démonstration : vérification + publication en ligne (exec de démo, simulation déterministe). */
   const deploy = async (id, options = {}) => {
     await mcpRegistry.verifyService(id)
     return mcpRegistry.deployService(id, { grayPercent: 100, actor: 'tester', ...options })
@@ -94,7 +94,7 @@ function makeHarness() {
 
 const TOOL = { name: 't1', description: '演示工具', inputSchema: { type: 'object' }, riskLevel: 'read' }
 
-// -- A. 绑定模型：幂等 / owner 回写 / 依赖边 -------------------------------------------------
+// -- A. Modèle de liaison : idempotence / réécriture owner / arêtes de dépendance -------------------------------------------------
 
 test('绑定能力服务：owner 回写 app 归属、capability 依赖边写入、重复绑定幂等返回现态', () => {
   const { registry, mcpRegistry, resourceCore, mkApp, mkService } = makeHarness()
@@ -107,17 +107,17 @@ test('绑定能力服务：owner 回写 app 归属、capability 依赖边写入�
   assert.equal(first.link.required, true)
   assert.equal(first.link.exposure, 'gateway')
   assert.equal(first.link.status, 'active')
-  // ownerEntity 回写（经 setOwnerEntity 归一形态）
+  // Réécriture ownerEntity (via la forme normalisée setOwnerEntity)
   assert.deepEqual(mcpRegistry.services().get(svc.id).ownerEntity, { type: 'app', id: app.id })
-  // 依赖边写入：{app→mcp, kind:'capability'}
+  // Écriture d'arête de dépendance : {app→mcp, kind:'capability'}
   const dep = resourceCore.dependencies().findOne((item) => item.fromType === 'app' && item.fromId === app.id && item.toType === 'mcp' && item.toId === svc.id)
   assert.ok(dep, 'capability 依赖边应存在')
   assert.equal(dep.kind, 'capability')
-  // 拓扑穿透：topology('app', id) 应含 mcp 子节点
+  // Traversée de topologie : topology('app', id) doit contenir le nœud enfant mcp
   const topology = registry.topology(app.id)
   assert.ok(topology.children.some((node) => node.type === 'mcp' && node.id === svc.id))
 
-  // 幂等：重复绑定返回现态（同一条记录、不新建、不改 required 现值）
+  // Idempotence : reliaison renvoie l'état courant (même enregistrement, pas de création, valeur required inchangée)
   const again = registry.bindCapability(app.id, { serviceId: svc.id, required: false, boundBy: '另一人' })
   assert.equal(again.created, false)
   assert.equal(again.link.id, first.link.id)
@@ -132,11 +132,11 @@ test('归属回写闸门：已归属其他 app / agent 的服务拒绝绑定（4
   const owned = mkService({ name: '已属A', slug: 'owned-by-a' })
   registry.bindCapability(appA.id, { serviceId: owned.id, boundBy: 'x' })
   assert.throws(() => registry.bindCapability(appB.id, { serviceId: owned.id, boundBy: 'x' }), CapabilityOwnerConflictError)
-  // 同 app 重复绑定不抛（幂等）；agent/connector 归属同样拒绝
+  // Reliaison au même app sans lever (idempotence) ; la propriété agent/connector est refusée pareillement
   assert.doesNotThrow(() => registry.bindCapability(appA.id, { serviceId: owned.id, boundBy: 'x' }))
   const agentOwned = mkService({ name: '已属Agent', slug: 'agent-owned', ownerEntity: { type: 'agent', id: 'agent-9' } })
   assert.throws(() => registry.bindCapability(appA.id, { serviceId: agentOwned.id, boundBy: 'x' }), CapabilityOwnerConflictError)
-  // 服务不存在 / 应用不存在显式报错
+  // Service inexistant / application inexistante : erreur explicite
   assert.throws(() => registry.bindCapability(appA.id, { serviceId: 'mcp-none', boundBy: 'x' }), /不存在/)
   assert.throws(() => registry.bindCapability('app-none', { serviceId: owned.id, boundBy: 'x' }), /应用不存在/)
 })
@@ -152,11 +152,11 @@ test('解绑：删记录与依赖边、归属联动还原 platform 占位、重�
   assert.deepEqual(mcpRegistry.services().get(svc.id).ownerEntity, { type: 'platform' }, '解绑联动还原 platform 占位')
   assert.equal(registry.listCapabilities(app.id).length, 0)
   assert.equal(resourceCore.dependencies().findOne((item) => item.fromType === 'app' && item.fromId === app.id && item.toId === svc.id), undefined)
-  // 幂等：重复解绑 removed=false
+  // Idempotence : déliaison répétée removed=false
   assert.deepEqual(registry.unbindCapability(app.id, svc.id), { removed: false, ownerRestored: false })
 })
 
-// -- B. 上线门禁 -----------------------------------------------------------------------------
+// -- B. Portes de mise en ligne -----------------------------------------------------------------------------
 
 test('门禁①未在线：required 能力服务 draft 状态被拒，错误列明服务名', async () => {
   const { registry, mkApp, mkService } = makeHarness()
@@ -172,7 +172,7 @@ test('门禁②未验证：status=online 但 health unknown 且无 lastProbeAt �
   const { registry, mkApp, mkService, setService } = makeHarness()
   const app = mkApp('门禁应用2', 'gate-verify')
   const svc = mkService({ name: '未验服务', slug: 'never-verified', tools: [TOOL] })
-  setService(svc.id, { status: 'online' }) // 直写状态（模拟绕过 verify 的脏数据）
+  setService(svc.id, { status: 'online' }) // écriture directe de l'état (simule une donnée sale contournant verify)
   registry.bindCapability(app.id, { serviceId: svc.id, required: true, boundBy: 'x' })
   const failures = registry.capabilityGateFailures(app.id)
   assert.ok(failures.some((item) => item.includes('未验证') || item.includes('测试验证')))
@@ -181,7 +181,7 @@ test('门禁②未验证：status=online 但 health unknown 且无 lastProbeAt �
 test('门禁③工具清单为空被拒', async () => {
   const { registry, mkApp, mkService, setService } = makeHarness()
   const app = mkApp('门禁应用3', 'gate-tools')
-  // createService 对空 tools 回落 defaultToolsFor（演示三件套），此处显式清空模拟未发现工具的服务
+  // createService retombe sur defaultToolsFor pour des outils vides (trio de démo) ; ici vidés explicitement pour simuler un service sans outils découverts
   const svc = mkService({ name: '空工具服务', slug: 'no-tools' })
   setService(svc.id, { tools: [], status: 'online', health: { status: 'healthy', consecutiveFails: 0, breakerOpen: false, lastProbeAt: new Date().toISOString() } })
   registry.bindCapability(app.id, { serviceId: svc.id, required: true, boundBy: 'x' })
@@ -196,7 +196,7 @@ test('门禁④未决高危风险登记（write/admin 且 pending）被拒', () 
   registry.bindCapability(app.id, { serviceId: svc.id, required: true, boundBy: 'x' })
   riskRegistry.submit({ serviceId: svc.id, toolName: 't_write', risk: 'write', reason: '演示登记', actor: { id: 'u9', name: '登记员' } })
   assert.ok(registry.capabilityGateFailures(app.id).some((item) => item.includes('未决高危')))
-  // 只读风险（read）不构成高危
+  // Un risque en lecture seule (read) ne constitue pas un haut risque
   const app2 = mkApp('门禁应用4b', 'gate-risk-read')
   const svc2 = mkService({ name: '只读登记服务', slug: 'risk-read', tools: [{ ...TOOL, name: 't_read', riskLevel: 'read' }] })
   setService(svc2.id, { status: 'online', health: { status: 'healthy', consecutiveFails: 0, breakerOpen: false, lastProbeAt: new Date().toISOString() } })
@@ -224,7 +224,7 @@ test('门禁全过：在线+已验证+工具非空+无高危+无敏感头 → �
   assert.equal(mcpRegistry.services().get(svc.id).status, 'online')
   registry.bindCapability(app.id, { serviceId: svc.id, required: true, boundBy: 'x' })
   assert.deepEqual(registry.capabilityGateFailures(app.id), [])
-  // SSO 门禁对 api 形态不启用（APP_SSO_ENFORCE 默认 web,h5）→ 直接出审批单
+  // La porte SSO n'est pas active pour la forme api (APP_SSO_ENFORCE défaut web,h5) → dossier d'approbation émis directement
   const approval = registry.requestOnline(app.id, { id: 'u1', name: '测试员' })
   assert.equal(approval.kind, 'app.online')
   assert.equal(approval.riskLevel, 'high')
@@ -237,14 +237,14 @@ test('requestOnline 早反馈：required 能力不满足即拒绝（CAPABILITY_G
   registry.bindCapability(app.id, { serviceId: svc.id, required: true, boundBy: 'x' })
   assert.throws(() => registry.requestOnline(app.id, { id: 'u1', name: '测试员' }), /CAPABILITY_GATE_FAILED/)
   assert.equal(auditRecords.filter((item) => item.action === 'approval.create').length, 0, '门禁拒绝不建审批单')
-  // 非 required 能力不参与门禁（另一 app 绑同一服务为非 required——先解绑归还归属再绑）
+  // Les capacités non required ne participent pas aux portes (un autre app lie le même service en non required — délier d'abord pour rendre la propriété, puis lier)
   registry.unbindCapability(app.id, svc.id)
   const app2 = mkApp('非必需能力应用', 'gate-optional')
   registry.bindCapability(app2.id, { serviceId: svc.id, required: false, boundBy: 'x' })
   assert.deepEqual(registry.capabilityGateFailures(app2.id), [])
 })
 
-// -- C. 生命周期联动 -------------------------------------------------------------------------
+// -- C. Cascades du cycle de vie -------------------------------------------------------------------------
 
 test('下架联动：app.offline 直下全部能力服务（含非 required），平台占位服务不动，留恢复前置态', async () => {
   const { registry, mcpRegistry, events, mkApp, mkService, deploy } = makeHarness()
@@ -253,21 +253,21 @@ test('下架联动：app.offline 直下全部能力服务（含非 required）�
   const optionalSvc = mkService({ name: '可选服务', slug: 'link-optional', exec: 'demo', tools: [TOOL] })
   const platformSvc = mkService({ name: '平台服务', slug: 'link-platform' })
   await deploy(requiredSvc.id)
-  await deploy(optionalSvc.id, { grayPercent: 30 }) // gray 前置态也应被记录
+  await deploy(optionalSvc.id, { grayPercent: 30 }) // l'état préalable gray doit aussi être enregistré
   assert.equal(mcpRegistry.services().get(requiredSvc.id).status, 'online')
 
   registry.bindCapability(app.id, { serviceId: requiredSvc.id, required: true, boundBy: 'x' })
   registry.bindCapability(app.id, { serviceId: optionalSvc.id, required: false, boundBy: 'x' })
-  registry.online(app.id, 'tester') // 生命周期：offline 仅可自 trial/online（先上线再下架）
+  registry.online(app.id, 'tester') // cycle de vie : offline n'est atteignable que depuis trial/online (mettre en ligne avant de retirer)
   registry.offline(app.id, 'tester', '测试下架')
 
-  // 直下路径（offlineService）：状态 offline + McpOfflined 事件跟随既有管道
+  // Chemin d'arrêt direct (offlineService) : état offline + événement McpOfflined dans le pipeline existant
   assert.equal(mcpRegistry.services().get(requiredSvc.id).status, 'offline')
   assert.equal(mcpRegistry.services().get(optionalSvc.id).status, 'offline')
   assert.equal(mcpRegistry.services().get(platformSvc.id).status, 'draft', '未绑定的 platform 占位服务不被联动')
   assert.ok(events.some((item) => item.name === 'mcp.offlined' && item.payload.serviceId === requiredSvc.id), '服务下线事件跟随既有管道')
   assert.ok(events.some((item) => item.name === 'app.offlined' && item.payload.id === app.id), '应用下架事件不受联动影响')
-  // 恢复前置态留痕在绑定记录（additive offlineRestore）
+  // La trace de l'état préalable de restauration est conservée dans l'enregistrement de liaison (champ additif offlineRestore)
   const requiredLink = registry.listCapabilities(app.id).find((item) => item.serviceId === requiredSvc.id)
   const optionalLink = registry.listCapabilities(app.id).find((item) => item.serviceId === optionalSvc.id)
   assert.equal(requiredLink.offlineRestore.status, 'online')
@@ -282,7 +282,7 @@ test('重上线恢复：restoreCapabilityServices 恢复前置状态 + change �
   const svc = mkService({ name: '恢复服务', slug: 'restore-svc', exec: 'demo', tools: [TOOL] })
   await deploy(svc.id)
   registry.bindCapability(app.id, { serviceId: svc.id, required: true, boundBy: 'x' })
-  registry.online(app.id, 'tester') // 生命周期：offline 仅可自 trial/online（先上线再下架）
+  registry.online(app.id, 'tester') // cycle de vie : offline n'est atteignable que depuis trial/online (mettre en ligne avant de retirer)
   registry.offline(app.id, 'tester', '下架联动')
   assert.equal(mcpRegistry.services().get(svc.id).status, 'offline')
 
@@ -292,7 +292,7 @@ test('重上线恢复：restoreCapabilityServices 恢复前置状态 + change �
   const restored = auditRecords.filter((item) => item.action === 'mcp.service.online-restore' && item.resourceId === svc.id)
   assert.equal(restored.length, 1, '恢复落 change 审计')
   assert.equal(restored[0].actorId, 'app-online-linkage')
-  // 幂等：再次恢复无动作（无标记可恢复）
+  // Idempotence : une restauration répétée ne fait rien (aucune marque restaurable)
   registry.restoreCapabilityServices(app.id)
   assert.equal(mcpRegistry.services().get(svc.id).status, 'online')
 })
@@ -303,10 +303,10 @@ test('purge 归档联动：archivedBy 标记 + 归属还原 + 绑定记录清除
   const svc = mkService({ name: '归档服务', slug: 'purge-svc', exec: 'demo', tools: [TOOL] })
   await deploy(svc.id)
   registry.bindCapability(app.id, { serviceId: svc.id, required: true, boundBy: 'x' })
-  registry.online(app.id, 'tester') // 生命周期：offline 仅可自 trial/online（先上线再下架）
+  registry.online(app.id, 'tester') // cycle de vie : offline n'est atteignable que depuis trial/online (mettre en ligne avant de retirer)
   registry.offline(app.id, 'tester', '先下架')
   assert.equal(mcpRegistry.services().get(svc.id).status, 'offline')
-  // 凭证联动清库（issue #19）：purge 前登记一条凭证，purge 后密钥文件必须整体消失
+  // Effacement en cascade des identifiants (issue #19) : un identifiant est enregistré avant purge, le fichier de clés doit disparaître intégralement après purge
   credentials.put(app.id, { key: 'external-token', value: 'tk_live_123456', rotatedBy: 'tester' })
   assert.equal(credentials.list(app.id).length, 1)
 
@@ -325,7 +325,7 @@ test('purge 归档联动：archivedBy 标记 + 归属还原 + 绑定记录清除
   )
 })
 
-// -- 执行器复核（薄委托：逻辑在 capabilityGateFailures，此处验证执行器装配形态可调用） -------
+// -- Revérification de l'exécuteur (délégation mince : la logique est dans capabilityGateFailures ; ici on valide que la forme d'assemblage de l'exécuteur est appelable) -------
 
 test('执行期复核：挂单期间能力下线后复核拒绝（CAPABILITY_GATE_FAILED）；服务恢复后放行', async () => {
   const { registry, mcpRegistry, mkApp, mkService, deploy } = makeHarness()
@@ -333,15 +333,15 @@ test('执行期复核：挂单期间能力下线后复核拒绝（CAPABILITY_GAT
   const svc = mkService({ name: '复核服务', slug: 'recheck-svc', exec: 'demo', tools: [TOOL] })
   await deploy(svc.id)
   registry.bindCapability(app.id, { serviceId: svc.id, required: true, boundBy: 'x' })
-  // 模拟执行器内复核语义（真实装配在 apply() 的 registerExecutor('app.online')，逻辑同源）：
-  // 挂单期间服务被人工下线 → 复核发现 → 执行失败留痕
+  // Simule la sémantique de revérification dans l'exécuteur (l'assemblage réel est le registerExecutor('app.online') de apply(), logique de même source) :
+  // service arrêté manuellement pendant l'examen du dossier → la revérification le détecte → échec d'exécution avec trace
   mcpRegistry.offlineService(svc.id, 'ops', '挂单期间人工下线')
   const failures = registry.capabilityGateFailures(app.id)
   assert.ok(failures.length > 0, '执行期复核应发现能力已下线')
   assert.throws(() => {
     if (failures.length > 0) throw new Error(`执行期复核失败：审批期间能力服务状态变化（CAPABILITY_GATE_FAILED）——${failures.join('；')}`)
   }, /CAPABILITY_GATE_FAILED/)
-  // 服务恢复上线后（offline 经 draft 回发布管道）复核通过，应用可上线
+  // Après remise en ligne du service (offline repasse par draft vers le pipeline de publication), la revérification passe et l'application peut se mettre en ligne
   mcpRegistry.services().update(svc.id, { status: 'draft' })
   await deploy(svc.id)
   assert.deepEqual(registry.capabilityGateFailures(app.id), [])

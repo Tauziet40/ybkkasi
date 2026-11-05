@@ -1,21 +1,21 @@
 /**
- * @dsh-ops/plugin-a2a —— A2A 协作平面（企业数字员工内网协作方案 §5/§6）。
+ * @dsh-ops/plugin-a2a —— plan de collaboration A2A (plan de collaboration intranet des employés numériques d'entreprise §5/§6).
  *
- * 在 contract-c3 冻结 v1（点名直调 + 级别透出）之上升版的完整协作闭环：
- *   - Agent Card 生成/签名/发布（源自授权集投影，声明不大于授权；JWS Ed25519 验签）；
- *   - 跨运行时发现（平台内目录，补 contract-c3 缺席项 2）；
- *   - JSON-RPC 方法面（message/send·stream、tasks/get·list·cancel，八态 Task 生命周期）；
- *   - Task 受理前治理检查五项（权限点/在线与 permit 覆盖/密级天花板/预算配额/审批规则）；
- *   - A0-A3 协商策略引擎（补缺席项 3；A3×A3 要约-还价，补缺席项 4 的多方仲裁由 flow-core 承载）；
- *   - 声明-授权一致性巡检（能力漂移治理）；协作履约视图与交付验收闭环。
+ * Boucle de collaboration complète, montée au-dessus du contract-c3 gelé v1 (appel nominatif direct + exposition des niveaux) :
+ *   - génération/signature/publication de l'Agent Card (projection depuis l'ensemble d'autorisations, déclaration ≤ autorisation ; vérification JWS Ed25519) ;
+ *   - découverte inter-runtimes (annuaire interne à la plateforme, comble l'absence 2 de contract-c3) ;
+ *   - facette de méthodes JSON-RPC (message/send·stream, tasks/get·list·cancel, cycle de vie de Task à huit états) ;
+ *   - cinq contrôles de gouvernance avant acceptation de la Task (point de permission/en ligne et couverture permit/plafond de confidentialité/quotas de budget/règles d'approbation) ;
+ *   - moteur de stratégie de négociation A0-A3 (comble l'absence 3 ; l'arbitrage multi-parties de l'absence 4 est porté par flow-core) ;
+ *   - inspection de cohérence déclaration-autorisation (gouvernance de la dérive des capacités) ; vue de performance de collaboration et boucle de recette des livrables.
  *
- * 纪律（协作方案 §11）：
- *   - 与 plugin-uhp 只走 ctx.platformBus（a2a.task.dispatch / a2a.task.progress / a2a.task.cancel），
- *     禁止直连对方插件数据；
- *   - 存量 Agent 缺省口径兼容（无 a2aProfile 字段时退化为 v1 点名调用行为）；
- *   - 中断态是治理信号：input_required 由调用方携 taskId 续答；auth_required 必经审批中心人工闭环，
- *     恢复执行用幂等键防重（a2a:<agentId>:<principal>:<taskId>:a<attempt>）；
- *   - 验收不轻信自报：Task completed ≠ 业务闭环，关键任务经交付验收（人工）后才算履约通过。
+ * Discipline (plan de collaboration §11) :
+ *   - avec plugin-uhp, uniquement via ctx.platformBus (a2a.task.dispatch / a2a.task.progress / a2a.task.cancel),
+ *     interdiction de se connecter directement aux données du plugin voisin ;
+ *   - compatibilité par défaut avec les Agents existants (sans champ a2aProfile, repli sur le comportement v1 d'appel nominatif) ;
+ *   - les états d'interruption sont des signaux de gouvernance : input_required se poursuit par l'appelant avec le taskId ; auth_required passe obligatoirement par une clôture humaine au centre d'approbations,
+ *     la reprise d'exécution utilise une clé d'idempotence anti-doublon (a2a:<agentId>:<principal>:<taskId>:a<attempt>) ;
+ *   - la recette ne fait pas confiance à l'auto-déclaration : Task completed ≠ clôture métier ; les tâches critiques ne sont réputées acquittées qu'après la recette de livraison (humaine).
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -48,7 +48,7 @@ import {
 } from './negotiate.ts'
 
 // ---------------------------------------------------------------------------
-// 数据模型
+// Modèle de données
 // ---------------------------------------------------------------------------
 
 export type A2aTaskState =
@@ -109,25 +109,25 @@ export interface A2aTaskRecord extends RecordBase {
   model?: string
   approvalId?: string
   acceptance?: { status: 'accepted' | 'rejected'; by: string; at: string; reason: string }
-  /** OBO 身份链（Q-6）：人类经 OBO 令牌代表该员工发起协作时，真实发起人随链透传进审计。 */
+  /** Chaîne d'identité OBO (Q-6) : quand un humain initie une collaboration pour le compte de cet employé via un jeton OBO, le vrai initiateur est transmis dans la chaîne jusqu'à l'audit. */
   onBehalfUser?: string
   actChain?: Array<{ principalId: string; name: string; type: string }>
   startedAt?: string
   finishedAt?: string
 }
 
-/** 敏感操作审批规则（治理检查第 5 项；命中则 auth_required 挂审批工单而非直接拒绝）。 */
+/** Règles d'approbation des opérations sensibles (contrôle de gouvernance n° 5 ; en cas de correspondance, auth_required crée un dossier d'approbation au lieu d'un refus direct). */
 export interface A2aRuleRecord extends RecordBase {
   name: string
-  /** 任务密级 ≥ 该级则命中（internal/secret）。 */
+  /** Se déclenche si la confidentialité de la tâche ≥ ce niveau (internal/secret). */
   matchDataClassAtLeast?: 'internal' | 'secret'
-  /** 任务消息包含该关键词则命中。 */
+  /** Se déclenche si le message de la tâche contient ce mot-clé. */
   matchKeyword?: string
   enabled: boolean
   createdBy: string
 }
 
-/** 声明-授权一致性巡检报告（能力漂移治理）。 */
+/** Rapport d'inspection de cohérence déclaration-autorisation (gouvernance de la dérive des capacités). */
 export interface A2aPatrolRecord extends RecordBase {
   at: string
   actor: string
@@ -144,7 +144,7 @@ interface CardKeyRecord extends RecordBase {
 }
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 export class A2aCollabService extends Service {
@@ -152,7 +152,7 @@ export class A2aCollabService extends Service {
 
   constructor(ctx: Context) {
     super(ctx, 'a2aCollab')
-    // UHP 执行进度 → 八态状态机推进（只走事件总线纪律）
+    // Progression UHP → avancement de la machine à états à huit états (discipline : uniquement par le bus d'événements)
     ctx.platformBus.on('a2a.task.progress', (payload) => {
       try {
         this.onProgress(payload as UhpProgressLike)
@@ -160,7 +160,7 @@ export class A2aCollabService extends Service {
         this.ctx.logger('a2a').error('a2a.task.progress 处理异常', error)
       }
     })
-    // 审批驳回联动：a2a.task.authorize 工单被驳 → 任务终态 rejected（中断态治理闭环）
+    // Liaison de rejet d'approbation : dossier a2a.task.authorize rejeté → état final de la tâche rejected (clôture de gouvernance de l'état d'interruption)
     ctx.platformBus.on(PlatformEvents.ApprovalDecided, (payload) => {
       const p = payload as { approvalId: string; approved: boolean }
       if (p.approved) return
@@ -173,7 +173,7 @@ export class A2aCollabService extends Service {
     })
   }
 
-  // -- 集合 -----------------------------------------------------------------
+  // -- Collections -----------------------------------------------------------------
 
   tasks(): Collection<A2aTaskRecord> {
     return this.ctx.opsStorage.collection<A2aTaskRecord>('a2a:tasks', { durability: 'durable' })
@@ -191,7 +191,7 @@ export class A2aCollabService extends Service {
     return this.ctx.opsStorage.collection<CardKeyRecord>('a2a:cardKeys', { durability: 'durable' })
   }
 
-  // -- 卡片签名密钥（私钥只落盘 dataDir 0600，集合只存公钥——对齐 authn/market 语义）---------
+  // -- Clés de signature de carte (la clé privée ne touche que le disque dataDir en 0600, les collections ne stockent que la clé publique — aligné sur la sémantique authn/market)---------
 
   private signingCache: { keyId: string; privateKeyPem: string; publicKeyBase64: string } | undefined
 
@@ -221,15 +221,15 @@ export class A2aCollabService extends Service {
     return this.signingCache
   }
 
-  // -- Agent Card：授权集投影 + 签名（声明以授权为权威，不接受自由填写）----------------------
+  // -- Agent Card : projection de l'ensemble d'autorisations + signature (la déclaration a l'autorisation pour autorité, pas de remplissage libre)----------------------
 
-  /** 技能投影：已上架 Skill（agent.attrs.skills）+ MCP 权限组（subjects 命中该 Agent）。 */
+  /** Projection des compétences : Skills mis en avant (agent.attrs.skills) + groupes de permissions MCP (subjects touchant cet Agent). */
   private projectSkills(agentId: string, attrs: Record<string, unknown>): AgentCardSkill[] {
     const skills: AgentCardSkill[] = []
     const slugs = Array.isArray(attrs['skills']) ? (attrs['skills'] as unknown[]).map(String) : []
     for (const slug of slugs) {
       const skill = this.ctx.skillHub.skills().find((item) => item.slug === slug && item.status === 'published')[0]
-      if (!skill) continue // 未上架/已强制下架的 Skill 不投影（声明 ≤ 授权）
+      if (!skill) continue // les Skills non mis en avant ou retirés de force ne sont pas projetés (déclaration ≤ autorisation)
       skills.push({ id: `skill:${skill.slug}`, name: skill.name, description: skill.summary, tags: skill.tags.slice(0, 6) })
     }
     for (const group of this.ctx.mcpRegistry.permGroups().all()) {
@@ -239,7 +239,7 @@ export class A2aCollabService extends Service {
     return skills
   }
 
-  /** 密级天花板（渠道口径 public/internal/secret；缺省 internal——D14 业务密级不做按名直译）。 */
+  /** Plafond de confidentialité (périmètre de canal public/internal/secret ; défaut internal — les niveaux métier D14 ne sont pas traduits mot à mot par leur nom). */
   dataClassCeilingOf(attrs: Record<string, unknown>): DataClass {
     const raw = String(attrs['a2aDataClassCeiling'] ?? '').trim()
     return raw === 'public' || raw === 'secret' ? (raw as DataClass) : 'internal'
@@ -250,9 +250,9 @@ export class A2aCollabService extends Service {
   }
 
   /**
-   * Agent Card 自描述（Q-31/Q-32/E-7）：补齐外部 Agent「只靠卡片协作」所需的全部契约面——
-   * SSE 事件地址、所需权限点、A2A 协议版本与���法面、计量双主体口径。
-   * 卡片是 A2A 生态扩展性的天花板：字段缺一项，每接一个外部厂商 Agent 就要多一次人工适配。
+   * Auto-description de l'Agent Card (Q-31/Q-32/E-7) : complète toute la facette de contrat nécessaire à la collaboration « avec la seule carte » d'un Agent externe —
+   * adresse des événements SSE, points de permission requis, version du protocole A2A et facette de méthodes, périmètre de mesure à double sujet.
+   * La carte est le plafond d'extensibilité de l'écosystème A2A : un champ manquant = une adaptation manuelle de plus pour chaque Agent de fournisseur externe intégré.
    */
   cardBodyFor(agent: { id: string; slug: string; name: string; attrs: Record<string, unknown> }): AgentCardBody {
     const attrs = agent.attrs
@@ -266,7 +266,7 @@ export class A2aCollabService extends Service {
       defaultInputModes: ['text/plain', 'application/json'],
       defaultOutputModes: ['text/plain', 'application/json'],
       skills: this.projectSkills(agent.id, attrs),
-      // Q-31：声明调用所需权限点（此前无 scopes，外部客户端只能猜）
+      // Q-31 : déclare les points de permission requis pour l'appel (auparavant pas de scopes, les clients externes devaient deviner)
       securitySchemes: {
         ybkMachineCredential: {
           type: 'http',
@@ -275,7 +275,7 @@ export class A2aCollabService extends Service {
           scopes: { 'agent.a2a.invoke': t('A2A 协作调用（派活/续答/取消/查询）') },
         },
       },
-      // Q-31/Q-32/E-7：事件地址 + 计量双主体口径 + 协议版本与方��面
+      // Q-31/Q-32/E-7 : adresse des événements + périmètre de mesure à double sujet + version du protocole et facette de méthodes
       eventsUrl: `${base}/v1/a2a/tasks/{taskId}/events`,
       extensions: [
         {
@@ -284,7 +284,7 @@ export class A2aCollabService extends Service {
             autonomy: this.autonomyOf(attrs),
             runtime: String(attrs['runtime'] ?? 'dsh'),
             dataClassCeiling: this.dataClassCeilingOf(attrs),
-            // 双主体口径（Q-32/E-7）：协作调用计量记在发起侧，模型用量记在本员工侧
+            // Périmètre à double sujet (Q-32/E-7) : la mesure des appels de collaboration est comptée côté initiateur, la consommation de modèle côté employé
             meteringSubject: `agent:${agent.id}`,
             callerMeteringSubject: 'agent:<callerAgentId>',
           },
@@ -314,7 +314,7 @@ export class A2aCollabService extends Service {
     return signAgentCard(this.cardBodyFor(agent), privateKeyPem, keyId)
   }
 
-  /** 平台级目录卡（含验签公钥——调用方先验签后采信）+ 协议面与目录入口（Q-31）。 */
+  /** Carte d'annuaire au niveau plateforme (avec la clé publique de vérification — l'appelant vérifie la signature avant de faire confiance) + facette protocole et entrée d'annuaire (Q-31). */
   platformCard() {
     const { keyId, publicKeyBase64 } = this.signing()
     const base = String(process.env.PLATFORM_PUBLIC_BASE ?? '').replace(/\/+$/, '')
@@ -349,11 +349,11 @@ export class A2aCollabService extends Service {
     }
   }
 
-  /** 目录检索（跨运行时发现）：在线员工 + 卡片治理扩展字段投影。 */
+  /** Recherche d'annuaire (découverte inter-runtimes) : employés en ligne + projection des champs d'extension de gouvernance de carte. */
   /**
-   * 目录检索（跨运行时发现）：在线员工 + 卡片治理扩展字段投影。
-   * 组织隔离（Q-4）：按调用方可见组织子树收敛——与 /api/agents 的 R11 口径一致，
-   * 下级组织持 a2a.directory.read 只能看到本组织子树的协作对象。
+   * Recherche d'annuaire (découverte inter-runtimes) : employés en ligne + projection des champs d'extension de gouvernance de carte.
+   * Isolation organisationnelle (Q-4) : convergence sur le sous-arbre organisationnel visible par l'appelant — même périmètre que /api/agents selon R11,
+   * une organisation inférieure détenant a2a.directory.read ne voit que les objets de collaboration de son sous-arbre organisationnel.
    */
   directory(filter: { skill?: string; q?: string; runtime?: string; autonomy?: string; dataClass?: string; category?: string }, caller?: CallerRefLike) {
     const orgScope = caller ? this.visibleOrgIds(caller) : null
@@ -368,7 +368,7 @@ export class A2aCollabService extends Service {
           name: agent.name,
           description: card.description,
           avatar: String(agent.attrs['avatar'] ?? '🤖'),
-          // 业务分类（各资产板块统一口径）：存量登记无该属性按「其他」归拢
+          // Classification métier (périmètre unifié de tous les volets d'actifs) : les enregistrements existants sans cet attribut sont rangés sous « autres »
           category: normalizeAssetCategory(agent.attrs['category']),
           url: card.url,
           skills: card.skills,
@@ -400,7 +400,7 @@ export class A2aCollabService extends Service {
       })
   }
 
-  // -- 治理检查五项（受理后、转译 UHP 前；任一不过即 rejected 并留痕）-------------------------
+  // -- Cinq contrôles de gouvernance (après acceptation, avant traduction UHP ; un seul échec = rejected avec trace)-------------------------
 
   private async governanceCheck(input: {
     agent: { id: string; name: string; slug: string; status: string; orgId: string; attrs: Record<string, unknown> }
@@ -409,19 +409,19 @@ export class A2aCollabService extends Service {
     callerAutonomy: Autonomy
   }): Promise<{ ok: true; approvalRequired: boolean } | { ok: false; code: string; message: string }> {
     const { agent } = input
-    // 1. 权限点：由 /api 路由 guarded('agent.a2a.invoke') 在 HTTP 边界强制（fail-closed），此处登记语义位。
+    // 1. Point de permission : forcé à la frontière HTTP par la route /api guarded('agent.a2a.invoke') (fail-closed) ; ici, enregistrement de la position sémantique.
     if (agent.status !== 'online') return { ok: false, code: 'TARGET_NOT_ONLINE', message: t('被调员工未上线（{status}），A2A 仅对 online 开放', { status: agent.status }) }
-    // 2. 在线 + 非冻结 + workforce permit 覆盖
-    //    受管员工（workforce 绑定 active + 员工在岗 + 任用生效）permit 覆盖成立；
-    //    绑定存在但失效（离岗/任用撤销/绑定停用）→ 拒绝（Q-22/D-4）；
-    //    从未纳管的 legacy Agent 按 v1 语义放行，不因未纳管而阻断。
+    // 2. En ligne + non gelé + couverture permit workforce
+    //    Employé géré (liaison workforce active + employé en poste + affectation effective) : la couverture permit est satisfaite ;
+    //    liaison présente mais invalide (parti/retrait d'affectation/liaison désactivée) → refus (Q-22/D-4) ;
+    //    les Agents legacy jamais gouvernés passent selon la sémantique v1, sans blocage pour cause de non-gouvernance.
     if (this.ctx.agentRegistry.isFrozen(agent.id)) return { ok: false, code: 'TARGET_FROZEN', message: t('被调员工已冻结（预算超限联动），暂不可承接协作任务') }
-    // P2-01：workforceIdentity 已进 inject（此前缺失 → cordis Service 代理读未注入键即抛错，
-    // 被 catch 吞掉按 legacy 放行，permit 覆盖实为空操作）。判定改用契约方法 inspectAgent——
-    // 不触碰 resolver.store 内部结构（脆弱耦合），并区分「未纳管」与「已纳管但失效」。
-    // 兜底口径：workforceIdentity 是声明依赖（inject + plugin.yaml），宿主缺提供者时本插件
-// 整体 INACTIVE（cordis 语义），不会走到这里；判定**抛错**则 fail-closed 拒绝——
-// 不允许把「治理判定失败」当成放行理由（P2-01 的根因正是异常被吞后按 legacy 放行）。
+    // P2-01 : workforceIdentity est désormais dans inject (auparavant absent → le proxy Service cordis levait en lisant une clé non injectée,
+    // l'exception était avalée par le catch et le passage se faisait en legacy, la couverture permit était en réalité une no-op). Le jugement passe par la méthode de contrat inspectAgent —
+    // sans toucher à la structure interne de resolver.store (couplage fragile), en distinguant « non gouverné » et « gouverné mais invalide ».
+    // Périmètre de repli : workforceIdentity est une dépendance déclarée (inject + plugin.yaml) ; si l'hôte manque de fournisseur, le plugin entier
+// passe INACTIVE (sémantique cordis) et n'arrive jamais ici ; si le jugement **lève**, refus fail-closed —
+// il est interdit de considérer un « échec du jugement de gouvernance » comme un motif de passage (la cause racine de P2-01 était justement l'exception avalée puis passage en legacy).
     const resolver = this.ctx.workforceIdentity
     let state: Awaited<ReturnType<typeof resolver.inspectAgent>>
     try {
@@ -450,12 +450,12 @@ export class A2aCollabService extends Service {
         message: t('被调员工已绑定数字员工身份但 permit 未生效：{reason}，请先恢复员工在岗与任用后重试', { reason }),
       }
     }
-    // 3. 密级天花板（越级走渠道锁死拒绝口径，契约 c1 语义）
+    // 3. Plafond de confidentialité (dépassement de niveau : refus verrouillé par le périmètre de canal, sémantique du contrat c1)
     const ceiling = this.dataClassCeilingOf(agent.attrs)
     if (DATA_CLASS_RANK[input.dataClass] > DATA_CLASS_RANK[ceiling]) {
       return { ok: false, code: 'DATA_CLASS_EXCEEDED', message: t('数据密级越级：任务密级 {requested} 高于该员工天花板 {ceiling}（拒绝并留痕）', { requested: input.dataClass, ceiling }) }
     }
-    // 4. 预算与配额（modelgw 预算熔断口径）
+    // 4. Budget et quotas (périmètre de disjonction de budget de modelgw)
     try {
       const statuses = this.ctx.modelGateway.budgetStatusForSubject(`agent:${agent.id}`, agent.orgId)
       for (const item of statuses) {
@@ -464,8 +464,8 @@ export class A2aCollabService extends Service {
           return { ok: false, code: 'BUDGET_EXCEEDED', message: t('被调员工预算熔断中（预算 {budget}），本次任务拒绝', { budget: item.budget.id }) }
         }
       }
-    } catch { /* modelgw 预算面缺席：不阻断（模型调用侧仍有熔断兜底） */ }
-    // 5. 敏感操作审批规则（命中 → auth_required 挂审批工单，而非直接拒绝）
+    } catch { /* facette budget modelgw absente : pas de blocage (la disjonction côté appel de modèle reste le filet) */ }
+    // 5. Règles d'approbation des opérations sensibles (correspondance → dossier d'approbation auth_required, plutôt qu'un refus direct)
     const approvalRequired = this.rules().all().some((rule) => {
       if (!rule.enabled) return false
       if (rule.matchDataClassAtLeast && DATA_CLASS_RANK[input.dataClass] >= DATA_CLASS_RANK[rule.matchDataClassAtLeast]) return true
@@ -476,9 +476,9 @@ export class A2aCollabService extends Service {
   }
 
   /**
-   * 调用方自治级别判定：机器凭证绑定 Agent 时取其登记级别（contract-c3）；
-   * 人类调用方映射 A1——协商矩阵下 A1 列语义恰好就是人类委派语义：
-   * A0 目标 → 单轮问答、A1 目标 → 执行+人在环、A2 目标 → 执行事后报告、A3 目标 → 执行。
+   * Jugement du niveau d'autonomie de l'appelant : identifiant machine lié à un Agent → niveau enregistré de celui-ci (contract-c3) ;
+   * appelant humain → mappé en A1 — dans la matrice de négociation, la colonne A1 correspond justement à la sémantique de délégation humaine :
+   * objectif A0 → Q&R en un tour ; objectif A1 → exécution avec humain dans la boucle ; objectif A2 → exécution avec rapport a posteriori ; objectif A3 → exécution.
    */
   private callerAutonomyOf(caller: CallerRefLike, verified?: VerifiedPrincipal): Autonomy {
     if (caller.refType === 'agent' && caller.refId) {
@@ -489,7 +489,7 @@ export class A2aCollabService extends Service {
     return 'A1'
   }
 
-  // -- 任务面 ---------------------------------------------------------------
+  // -- Facette tâches ---------------------------------------------------------------
 
   private resolveAgent(ref: string) {
     return this.ctx.resourceCore.get('agent', ref) ?? this.ctx.resourceCore.bySlug('agent', ref)
@@ -529,8 +529,8 @@ export class A2aCollabService extends Service {
   }
 
   /**
-   * message/send 主入口：创建或续答任务 → 治理检查五项 → 协商引擎 → 执行派发。
-   * 返回任务快照（同步等待至终态或超时——长任务客户端经 tasks/get 或 SSE 续查）。
+   * Entrée principale message/send : création ou poursuite de tâche → cinq contrôles de gouvernance → moteur de négociation → distribution d'exécution.
+   * Renvoie l'instantané de la tâche (attente synchrone jusqu'à l'état final ou dépassement — les tâches longues continuent via tasks/get ou SSE).
    */
   async sendMessage(input: {
     caller: CallerRefLike
@@ -549,7 +549,7 @@ export class A2aCollabService extends Service {
     const callerAutonomy = this.callerAutonomyOf(caller)
     const targetAutonomy = this.autonomyOf(agent.attrs)
 
-    // 续答路径：input_required 任务的协商续轮 / 补充输入
+    // Chemin de poursuite : tour de négociation supplémentaire / entrée complémentaire pour une tâche input_required
     if (input.taskId) {
       const task = this.tasks().findOne((item) => item.taskId === input.taskId)
       if (!task) throw new NotFoundError(t('A2A 任务不存在：{id}', { id: input.taskId }))
@@ -561,11 +561,11 @@ export class A2aCollabService extends Service {
       }
       this.appendHistory(task, { at: new Date().toISOString(), from: 'caller', type: 'message', text: input.message })
       if (task.negotiation?.status === 'open') return this.advanceNegotiation(task, input.message, caller)
-      // 非协商中断：补充输入后重新派发执行
+      // Interruption hors négociation : redistribution de l'exécution après entrée complémentaire
       return this.dispatchTask(task, input.message)
     }
 
-    // 新任务路径
+    // Chemin de nouvelle tâche
     const governance = await this.governanceCheck({
       agent, dataClass: requested, message: input.message, callerAutonomy,
     })
@@ -576,16 +576,16 @@ export class A2aCollabService extends Service {
       throw new GovernanceError(governance.code, governance.message)
     }
 
-    // 协商引擎：A0-A3 矩阵仅约束「数字员工互调」（矩阵的行/列都是员工自治级别）；
-    // 人类/外部服务调用方不进矩阵——按目标级别直判：A0 目标=单轮问答，A1+ 目标=A1 列语义
-    // （A1→人在环执行、A2/A3→执行事后报告），执行深度始终受治理检查五项约束。
+    // Moteur de négociation : la matrice A0-A3 ne contraint que les « appels entre employés numériques » (lignes et colonnes de la matrice = niveaux d'autonomie des employés) ;
+    // les appelants humains/services externes n'entrent pas dans la matrice — jugement direct par niveau d'objectif : objectif A0 = Q&R en un tour, objectif A1+ = sémantique de la colonne A1
+    // (A1 → exécution avec humain dans la boucle, A2/A3 → exécution avec rapport a posteriori) ; la profondeur d'exécution reste toujours contrainte par les cinq contrôles de gouvernance.
     const isAgentCaller = Boolean(caller.refType === 'agent' && caller.refId && this.ctx.resourceCore.get('agent', caller.refId))
     const mode: NegotiationMode = isAgentCaller
       ? negotiateMode(callerAutonomy, targetAutonomy)
       : (targetAutonomy === 'A0' ? 'single_turn' : negotiateMode('A1', targetAutonomy))
     if (mode === 'rejected') {
-      // Q-10：mode 记录真实判定（rejected），不再兜底成 single_turn——按 mode 统计的消费方
-      // （履约视图/审计归类/控制台筛选）不应把「矩阵拒绝」误计为「单轮问答」
+      // Q-10 : mode enregistre le jugement réel (rejected), plus de repli en single_turn — les consommateurs qui statistiquent par mode
+      // (vue de performance/classement audit/filtres console) ne doivent pas compter un « refus de matrice » comme une « Q&R en un tour »
       const task = this.createTaskRecord({ caller, agent, message: input.message, dataClass: requested, callerAutonomy, targetAutonomy, mode: 'rejected' })
       const reason = t('协商矩阵拒绝：调用方 {caller} × 被调方 {target} 不允许执行类交互（A0 提示型员工不可被驱动执行）', { caller: callerAutonomy, target: targetAutonomy })
       this.transition(task.taskId, 'rejected', reason)
@@ -595,13 +595,13 @@ export class A2aCollabService extends Service {
 
     const task = this.createTaskRecord({
       caller, agent, message: input.message, dataClass: requested, callerAutonomy, targetAutonomy, mode,
-      // Q-21：调用方可指定协作链 ID（metadata.contextId），同链多 Task 才能被计量归集
+      // Q-21 : l'appelant peut spécifier l'ID de chaîne de collaboration (metadata.contextId) ; seule une même chaîne permet la consolidation de mesure
       ...(input.contextId ? { contextId: input.contextId } : {}),
     })
     this.auditTask(task, 'a2a.task.accepted', 'ok', t('治理检查五项通过，协商引擎判定 {mode}', { mode }))
 
     if (mode === 'single_turn') return this.runSingleTurn(this.tasks().findOne((item) => item.taskId === task.taskId)!)
-    // 敏感操作审批规则命中（单轮问答不构成操作，豁免）：执行类/协商类任务一律先挂审批工单
+    // Règle d'approbation des opérations sensibles satisfaite (une Q&R en un tour ne constitue pas une opération, exemption) : les tâches d'exécution/négociation créent d'abord un dossier d'approbation
     if (governance.approvalRequired) {
       return this.requestAuthorize(this.tasks().findOne((item) => item.taskId === task.taskId)!, t('命中敏感操作审批规则，人在环确认后恢复执行'))
     }
@@ -621,14 +621,14 @@ export class A2aCollabService extends Service {
     callerAutonomy: Autonomy
     targetAutonomy: Autonomy
     mode?: NegotiationMode
-    /** 调用方指定的协作链 ID（Q-21）；缺省由平台生成。 */
+    /** ID de chaîne de collaboration spécifié par l'appelant (Q-21) ; généré par la plateforme par défaut. */
     contextId?: string
   }): A2aTaskRecord {
     const now = new Date().toISOString()
     return this.tasks().insert({
       id: newId('a2at'),
       taskId: newId('task'),
-      // Q-21：调用方指定的协作链原样透传（计量按链归集的前提）；缺省仍由平台生成
+      // Q-21 : la chaîne de collaboration spécifiée par l'appelant est transmise telle quelle (condition préalable à la consolidation de mesure par chaîne) ; sinon la plateforme la génère toujours
       contextId: input.contextId?.trim() || newId('a2actx'),
       agentId: input.agent.id,
       agentSlug: input.agent.slug,
@@ -646,13 +646,13 @@ export class A2aCollabService extends Service {
       artifacts: [],
       history: [{ at: now, from: 'caller', type: 'message', text: input.message.slice(0, 2000) }],
       attempts: 0,
-      // OBO 身份链（Q-6）：人类以代表身份发起时，act 链里的真实发起人随任务与审计留痕
+      // Chaîne d'identité OBO (Q-6) : quand un humain initie en tant que représentant, le vrai initiateur de la chaîne act accompagne la tâche et l'audit
       ...(input.caller.onBehalfOfUser ? { onBehalfUser: input.caller.onBehalfOfUser } : {}),
       ...(input.caller.oboActChain && input.caller.oboActChain.length > 0 ? { actChain: input.caller.oboActChain } : {}),
     })
   }
 
-  /** 单轮问答（single_turn）：v1 平台代答语义，真实模型调用 + 零价快照计量（带协作链 contextId）。 */
+  /** Q&R en un tour (single_turn) : sémantique v1 de réponse par la plateforme, appel de modèle réel + mesure d'instantané à prix zéro (avec contextId de chaîne de collaboration). */
   private async runSingleTurn(task: A2aTaskRecord): Promise<A2aTaskRecord> {
     const agent = this.resolveAgent(task.agentId)
     if (!agent) return this.transition(task.taskId, 'failed', t('Agent 资产不存在'))
@@ -692,7 +692,7 @@ export class A2aCollabService extends Service {
     }
   }
 
-  /** 执行派发：转译 UHP 调用（幂等键对齐 Task；只走事件总线）。 */
+  /** Distribution d'exécution : traduit en appel UHP (clé d'idempotence alignée sur la Task ; uniquement par le bus d'événements). */
   private dispatchTask(task: A2aTaskRecord, resumeMessage?: string): A2aTaskRecord {
     const agent = this.resolveAgent(task.agentId)
     if (!agent) return this.transition(task.taskId, 'failed', t('Agent 资产不存在'))
@@ -707,11 +707,11 @@ export class A2aCollabService extends Service {
       harnessRef: String(agent.attrs['uhpHarnessRef'] ?? '') || undefined,
       input: resumeMessage ?? task.message,
       dataClass: task.dataClass,
-      // 幂等键对齐（协作方案 §7.2）：a2a:<agentId>:<principal>:<taskId>:a<attempt>
+      // Alignement de la clé d'idempotence (plan de collaboration §7.2) : a2a:<agentId>:<principal>:<taskId>:a<attempt>
       idempotencyKey: this.dispatchKey(task, attempts),
       sessionPolicy: String(agent.attrs['uhpSessionPolicy'] ?? 'task-bound') === 'employee-bound' ? 'employee-bound' : 'task-bound',
       callerPrincipalId: task.callerPrincipalId,
-      // OBO 身份链（Q-6）：平台内部透传真实发起人，UHP 侧据此记审计（不采信任何外部自述）
+      // Chaîne d'identité OBO (Q-6) : la plateforme transmet en interne le vrai initiateur ; le côté UHP l'inscrit à l'audit (aucune auto-déclaration externe n'est admise)
       ...(task.onBehalfUser ? { onBehalfUser: task.onBehalfUser } : {}),
       ...(task.actChain?.length ? { actChain: task.actChain } : {}),
     })
@@ -719,7 +719,7 @@ export class A2aCollabService extends Service {
     return this.tasks().findOne((item) => item.taskId === task.taskId)!
   }
 
-  /** A3×A3 协商：发起要约（round 1）。 */
+  /** Négociation A3×A3 : émission de l'offre (round 1). */
   private async startNegotiation(task: A2aTaskRecord, proposal: unknown): Promise<A2aTaskRecord> {
     const negotiation = { round: 1, maxRounds: NEGOTIATION_MAX_ROUNDS, status: 'open' as const, offers: [{
       round: 1, from: 'caller' as const, proposal, at: new Date().toISOString(),
@@ -729,7 +729,7 @@ export class A2aCollabService extends Service {
     return this.evaluateNegotiation(this.tasks().findOne((item) => item.taskId === task.taskId)!)
   }
 
-  /** 协商续轮：调用方对还价的回应。 */
+  /** Tour de négociation suivant : réponse de l'appelant à la contre-offre. */
   private async advanceNegotiation(task: A2aTaskRecord, message: string, _caller: CallerRefLike): Promise<A2aTaskRecord> {
     void _caller
     const negotiation = task.negotiation!
@@ -747,7 +747,7 @@ export class A2aCollabService extends Service {
     return this.evaluateNegotiation(this.tasks().findOne((item) => item.taskId === task.taskId)!)
   }
 
-  /** 被调方评估当前要约：accept → 转执行；counter → input_required 挂起等调用方回应。 */
+  /** Le côté appelé évalue l'offre courante : accept → passage à l'exécution ; counter → suspension input_required en attendant la réponse de l'appelant. */
   private async evaluateNegotiation(task: A2aTaskRecord): Promise<A2aTaskRecord> {
     const agent = this.resolveAgent(task.agentId)
     if (!agent) return this.transition(task.taskId, 'failed', t('Agent 资产不存在'))
@@ -794,7 +794,7 @@ export class A2aCollabService extends Service {
     return this.tasks().findOne((item) => item.taskId === task.taskId)!
   }
 
-  /** 人在环确认（execute_confirm / 审批规则命中）：auth_required + 审批中心工单。 */
+  /** Confirmation humaine dans la boucle (execute_confirm / règle d'approbation satisfaite) : auth_required + dossier au centre d'approbations. */
   private requestAuthorize(task: A2aTaskRecord, reason: string): A2aTaskRecord {
     const approval = this.ctx.audit.createApproval({
       kind: 'a2a.task.authorize',
@@ -818,11 +818,11 @@ export class A2aCollabService extends Service {
   }
 
   /**
-   * UHP 进度 → 状态机。
+   * Progression UHP → machine à états.
    *
-   * P0（Q-1）纵深防御：progress 必须携带本任务**平台派发时产生的** responseId 才可推进状态。
-   * 协议面已禁止外部注入 taskId、UHP 侧也只对平台派发记录发 progress；此处再加一道配对校验——
-   * 即使前两层被绕过，非本任务派发产生的 responseId 也不会推进任务。
+   * Défense en profondeur P0 (Q-1) : progress ne peut faire avancer l'état que s'il porte le responseId **généré par la plateforme lors de la distribution** de cette tâche.
+   * la facette protocole interdit l'injection externe de taskId et le côté UHP n'émet de progress que pour les enregistrements distribués par la plateforme ; ici s'ajoute une vérification d'appariement —
+   * même si les deux premières couches sont contournées, un responseId non issu de la distribution de cette tâche ne peut pas faire avancer la tâche.
    */
   private onProgress(payload: UhpProgressLike): void {
     if (!payload.taskId) return
@@ -833,7 +833,7 @@ export class A2aCollabService extends Service {
       if (payload.responseId) this.tasks().update(task.id, { responseId: payload.responseId })
       return
     }
-    // 终态类 progress 校验来源：任务必须已登记过派发 responseId，且与本次 progress 的 responseId 一致
+    // Les progress de type état final vérifient leur source : la tâche doit avoir enregistré un responseId de distribution, identique à celui du progress courant
     const bound = task.responseId
     if (!bound || !payload.responseId || bound !== payload.responseId) {
       this.ctx.audit.record({
@@ -866,7 +866,7 @@ export class A2aCollabService extends Service {
     }
   }
 
-  /** 任务完成收口：artifact 落账 + 零价快照计量（contextId 协作链归集）+ 审计。 */
+  /** Clôture de tâche accomplie : comptabilisation de l'artifact + mesure d'instantané à prix zéro (consolidation par chaîne contextId) + audit. */
   private completeTask(task: A2aTaskRecord, text: string): void {
     const artifact: A2aArtifact = {
       artifactId: newId('art'),
@@ -887,8 +887,8 @@ export class A2aCollabService extends Service {
           subject: task.callerSubject,
           principal: org ? `org:${org}` : 'platform',
           resource: `agent:${task.agentId}`,
-          // Q-20：落账键与执行层派发键同形（含 attempt）——重派发时两层同步计数，
-          // 不再出现「执行层计 2 次、协作链计量计 1 次」的口径裂口
+          // Q-20 : la clé de comptabilisation a la même forme que la clé de distribution de la couche d'exécution (attempt inclus) — à la redistribution, les deux couches comptent en synchronisation,
+          // plus de faille de périmètre du type « couche d'exécution compte 2 fois, mesure de chaîne de collaboration compte 1 fois »
           idempotency_key: this.dispatchKey(task, task.attempts),
         }),
         meters: [
@@ -896,11 +896,11 @@ export class A2aCollabService extends Service {
           { key: 'input_tokens', value: task.inputTokens ?? 0, unit: 'token' },
           { key: 'output_tokens', value: task.outputTokens ?? 0, unit: 'token' },
         ],
-        // 协作链归集（C4）：同 contextId 多 Task 计量按链聚合
+        // Consolidation par chaîne de collaboration (C4) : la mesure des multiples Tasks d'un même contextId s'agrège par chaîne
         contextId: task.contextId,
       })
     } catch (error) {
-      // Q-20：计量失败不再静默吞没——落审计告警，使「任务完成但未入账」可被发现
+      // Q-20 : un échec de mesure n'est plus avalé en silence — alerte inscrite à l'audit, pour que « tâche accomplie mais non comptabilisée » puisse être découvert
       this.ctx.audit.fire({
         severity: 'warning',
         title: t('A2A 协作任务计量入账失败：{taskId}', { taskId: task.taskId }),
@@ -912,7 +912,7 @@ export class A2aCollabService extends Service {
     this.auditTask(this.tasks().findOne((item) => item.taskId === task.taskId)!, 'agent.a2a.invoke', 'ok', t('UHP 任务完成：tokens {in}/{out}', { in: task.inputTokens ?? 0, out: task.outputTokens ?? 0 }))
   }
 
-  /** 执行/计量共用的幂等键：a2a:<agentId>:<principal>:<taskId>:a<attempt>（两层同形，见 Q-20）。 */
+  /** Clé d'idempotence partagée par exécution/mesure : a2a:<agentId>:<principal>:<taskId>:a<attempt> (même forme sur les deux couches, voir Q-20). */
   private dispatchKey(task: A2aTaskRecord, attempt: number): string {
     return `a2a:${task.agentId}:${task.callerPrincipalId}:${task.taskId}:a${Math.max(attempt, 1)}`
   }
@@ -939,12 +939,12 @@ export class A2aCollabService extends Service {
     })
   }
 
-  // -- 查询 / 取消 / 验收 / 履约 / 巡检 ---------------------------------------
+  // -- Requête / annulation / recette / performance / inspection ---------------------------------------
 
   /**
-   * 任务视图（Q-5 正文脱敏）：治理读权限（a2a.directory.read）可见元数据，
-   * 但任务正文（message / artifacts 内容 / 协商要约原文 / 历史流水）需
-   * 发起方本人、验收员（a2a.task.accept）或平台管理员；否则标记 contentRedacted 并省略明文。
+   * Vue de tâche (anonymisation du corps Q-5) : la permission de lecture de gouvernance (a2a.directory.read) donne accès aux métadonnées,
+   * mais le corps de la tâche (message / contenu des artifacts / texte des offres de négociation / historique des flux) exige
+   * l'initiateur lui-même, le réceptionnaire (a2a.task.accept) ou un administrateur plateforme ; sinon contentRedacted est marqué et le texte omis.
    */
   taskView(task: A2aTaskRecord, caller?: CallerRefLike) {
     const privileged = !caller
@@ -969,7 +969,7 @@ export class A2aCollabService extends Service {
       mode: task.mode, state: task.state, stateReason: task.stateReason, dataClass: task.dataClass,
       contentRedacted: true,
       redactionHint: t('正文已按权限脱敏（需任务发起方、验收员或平台管理员权限查看任务正文与交付物）'),
-      // 协商与历史仅保留状态骨架，不含要约原文与流水文本
+      // Négociation et historique ne conservent que le squelette d'état, sans le texte des offres ni celui des flux
       negotiation: task.negotiation
         ? { round: task.negotiation.round, maxRounds: task.negotiation.maxRounds, status: task.negotiation.status, offers: [] }
         : undefined,
@@ -983,20 +983,20 @@ export class A2aCollabService extends Service {
   }
 
   /**
-   * 任务读取（治理视图）：发起方本人、`*` 或持 a2a.directory.read 者可见，但**正文按权限脱敏**（Q-5）。
-   * 只读治理视图点不应等于「全平台任务明文正文读取权」——message/artifacts/协商原文/历史流水
-   * 属业务正文，需发起方本人、验收员（a2a.task.accept）或平台管理员才可见。
+   * Lecture de tâche (vue de gouvernance) : visible par l'initiateur lui-même, `*` ou le détenteur de a2a.directory.read, mais **corps anonymisé selon les permissions** (Q-5).
+   * Un point de lecture de gouvernance ne doit pas équivaloir à « droit de lecture du texte intégral de toutes les tâches de la plateforme » — message/artifacts/texte de négociation/historique
+   * sont le corps métier : visibles uniquement par l'initiateur lui-même, le réceptionnaire (a2a.task.accept) ou un administrateur plateforme.
    */
   getTask(caller: CallerRefLike, taskId: string): A2aTaskRecord {
     const task = this.tasks().findOne((item) => item.taskId === taskId)
     if (!task) throw new NotFoundError(t('A2A 任务不存在：{id}', { id: taskId }))
-    // 归属优先于组织收敛（P1-01）：任务发起方本人永远可读自己的任务——外部集成凭证
-    // （refType=external）没有组织归属，组织判定对其恒为 false；若先判组织，归属短路
-    // 永远不可达，第三方「派活 → tasks/get/list/cancel/SSE」闭环断裂。
-    // 组织隔离（Q-4）只约束**非发起方**的治理读，不改变「发起方本人可见」的既有语义。
+    // L'appartenance prime sur la convergence organisationnelle (P1-01) : l'initiateur lit toujours ses propres tâches — les identifiants d'intégration externes
+    // (refType=external) n'ont pas d'appartenance organisationnelle, le jugement organisationnel est donc toujours false pour eux ; si l'organisation était testée en premier, le court-circuit
+    // d'appartenance serait inatteignable et la boucle tierce « confier un travail → tasks/get/list/cancel/SSE » se casserait.
+    // L'isolation organisationnelle (Q-4) ne contraint que la lecture de gouvernance des **non-initiateurs**, sans changer la sémantique existante « l'initiateur voit les siennes ».
     const isOwner = task.callerPrincipalId === caller.principalId
     if (!isOwner) {
-      // 组织隔离（Q-4）：下级组织账号即便持治理读权限，也只能读本组织子树的资源
+      // Isolation organisationnelle (Q-4) : un compte d'organisation inférieure, même détenteur d'une permission de lecture de gouvernance, ne lit que les ressources de son sous-arbre organisationnel
       if (!this.canSeeOrg(caller, task.agentId)) {
         throw new ForbiddenError(t('无权查看该任务（超出你的组织可见范围）'))
       }
@@ -1008,8 +1008,8 @@ export class A2aCollabService extends Service {
   }
 
   /**
-   * 组织可见性（R11 同口径）：`*` 全量；人类按自身 orgId 的子树；机器按其绑定 Agent 的 orgId 子树；
-   * 无归属=fail-closed 空集。跨组织协作任务（调用方与被调方不同组织）以被调方员工的组织为判定面。
+   * Visibilité organisationnelle (même périmètre que R11) : `*` = tout ; humain = sous-arbre de son propre orgId ; machine = sous-arbre de l'orgId de l'Agent auquel elle est liée ;
+   * sans appartenance = fail-closed, ensemble vide. Pour une tâche de collaboration inter-organisations (appelant et appelé d'organisations différentes), le jugement se fait sur l'organisation de l'employé appelé.
    */
   private canSeeOrg(caller: CallerRefLike, targetAgentId: string): boolean {
     if (caller.permissions.includes('*')) return true
@@ -1019,37 +1019,37 @@ export class A2aCollabService extends Service {
     }
     if (!orgId) return false
     const targetOrg = this.ctx.resourceCore.collection('agent').get(targetAgentId)?.orgId
-    if (!targetOrg) return true // 无组织归属的资源（存量数据）不因组织过滤而消失
+    if (!targetOrg) return true // les ressources sans appartenance organisationnelle (données existantes) ne disparaissent pas à cause du filtre organisationnel
     return this.ctx.iam.orgSubtreeIds(orgId).includes(targetOrg)
   }
 
-  /** 可见组织集合（供列表类治理视图统一过滤）。 */
+  /** Ensemble des organisations visibles (pour le filtrage unifié des vues de gouvernance en liste). */
   private visibleOrgIds(caller: CallerRefLike): Set<string> | null {
     if (caller.permissions.includes('*')) return null
     let orgId = caller.userId ? this.ctx.iam.users().get(caller.userId)?.orgId : undefined
     if (!orgId && caller.kind === 'machine' && caller.refType === 'agent' && caller.refId) {
       orgId = this.ctx.resourceCore.collection('agent').get(caller.refId)?.orgId
     }
-    if (!orgId) return new Set<string>() // fail-closed：无归属=空集
+    if (!orgId) return new Set<string>() // fail-closed : sans appartenance = ensemble vide
     return new Set(this.ctx.iam.orgSubtreeIds(orgId))
   }
 
-  /** 任务写操作（取消/续答/验收回写）的严格所有权判定（Q-2）。 */
+  /** Jugement strict de propriété des opérations en écriture sur les tâches (annulation/poursuite/retour de recette) (Q-2). */
   private assertTaskOwner(task: A2aTaskRecord, caller: CallerRefLike, action: string): void {
     if (task.callerPrincipalId === caller.principalId || caller.permissions.includes('*')) return
     throw new ForbiddenError(t('仅任务发起方可{action}该任务（治理读权限不含写语义）', { action }))
   }
 
   listTasks(filter: { agentId?: string; contextId?: string; state?: string; callerPrincipalId?: string; limit?: number }, caller?: CallerRefLike): A2aTaskRecord[] {
-    // 无 caller（平台内部治理调用）或 `*` → 不收敛；其余按「本人任务 ∪ 组织可见」过滤。
+    // Sans caller (appel de gouvernance interne à la plateforme) ou `*` → pas de convergence ; sinon filtre « tâches propres ∪ organisations visibles ».
     const unrestricted = !caller || caller.permissions.includes('*')
     return this.tasks().all()
       .filter((task) => (filter.agentId ? task.agentId === filter.agentId : true))
       .filter((task) => (filter.contextId ? task.contextId === filter.contextId : true))
       .filter((task) => (filter.state ? task.state === filter.state : true))
       .filter((task) => (filter.callerPrincipalId ? task.callerPrincipalId === filter.callerPrincipalId : true))
-      // 归属优先（P1-01）：发起方本人总能看到自己的任务；组织隔离（Q-4）只收敛非发起方的治理读。
-      // 外部集成凭证（refType=external）无组织归属，若只按组织过滤，tasks/list 对其恒为空集。
+      // L'appartenance prime (P1-01) : l'initiateur voit toujours ses propres tâches ; l'isolation organisationnelle (Q-4) ne converge que la lecture de gouvernance des non-initiateurs.
+      // Les identifiants d'intégration externes (refType=external) n'ont pas d'appartenance organisationnelle : avec un filtre purement organisationnel, tasks/list serait toujours vide pour eux.
       .filter((task) => {
         if (unrestricted) return true
         if (task.callerPrincipalId === caller.principalId) return true
@@ -1059,7 +1059,7 @@ export class A2aCollabService extends Service {
       .slice(0, Math.min(filter.limit ?? 100, 500))
   }
 
-  /** 取消（写操作）：严格所有权判定——治理读权限点不含跨主体写语义（Q-2）。 */
+  /** Annulation (opération en écriture) : jugement strict de propriété — le point de lecture de gouvernance n'emporte pas de sémantique d'écriture inter-sujets (Q-2). */
   cancelTask(caller: CallerRefLike, taskId: string, reason: string): A2aTaskRecord {
     const task = this.getTask(caller, taskId)
     this.assertTaskOwner(task, caller, '取消')
@@ -1071,8 +1071,8 @@ export class A2aCollabService extends Service {
   }
 
   /**
-   * 交付验收（人工）：Task completed ≠ 业务闭环，验收通过才归档（协作方案 §6.3 验收不轻信自报）。
-   * 职责分离（Q-30）：发起人不可验收自己发起的任务——否则验收通过率可被自验收刷高。
+   * Recette de livraison (humaine) : Task completed ≠ clôture métier, l'archivage n'a lieu qu'après recette validée (plan de collaboration §6.3, la recette ne fait pas confiance à l'auto-déclaration).
+   * Séparation des responsabilités (Q-30) : l'initiateur ne peut pas recetter la tâche qu'il a initiée — sinon le taux de recette pourrait être gonflé par auto-recette.
    */
   acceptTask(actor: { userId: string; name: string }, taskId: string, decision: 'accepted' | 'rejected', reason: string): A2aTaskRecord {
     const task = this.tasks().findOne((item) => item.taskId === taskId)
@@ -1091,7 +1091,7 @@ export class A2aCollabService extends Service {
     return this.tasks().findOne((item) => item.taskId === taskId)!
   }
 
-  /** 协作履约视图（接收数/完成率/耗时/中断次数/验收通过率）。 */
+  /** Vue de performance de collaboration (reçus/taux d'achèvement/durées/nombre d'interruptions/taux de recette). */
   fulfillment(caller?: CallerRefLike) {
     const all = this.listTasks({}, caller)
     const byAgent = new Map<string, A2aTaskRecord[]>()
@@ -1132,20 +1132,20 @@ export class A2aCollabService extends Service {
     }).sort((a, b) => b.received - a.received)
   }
 
-  /** 声明-授权一致性巡检（能力漂移治理）：卡片声明 ∩ 授权集 vs harness 自报/注册表。 */
+  /** Inspection de cohérence déclaration-autorisation (gouvernance de la dérive des capacités) : déclaration de carte ∩ ensemble d'autorisations vs auto-déclaration du harness/registre. */
   runPatrol(actor: string): A2aPatrolRecord {
     const findings: A2aPatrolRecord['findings'] = []
     const online = this.ctx.resourceCore.list('agent').filter((item) => item.status === 'online')
     for (const agent of online) {
       const issues: string[] = []
       const attrs = agent.attrs
-      // ① 技能声明漂移：attrs.skills 引用了非 published 的 Skill（下架/弃用未同步）
+      // ① Dérive de déclaration de compétences : attrs.skills référence un Skill non published (retrait/dépréciation non synchronisés)
       const slugs = Array.isArray(attrs['skills']) ? (attrs['skills'] as unknown[]).map(String) : []
       for (const slug of slugs) {
         const skill = this.ctx.skillHub.skills().find((item) => item.slug === slug)[0]
         if (!skill || skill.status !== 'published') issues.push(t('声明漂移：引用的 Skill「{slug}」已不在架（发布状态 {status}），卡片不会投影（声明≤授权已兜底），请清理 attrs.skills', { slug, status: skill?.status ?? '不存在' }))
       }
-      // ② MCP 权限组漂移：引用的权限组已删除
+      // ② Dérive de groupe de permissions MCP : le groupe de permissions référencé a été supprimé
       for (const group of this.ctx.mcpRegistry.permGroups().all()) {
         void group
       }
@@ -1153,8 +1153,8 @@ export class A2aCollabService extends Service {
       for (const permGroupId of Array.isArray(attrs['mcpPermGroupIds']) ? (attrs['mcpPermGroupIds'] as unknown[]).map(String) : []) {
         if (!this.ctx.mcpRegistry.permGroups().get(permGroupId)) issues.push(t('授权漂移：登记的 MCP 权限组 {id} 已不存在，请清理 mcpPermGroupIds', { id: permGroupId }))
       }
-      // ③ harness 注册表漂移：uhpHarnessRef 指向缺失/停用/模型离线（uhpGateway 已进 inject——
-      //    只读治理探测，任务协作状态流仍只走总线；纪律例外已在 contract-c3 v2 发布说明登记）
+      // ③ Dérive du registre harness : uhpHarnessRef pointe vers un harness absent/désactivé/au modèle hors ligne (uhpGateway est désormais dans inject —
+      //    sonde de gouvernance en lecture seule ; le flux d'états de collaboration de tâches passe toujours par le bus ; l'exception de discipline est enregistrée dans les notes de publication contract-c3 v2)
       const harnessRef = String(attrs['uhpHarnessRef'] ?? '').trim()
       if (harnessRef) {
         const harness = this.ctx.uhpGateway.harnesses().get(harnessRef)
@@ -1165,7 +1165,7 @@ export class A2aCollabService extends Service {
           if (!model || model.status !== 'online') issues.push(t('harness 漂移：{id} 绑定模型 {model} 不在线', { id: harnessRef, model: harness.model }))
         }
       }
-      // ④ 天花板一致性：A2A 天花板不得高于 modelgw 渠道可达口径的机密级映射（D14 显式映射提示）
+      // ④ Cohérence du plafond : le plafond A2A ne doit pas dépasser le mapping de niveau confidentiel atteignable par le canal modelgw (rappel du mapping explicite D14)
       if (attrs['a2aDataClassCeiling'] === 'secret' && String(attrs['dataClass'] ?? '') === 'secret') {
         issues.push(t('密级口径提示：A2A 天花板=secret 且业务密级=secret（绝密禁止 Agent 处理口径），执行面将按渠道锁死拒绝——请确认口径'))
       }
@@ -1198,7 +1198,7 @@ export class A2aCollabService extends Service {
     return report
   }
 
-  /** 恢复执行（审批通过执行器回调）：auth_required → submitted → 派发（幂等防重由 attempts 键保证）。 */
+  /** Reprise d'exécution (callback de l'exécuteur après approbation) : auth_required → submitted → distribution (l'anti-doublon est garanti par la clé attempts). */
   resumeFromApproval(taskId: string): void {
     const task = this.tasks().findOne((item) => item.taskId === taskId)
     if (!task || task.state !== 'auth_required') return
@@ -1207,7 +1207,7 @@ export class A2aCollabService extends Service {
 }
 
 // ---------------------------------------------------------------------------
-// 内部类型与错误
+// Types internes et erreurs
 // ---------------------------------------------------------------------------
 
 interface CallerRefLike {
@@ -1219,9 +1219,9 @@ interface CallerRefLike {
   name: string
   permissions: string[]
   actChain?: Array<{ name: string; type: string }>
-  /** OBO 真实发起人（Q-6）：人类经 OBO 令牌代表员工发起协作时，由令牌 act 链解析得到。 */
+  /** Vrai initiateur OBO (Q-6) : quand un humain initie une collaboration pour le compte d'un employé via un jeton OBO, résolu depuis la chaîne act du jeton. */
   onBehalfOfUser?: string
-  /** OBO 完整身份链（透传给 UHP 执行面，审计可还原「谁代表谁」）。 */
+  /** Chaîne d'identité OBO complète (transmise à la facette d'exécution UHP ; l'audit peut reconstituer « qui au nom de qui »). */
   oboActChain?: Array<{ principalId: string; name: string; type: string }>
 }
 
@@ -1247,7 +1247,7 @@ export class GovernanceError extends Error {
 }
 
 // ---------------------------------------------------------------------------
-// 插件
+// Plugin
 // ---------------------------------------------------------------------------
 
 declare module '@deepseek-ai/cordis' {
@@ -1257,19 +1257,19 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export const name = 'a2a'
-// uhpGateway：声明-授权一致性巡检对 harness 注册表的只读治理探测（cordis inject 强制显式声明；
-// 仅读注册表，任务协作状态流仍只走 ctx.platformBus——纪律例外已在 contract-c3 v2 发布说明登记）。
-// workforceIdentity：治理检查第 2 项 permit 覆盖的**唯一**判定来源（P2-01：此前漏声明导致
-// Service 代理读未注入键抛错、异常被 catch 吞掉按 legacy 放行，治理第 2 项实为空操作）。
+// uhpGateway : sonde de gouvernance en lecture seule du registre harness pour l'inspection de cohérence déclaration-autorisation (inject cordis force la déclaration explicite ;
+// lecture du registre seule, le flux d'états de collaboration de tâches passe toujours par ctx.platformBus — exception de discipline enregistrée dans les notes de publication contract-c3 v2).
+// workforceIdentity : source de jugement **unique** pour la couverture permit du contrôle de gouvernance n° 2 (P2-01 : l'omission de déclaration faisait
+// lever le proxy Service en lisant une clé non injectée, l'exception était avalée par le catch et le passage se faisait en legacy, le contrôle n° 2 était une no-op).
 export const inject = ['opsStorage', 'platformBus', 'httpServer', 'resourceCore', 'authn', 'iam', 'audit', 'usage', 'modelGateway', 'skillHub', 'mcpRegistry', 'agentRegistry', 'uhpGateway', 'workforceIdentity']
 
 export function apply(ctx: Context) {
   const collab = new A2aCollabService(ctx)
   const gate = createRestGate(ctx)
-  // 命名约定：http 别名让 contract-lint 的路由字面量扫描器识别 http.register 声明面
+  // Convention de nommage : l'alias http permet au scanner de littéraux de routes de contract-lint de reconnaître la surface déclarée http.register
   const http = ctx.httpServer
 
-  // 启动期向 iam 的 PermissionCatalog 幂等补录 A2A 权限点（先例：plugin-agent exec.read/exec.write 补录）
+  // Au démarrage, enregistrement idempotent des points de permission A2A dans le PermissionCatalog d'iam (précédent : enregistrement des exec.read/exec.write de plugin-agent)
   for (const entry of [
     { point: 'a2a.directory.read', label: '读取 A2A 协作目录与任务治理视图', group: 'A2A 协作' },
     { point: 'a2a.task.accept', label: 'A2A 协作任务交付验收', group: 'A2A 协作' },
@@ -1278,7 +1278,7 @@ export function apply(ctx: Context) {
     if (!PermissionCatalog.some((item) => item.point === entry.point)) PermissionCatalog.push(entry)
   }
 
-  // -- Agent Card 发现（A2A 规范 well-known；裸体 JSON——外部通用解析器可直接消费，见 Q-31） ----
+  // -- Découverte de l'Agent Card (well-known de la spécification A2A ; JSON nu — consommable directement par un analyseur générique externe, voir Q-31) ----
   const sendRawJson = (exchange: HttpExchange, payload: unknown): void => {
     if (exchange.res.headersSent) return
     exchange.res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
@@ -1290,7 +1290,7 @@ export function apply(ctx: Context) {
       exchange.fail(404, 'NOT_FOUND', t('数字员工不存在或未上线：{slug}', { slug }))
       return
     }
-    // A2A 规范要求 well-known 返回裸卡片体（此前包在平台 {ok,data} 信封里，外部解析器无法直接消费）
+    // La spécification A2A exige que well-known renvoie le corps de carte nu (auparavant enveloppé dans l'enveloppe plateforme {ok,data}, inexploitable par les analyseurs externes)
     sendRawJson(exchange, collab.cardFor(agent))
   }
   http.register('GET', '/.well-known/agent-card.json', (exchange) => {
@@ -1300,7 +1300,7 @@ export function apply(ctx: Context) {
     wellKnownCard(exchange, exchange.params['slug'] ?? '')
   })
 
-  // -- 目录检索（跨运行时发现，权限点 a2a.directory.read） -----------------------------------
+  // -- Recherche d'annuaire (découverte inter-runtimes, point de permission a2a.directory.read) -----------------------------------
   gate.guarded('GET', '/api/a2a/directory', 'a2a.directory.read', (exchange) => {
     const caller = gate.caller(exchange)
     return {
@@ -1315,7 +1315,7 @@ export function apply(ctx: Context) {
     }
   })
 
-  // -- A2A 主端点（JSON-RPC 2.0；复用 v1 权限点 agent.a2a.invoke） ---------------------------
+  // -- Point d'accès principal A2A (JSON-RPC 2.0 ; réutilise le point de permission v1 agent.a2a.invoke) ---------------------------
   const jsonRpcError = (exchange: HttpExchange, id: unknown, code: number, message: string, data?: Record<string, unknown>) => {
     exchange.ok({ jsonrpc: '2.0', id: id ?? null, error: { code, message, ...(data ? { data } : {}) } })
   }
@@ -1340,8 +1340,8 @@ export function apply(ctx: Context) {
       return parts.map((part) => part.text ?? '').filter(Boolean).join('\n')
     }
     const metadata = params.metadata ?? {}
-    // OBO 身份链（Q-6）：令牌 act 链里含人类（OBO 令牌）时，真实发起人写入任务与审计——
-    // 身份一律取自令牌解析结果，禁止从 metadata 自述（与 NAS X-On-Behalf-User 红线同纪律）。
+    // Chaîne d'identité OBO (Q-6) : quand la chaîne act du jeton contient un humain (jeton OBO), le vrai initiateur est écrit dans la tâche et l'audit —
+    // l'identité vient toujours du résultat de résolution du jeton, interdiction de l'auto-déclarer dans metadata (même discipline que la ligne rouge NAS X-On-Behalf-User).
     const obo = actChainOf(ctx, exchange)
     const effectiveCaller: CallerRefLike = obo ? { ...caller, onBehalfOfUser: obo.principalId, oboActChain: obo.actChain } : caller
     try {
@@ -1355,10 +1355,10 @@ export function apply(ctx: Context) {
           ...(typeof metadata['taskId'] === 'string' ? { taskId: metadata['taskId'] } : {}),
           negotiation: metadata['negotiation'],
         })
-        // Q-8 协议同构：message/send 与 message/stream 均返回 JSON-RPC 信封中的 Task；
-        // 流式进度由专用 SSE 端点承载（/v1/a2a/tasks/:taskId/events，Agent Card 已声明）——
-        // 同一端点不再返回裸 SSE，外部客户端无需为同一 URL 写两套解析分支。
-        // 同步等待至终态或超时（长任务客户端经 tasks/get / SSE 续查）
+        // Isomorphisme de protocole Q-8 : message/send et message/stream renvoient tous deux la Task dans l'enveloppe JSON-RPC ;
+        // la progression en flux est portée par le point SSE dédié (/v1/a2a/tasks/:taskId/events, déclaré dans l'Agent Card) —
+        // le même point ne renvoie plus de SSE nu, les clients externes n'écrivent plus deux branches d'analyse pour la même URL.
+        // Attente synchrone jusqu'à l'état final ou dépassement (les tâches longues continuent via tasks/get / SSE)
         const settled = await waitForTerminal(collab, task.taskId, Number(process.env.A2A_SYNC_WAIT_MS ?? 12000))
         return { jsonrpc: '2.0', id, result: { task: collab.taskView(settled, caller) } }
       }
@@ -1384,13 +1384,13 @@ export function apply(ctx: Context) {
     } catch (error) {
       if (error instanceof NotFoundError) return jsonRpcError(exchange, id, -32001, error.message)
       if (error instanceof GovernanceError) return jsonRpcError(exchange, id, -32002, error.message, { code: error.code })
-      // 归属/写闸门拒绝用保留码 -32003（与参数错误 -32000 区分，便于客户端与审计分流）
+      // Les refus de propriété/portes d'écriture utilisent le code réservé -32003 (distingué de l'erreur de paramètre -32000, pour faciliter le tri côté client et audit)
       if (error instanceof ForbiddenError) return jsonRpcError(exchange, id, -32003, error.message, { code: 'FORBIDDEN' })
       return jsonRpcError(exchange, id, -32000, error instanceof Error ? error.message : String(error))
     }
   })
 
-  // -- 任务流式事件（SSE；/v1 协议面自校验 ?token=，EventSource 无法带 Bearer） ----------------
+  // -- Événements de tâches en flux (SSE ; facette protocole /v1 auto-validée ?token=, EventSource ne peut pas porter de Bearer) ----------------
   http.register('GET', '/v1/a2a/tasks/:taskId/events', (exchange) => {
     const token = exchange.query.get('token') ?? ''
     if (!token) {
@@ -1402,7 +1402,7 @@ export function apply(ctx: Context) {
     try {
       verified = ctx.authn.verify(token)
     } catch (error) {
-      // Q-28：令牌非法/过期映射 401（与 /api 域鉴权口径一致），不再混入 400 参数错误；拒绝路径留痕（Q-27）
+      // Q-28 : jeton invalide/expiré mappé en 401 (même périmètre que l'authentification du domaine /api), plus de mélange avec les erreurs 400 de paramètre ; le chemin de refus laisse une trace (Q-27)
       ctx.platformBus.emit('audit.authz.denied', { actorId: '(anon)', actorName: t('匿名请求'), point: 'a2a.task.events', path: exchange.path, detail: t('令牌校验失败') })
       exchange.fail(401, 'TOKEN_INVALID', error instanceof Error ? error.message : String(error))
       return
@@ -1422,14 +1422,14 @@ export function apply(ctx: Context) {
       const task = collab.getTask(caller, exchange.params['taskId'] ?? '')
       streamTaskEvents(exchange, ctx, collab, task.taskId, caller)
     } catch (error) {
-      // Q-28：语义分流——不存在 404 / 无权 403 / 其余 400
+      // Q-28 : tri sémantique — inexistant 404 / sans droit 403 / le reste 400
       if (error instanceof NotFoundError) { exchange.fail(404, 'NOT_FOUND', error.message); return }
       if (error instanceof ForbiddenError) { exchange.fail(403, 'FORBIDDEN', error.message); return }
       exchange.fail(400, 'BAD_REQUEST', error instanceof Error ? error.message : String(error))
     }
   })
 
-  // -- 治理视图 REST（console 数据源；目录读权限即可读，验收单列权限点） ------------------------
+  // -- REST des vues de gouvernance (source de données console ; permission de lecture d'annuaire suffit pour lire, la recette a son point de permission propre) ------------------------
   gate.guarded('GET', '/api/a2a/tasks', 'a2a.directory.read', (exchange) => {
     const caller = gate.caller(exchange)
     return {
@@ -1443,7 +1443,7 @@ export function apply(ctx: Context) {
   })
   gate.guarded('GET', '/api/a2a/tasks/:taskId', 'a2a.directory.read', (exchange) => {
     const caller = gate.caller(exchange)
-    // Q-29：REST 详情与 RPC tasks/get 同一实现（getTask），消除两套归属口径
+    // Q-29 : le détail REST et le RPC tasks/get partagent la même implémentation (getTask), élimine deux périmètres d'appartenance
     try {
       return { task: collab.taskView(collab.getTask(caller, exchange.params['taskId'] ?? ''), caller) }
     } catch (error) {
@@ -1474,7 +1474,7 @@ export function apply(ctx: Context) {
   })
   gate.guarded('GET', '/api/a2a/fulfillment', 'a2a.directory.read', (exchange) => ({ fulfillment: collab.fulfillment(gate.caller(exchange)) }))
 
-  // -- 审批规则与巡检（a2a.admin） ----------------------------------------------------------
+  // -- Règles d'approbation et inspection (a2a.admin) ----------------------------------------------------------
   gate.guarded('GET', '/api/a2a/rules', 'a2a.directory.read', () => ({ rules: collab.rules().all() }))
   gate.guarded('POST', '/api/a2a/rules', 'a2a.admin', (exchange) => {
     const input = gate.body<{ name?: string; matchDataClassAtLeast?: string; matchKeyword?: string; enabled?: boolean }>(exchange)
@@ -1511,13 +1511,13 @@ export function apply(ctx: Context) {
     patrols: collab.patrols().all().sort((a, b) => b.at.localeCompare(a.at)).slice(0, Math.min(Number(exchange.query.get('limit') ?? 20) || 20, 100)),
   }))
 
-  // -- 审批执行器：a2a.task.authorize 通过 → 恢复执行（幂等防重） ------------------------------
+  // -- Exécuteur d'approbation : a2a.task.authorize validé → reprise d'exécution (anti-doublon idempotent) ------------------------------
   ctx.effect(() => ctx.audit.registerExecutor('a2a.task.authorize', async (payload) => {
     collab.resumeFromApproval(String(payload.taskId ?? ''))
     return { resumed: true }
   }))
 
-  // -- 例行一致性巡检（能力漂移治理；A2A_PATROL_INTERVAL_MINUTES，默认 60，0=关闭） -------------
+  // -- Inspection de cohérence récurrente (gouvernance de la dérive des capacités ; A2A_PATROL_INTERVAL_MINUTES, défaut 60, 0=désactivé) -------------
   const intervalMinutes = Number(process.env.A2A_PATROL_INTERVAL_MINUTES ?? 60)
   if (Number.isFinite(intervalMinutes) && intervalMinutes > 0) {
     const first = setTimeout(() => {
@@ -1536,15 +1536,15 @@ export function apply(ctx: Context) {
 }
 
 // ---------------------------------------------------------------------------
-// 共用工具（同步等待 + SSE 流）
+// Outils partagés (attente synchrone + flux SSE)
 // ---------------------------------------------------------------------------
 
 /**
- * OBO 身份链解析（Q-6）：令牌 act 链中含 type=human 的条目即为「代表该人类行事」——
- * 返回真实发起人 principalId 与完整链，供任务记录/审计/dispatch 透传；非 OBO 令牌返回 undefined。
- * MCP 治理（契约 §2/§4，2026-10-22）：与 platform-core humanDelegatorOf 语义对齐——链首
- * （数组首位，issueOnBehalfOf 语义「父链+父主体」的发起人）human 条目即真实发起人；身份事实
- * 只取令牌解析结果（自校验 verify），禁止从请求参数/header 声明。对外行为不变。
+ * Résolution de la chaîne d'identité OBO (Q-6) : une entrée type=human dans la chaîne act du jeton signifie « agit au nom de cet humain » —
+ * renvoie le principalId du vrai initiateur et la chaîne complète, pour les enregistrements de tâche/l'audit/la transmission dispatch ; renvoie undefined pour un jeton non OBO.
+ * Gouvernance MCP (contrat §2/§4, 2026-10-22) : sémantique alignée sur humanDelegatorOf de platform-core — l'entrée human de tête
+ * (premier élément du tableau, initiateur selon la sémantique issueOnBehalfOf « chaîne parentale + sujet parent ») est le vrai initiateur ; les faits d'identité
+ * ne viennent que du résultat de résolution du jeton (verify auto-validé), interdiction de déclarer depuis les paramètres/headers de la requête. Comportement externe inchangé.
  */
 function actChainOf(ctx: Context, exchange: HttpExchange): { principalId: string; actChain: Array<{ principalId: string; name: string; type: string }> } | undefined {
   const header = String(exchange.headers['authorization'] ?? '')
@@ -1559,7 +1559,7 @@ function actChainOf(ctx: Context, exchange: HttpExchange): { principalId: string
       actChain: verified.actChain.map((entry) => ({ principalId: entry.principalId, name: entry.name, type: entry.type })),
     }
   } catch {
-    return undefined // 令牌已由鉴权中间件校验过；此处仅取身份，不重复报错
+    return undefined // le jeton a déjà été validé par le middleware d'authentification ; ici on ne fait qu'extraire l'identité, sans redemander d'erreur
   }
 }
 
@@ -1573,7 +1573,7 @@ async function waitForTerminal(collab: A2aCollabService, taskId: string, timeout
   }
 }
 
-/** SSE：历史回放 + 订阅 a2a.task.changed / a2a.task.progress 至终态。 */
+/** SSE : rejeu de l'historique + abonnement a2a.task.changed / a2a.task.progress jusqu'à l'état final. */
 function streamTaskEvents(exchange: HttpExchange, ctx: Context, collab: A2aCollabService, taskId: string, caller?: CallerRefLike): undefined {
   const task = collab.tasks().findOne((item) => item.taskId === taskId)
   if (!task) {

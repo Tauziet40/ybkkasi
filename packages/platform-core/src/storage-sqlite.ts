@@ -1,19 +1,19 @@
 /**
- * 存储后端：SQLite 集合实现（ADR-0001 第一期）。
+ * Backend de stockage : implémentation des collections SQLite (phase 1 de l'ADR-0001).
  *
- * 与 JSON 集合（storage.ts CollectionImpl）严格同一 Collection<T> 契约，业务插件零感知：
- *   - 文档存单表 collection_docs（name, id, doc JSON）；每次写入独立事务提交
- *     （WAL + synchronous=FULL——进程 kill -9 后已提交事务零丢失）。
- *   - uniqueOn → collection_uniques（name, label, key, id）真实唯一主键：
- *     「先查后插」竞态由引擎级约束兜底，而非应用层扫描
- *     （iam:identityLinks「一人一号」红线的执行点，见 ADR-0001 第 2 批验收）。
- *   - onChange 监听器在事务提交后同步触发（authn:tokens 吊销广播语义不变）。
- *   - 读路径按需解析文档，常驻内存不随记录数线性增长。
+ * Strictement le même contrat Collection<T> que les collections JSON (storage.ts CollectionImpl), invisible pour les plugins métier :
+ *   - les documents sont stockés dans la table unique collection_docs (name, id, doc JSON) ; chaque écriture est validée dans une transaction autonome
+ *     (WAL + synchronous=FULL — après kill -9 du processus, zéro perte des transactions déjà validées).
+ *   - uniqueOn → collection_uniques (name, label, key, id), vraie clé unique :
+ *     la course « chercher puis insérer » est rattrapée par la contrainte au niveau moteur, pas par un scan applicatif
+ *     (point d'exécution de la ligne rouge iam:identityLinks « une personne, un compte », voir recette lot 2 de l'ADR-0001).
+ *   - les listeners onChange se déclenchent de façon synchrone après validation de la transaction (sémantique de diffusion des révocations authn:tokens inchangée).
+ *   - le chemin de lecture résout les documents à la demande, l'empreinte mémoire ne croît pas linéairement avec le nombre d'enregistrements.
  *
- * 回填（backfill）：restore 时若该集合尚无 meta 且数据目录存在同名 JSON 文件，
- * 整表导入一次；JSON 文件保留不删，作为回滚源（导回 JSON 用 scripts/storage-export.mjs）。
- * meta.backfilled_at 为 NULL 表示「尚未完成导入」——进程在导入事务前崩溃时下次启动重试，
- * 导入与标记在同一事务内完成，不会出现「半套数据」。
+ * Remplissage (backfill) : à la restauration, si la collection n'a pas encore de meta et qu'un fichier JSON homonyme existe dans le répertoire de données,
+ * import de la table entière une seule fois ; le fichier JSON est conservé sans suppression comme source de retour arrière (retour vers JSON via scripts/storage-export.mjs).
+ * meta.backfilled_at à NULL signifie « import non achevé » — si le processus a crashé avant la transaction d'import, nouvelle tentative au prochain démarrage,
+ * l'import et le marquage se font dans la même transaction, pas d'état « à moitié chargé » possible.
  */
 import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
@@ -52,7 +52,7 @@ export class SqliteCollectionBackend {
     )`)
   }
 
-  /** 事务：fn 内全部写入原子提交（BEGIN IMMEDIATE 立即取写锁，避免升级死锁）。 */
+  /** Transaction : validation atomique de toutes les écritures de fn (BEGIN IMMEDIATE prend immédiatement le verrou d'écriture, évite les interblocages de montée en gamme). */
   txn<R>(fn: () => R): R {
     this.db.exec('BEGIN IMMEDIATE')
     try {
@@ -63,7 +63,7 @@ export class SqliteCollectionBackend {
       try {
         this.db.exec('ROLLBACK')
       } catch {
-        /* 连接异常时回滚失败仅记录 */
+        /* en cas d'exception de connexion, l'échec de rollback n'est que journalisé */
       }
       throw error
     }
@@ -77,7 +77,7 @@ export class SqliteCollectionBackend {
     return created
   }
 
-  /** 已登记集合名（meta 表，含回填过的与新建的）。 */
+  /** Noms des collections enregistrées (table meta, remplies et nouvelles incluses). */
   names(): string[] {
     return (this.db.prepare('SELECT name FROM collection_meta ORDER BY name').all() as Array<{ name: string }>).map((row) => row.name)
   }
@@ -91,13 +91,13 @@ export class SqliteCollectionBackend {
   }
 
   /**
-   * JSON → SQLite 回填：仅在集合当前为空时导入（幂等防重），导入完成与标记
-   * backfilled_at 在同一事务内原子生效。集合非空（如导入事务已提交但标记读取前的
-   * 极端窗口）同样补记标记，避免下次启动重复探测 JSON。
+   * Remplissage JSON → SQLite : import seulement si la collection est actuellement vide (idempotent, anti-doublon) ; l'achèvement de l'import et la marque
+   * backfilled_at prennent effet atomiquement dans la même transaction. Une collection non vide (p. ex. fenêtre extrême où la transaction d'import est validée
+   * mais la marque pas encore lue) reçoit elle aussi la marque, pour éviter de re-sonder le JSON au prochain démarrage.
    *
-   * 回填对账（ADR-0001 缺口②）：verify 回调插在导入之后、标记 backfilled_at 之前——
-   * 条数与关键字段哈希对账失败即抛错，整个事务回滚（导入与标记一并撤销，meta 恢复
-   * NULL），下次启动重试并再次响亮失败，杜绝「带病标记 + 静默不一致」。
+   * Réconciliation du remplissage (lacune ② de l'ADR-0001) : le callback verify est inséré après l'import et avant la marque backfilled_at —
+   * un échec de réconciliation du nombre d'entrées ou du hash des champs clés lève et annule toute la transaction (import et marque retirés ensemble, meta retournée à
+   * NULL), le prochain démarrage réessaie et échoue de nouveau bruyamment ; jamais de « marque défectueuse + incohérence silencieuse ».
    */
   backfill(name: string, records: RecordBase[], verify?: (rows: Array<{ id: string; doc: string }>) => void): void {
     this.txn(() => {
@@ -106,7 +106,7 @@ export class SqliteCollectionBackend {
         const ins = this.db.prepare('INSERT INTO collection_docs (name, id, doc) VALUES (?, ?, ?)')
         for (const record of records) ins.run(name, record.id, JSON.stringify(record))
       }
-      // 对账读的是同一事务内的未提交数据：失败即 ROLLBACK，崩溃安全语义不变
+      // La réconciliation lit des données non validées de la même transaction : en cas d'échec → ROLLBACK, la sémantique de sécurité sur crash reste inchangée
       if (verify) verify(this.db.prepare('SELECT id, doc FROM collection_docs WHERE name = ? ORDER BY id').all(name) as Array<{ id: string; doc: string }>)
       this.db.prepare('UPDATE collection_meta SET backfilled_at = ? WHERE name = ?').run(new Date().toISOString(), name)
     })
@@ -116,7 +116,7 @@ export class SqliteCollectionBackend {
     try {
       this.db.close()
     } catch {
-      /* 已关闭 */
+      /* Fermé */
     }
   }
 }
@@ -145,8 +145,8 @@ export class SqliteCollectionImpl<T extends RecordBase> implements Collection<T>
   uniqueOn(label: string, keyOf: (record: T) => string): void {
     if (this.uniques.some((unique) => unique.label === label)) return
     this.uniques.push({ label, keyOf })
-    // 注册即对存量数据生效：全量重建该 label 的键，保证键表与当前 keyOf 实现一致。
-    // 约束集合均为治理型小集合（用户/组织/身份连接等），重建成本毫秒级。
+    // L'enregistrement s'applique aussi aux données existantes : reconstruction complète des clés de ce label, garantissant la cohérence de la table de clés avec l'implémentation keyOf courante.
+    // Les collections contraintes sont toutes de petites collections de gouvernance (utilisateurs/organisations/liens d'identité…) : reconstruction en millisecondes.
     const rows = this.db.prepare('SELECT id, doc FROM collection_docs WHERE name = ?').all(this.name) as Array<{ id: string; doc: string }>
     this.txn(() => {
       this.db.prepare('DELETE FROM collection_uniques WHERE name = ? AND label = ?').run(this.name, label)
@@ -158,7 +158,7 @@ export class SqliteCollectionImpl<T extends RecordBase> implements Collection<T>
     })
   }
 
-  /** 唯一约束执行（引擎级）：update 时先移除自身旧键再占新键，冲突即抛（事务回滚）。 */
+  /** Exécution de la contrainte d'unicité (niveau moteur) : à l'update, retire d'abord sa propre ancienne clé puis occupe la nouvelle, tout conflit lève (rollback de transaction). */
   private enforceUniques(record: T, selfId?: string): void {
     for (const unique of this.uniques) {
       const key = unique.keyOf(record)
@@ -240,7 +240,7 @@ export class SqliteCollectionImpl<T extends RecordBase> implements Collection<T>
       const insKey = this.db.prepare('INSERT OR IGNORE INTO collection_uniques (name, label, key, id) VALUES (?, ?, ?, ?)')
       for (const record of records) {
         ins.run(this.name, record.id, JSON.stringify(record))
-        // 与 JSON 版对齐：replaceAll 不做唯一校验（宽松落键，OR IGNORE）
+        // Aligné sur la version JSON : replaceAll ne fait pas de validation d'unicité (écriture de clé tolérante, OR IGNORE)
         for (const unique of this.uniques) {
           const key = unique.keyOf(record)
           if (key) insKey.run(this.name, unique.label, key, record.id)

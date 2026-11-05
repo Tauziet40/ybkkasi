@@ -1,18 +1,18 @@
 /**
- * 应用外部凭证托管单元测试（issue #19 方向 A 最小闭环）。
+ * Tests unitaires de l'hébergement d'identifiants externes d'application (issue #19, direction A, boucle minimale).
  *
- * 运行方式（Node 直接加载，进程内构造，参照 capabilities.test.mjs 桩总线+StorageService 模式）：
+ * Exécution (chargement direct par Node, construction dans le processus, sur le modèle bus factice+StorageService de capabilities.test.mjs) :
  *
  *     node packages/plugin-app/src/credentials.test.mjs
  *
- * 覆盖面：
- *   - 登记 → 掩码回显（响应与掩码元数据绝不含明文）；键名/值护栏（非法键名、空值、超长值）；
- *   - 静态加密：密钥文件内容不含明文（AES-256-GCM），主密钥独立文件首用生成（0600/目录 0700）；
- *   - 取值解密往返；未登记键 404 语义（AppCredentialMissingError + CREDENTIAL_NOT_FOUND code）；
- *   - 篡改检测：密文或 tag 被改 → 解密 fail-closed 显式报错（绝不返回垃圾值）；
- *   - 轮换：同键再 put 即轮换（rotatedAt/rotatedBy 更新、createdAt 不变、旧值立即失效）；
- *   - 删除：单条幂等；purge 整文件删除（应用删除联动）；
- *   - 留痕：每次 resolve emit app.secret.access（payload 仅元数据，绝无值）。
+ * Couverture :
+ *   - enregistrement → écho masqué (réponse et métadonnées de masque jamais en clair) ; gardes de nom/valeur (nom illégal, valeur vide, valeur trop longue) ;
+ *   - chiffrement au repos : le contenu du fichier de clés ne contient pas de clair (AES-256-GCM), clé maîtresse dans un fichier distinct généré au premier usage (0600/répertoire 0700) ;
+ *   - aller-retour de déchiffrement ; sémantique 404 pour clé non enregistrée (AppCredentialMissingError + code CREDENTIAL_NOT_FOUND) ;
+ *   - détection de falsification : chiffré ou tag modifié → échec de déchiffrement fail-closed explicite (jamais de valeur poubelle) ;
+ *   - rotation : un second put sur la même clé = rotation (rotatedAt/rotatedBy mis à jour, createdAt inchangé, ancienne valeur invalidée immédiatement) ;
+ *   - suppression : à l'unité idempotente ; purge supprime le fichier entier (cascade de suppression d'application) ;
+ *   - traçabilité : chaque resolve émet app.secret.access (payload en métadonnées seules, jamais de valeur).
  */
 import assert from 'node:assert/strict'
 import { test, afterEach } from 'node:test'
@@ -23,7 +23,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { StorageService } from '../../platform-core/src/storage.ts'
 import { AppCredentialService, AppCredentialMissingError } from './credentials.ts'
 
-// -- 进程内构造宿主（桩总线 + 真实 StorageService + 临时数据目录） ----------------------------
+// -- Construction de l'hôte dans le processus (bus factice + vrai StorageService + répertoire de données temporaire) ----------------------------
 
 const cleanup = []
 afterEach(() => {
@@ -35,7 +35,7 @@ function makeHarness(existingDataDir) {
   cleanup.push(() => rmSync(dataDir, { recursive: true, force: true }))
   const ctx = new Context()
   const events = []
-  // 桩总线：记录 emit 供留痕断言（on 返回空注销函数）
+  // Bus factice : enregistre les emit pour les assertions de traçabilité (on renvoie une fonction de désinscription vide)
   ctx.platformBus = {
     on: () => () => {},
     emit: (name, payload) => events.push({ name, payload }),
@@ -45,7 +45,7 @@ function makeHarness(existingDataDir) {
   return { ctx, vault, events, dataDir }
 }
 
-// -- A. 登记与掩码 ---------------------------------------------------------------------------
+// -- A. Enregistrement et masque ---------------------------------------------------------------------------
 
 test('登记：掩码回显绝不含明文；键名/值护栏（非法键名/空值/超长值）', () => {
   const { vault } = makeHarness()
@@ -56,18 +56,18 @@ test('登记：掩码回显绝不含明文；键名/值护栏（非法键名/空
   assert.equal(meta.rotatedBy, '管理员')
   assert.equal(meta.description, 'Kizuna 产品服务管理令牌')
 
-  // 短值全掩码（不给暴力猜测留末位锚点）
+  // Valeur courte entièrement masquée (pas d'ancre sur les derniers caractères pour la force brute)
   const short = vault.put('app_1', { key: 'short-key', value: 'abc', rotatedBy: 'x' })
   assert.equal(short.masked, '••••••••')
 
-  // 护栏：键名非法 / 空值 / 超长值
+  // Gardes : nom de clé illégal / valeur vide / valeur trop longue
   assert.throws(() => vault.put('app_1', { key: '../escape', value: 'v', rotatedBy: 'x' }), /键名非法/)
   assert.throws(() => vault.put('app_1', { key: '-lead', value: 'v', rotatedBy: 'x' }), /键名非法/)
   assert.throws(() => vault.put('app_1', { key: 'ok', value: '', rotatedBy: 'x' }), /凭证值必填/)
   assert.throws(() => vault.put('app_1', { key: 'ok', value: 'x'.repeat(8193), rotatedBy: 'x' }), /过长/)
 })
 
-// -- B. 静态加密与解密往返 -------------------------------------------------------------------
+// -- B. Chiffrement au repos et aller-retour de déchiffrement -------------------------------------------------------------------
 
 test('静态加密：密钥文件不含明文；主密钥独立文件 0600 / 目录 0700；解密往返一致', () => {
   const { vault, dataDir } = makeHarness()
@@ -79,14 +79,14 @@ test('静态加密：密钥文件不含明文；主密钥独立文件 0600 / 目
   assert.ok(!raw.includes(SECRET), '密钥文件不含明文（AES-256-GCM 密文落盘）')
   assert.ok(!raw.includes('maskedPreview": "••••••••_value'), '掩码字段只存掩码')
 
-  // 主密钥独立文件 + 权限位
+  // Fichier distinct de la clé maîtresse + bits de permission
   const keyFile = join(dataDir, 'secrets', 'app', '.master.key')
   assert.ok(existsSync(keyFile), '主密钥首用生成')
   assert.equal((statSync(keyFile).mode & 0o777), 0o600, '主密钥文件 0600')
   assert.equal((statSync(join(dataDir, 'secrets', 'app')).mode & 0o777), 0o700, '密钥目录 0700')
   assert.ok(!readFileSync(keyFile, 'utf8').includes(SECRET))
 
-  // 解密往返（同主密钥重启语义：新 Context/新实例指向同一数据目录仍可解）
+  // Aller-retour de déchiffrement (sémantique de redémarrage avec la même clé maîtresse : un nouveau Context/nouvelle instance pointant le même répertoire de données déchiffre encore)
   const restarted = makeHarness(dataDir)
   assert.equal(restarted.vault.resolve('app_1', 'token'), SECRET)
 })
@@ -98,7 +98,7 @@ test('取值：未登记键 404 语义；篡改检测 fail-closed（密文被改
   assert.equal(events.at(-1).payload.result, 'missing')
 
   vault.put('app_1', { key: 'token', value: 'tk_live_value_01', rotatedBy: 'x' })
-  // 篡改密文（模拟拖库后离线篡改）：GCM 校验失败 → fail-closed
+  // Falsification du chiffré (simule une altération hors ligne après vol de la base) : la vérification GCM échoue → fail-closed
   const file = vault.fileOf('app_1')
   const stored = JSON.parse(readFileSync(file, 'utf8'))
   stored.entries.token.data = Buffer.from('tampered').toString('base64')
@@ -107,12 +107,12 @@ test('取值：未登记键 404 语义；篡改检测 fail-closed（密文被改
   assert.equal(events.at(-1).payload.result, 'error', '解密失败留痕（error）')
 })
 
-// -- C. 轮换 / 删除 / 清库 -------------------------------------------------------------------
+// -- C. Rotation / suppression / effacement -------------------------------------------------------------------
 
 test('轮换：同键再 put 即轮换（rotatedAt/rotatedBy 更新、createdAt 不变、旧值立即失效）', async () => {
   const { vault } = makeHarness()
   const first = vault.put('app_1', { key: 'token', value: 'tk_live_old_value_1', rotatedBy: '旧操作者' })
-  await new Promise((resolve) => setTimeout(resolve, 5)) // 保证 rotatedAt 时间戳可区分
+  await new Promise((resolve) => setTimeout(resolve, 5)) // garantit des timestamps rotatedAt distinguables
   const second = vault.put('app_1', { key: 'token', value: 'tk_live_new_value_2', rotatedBy: '新操作者' })
   assert.equal(second.createdAt, first.createdAt, 'createdAt 保持首次登记时间')
   assert.notEqual(second.rotatedAt, first.rotatedAt, 'rotatedAt 更新为轮换时间')
@@ -134,7 +134,7 @@ test('删除：单条幂等；purge 整文件删除（应用删除联动清库�
   assert.deepEqual(vault.list('app_1'), [])
 })
 
-// -- D. 取用留痕 -----------------------------------------------------------------------------
+// -- D. Traçabilité des accès -----------------------------------------------------------------------------
 
 test('留痕：每次 resolve emit app.secret.access，payload 仅元数据绝无值；caller 透传审计主体', () => {
   const { vault, events } = makeHarness()

@@ -1,16 +1,16 @@
 /**
- * 契约↔实现双向一致性 lint 引擎自证（OPT-P0-01，2026-09-12 配套测试）。
+ * Auto-validation du moteur de lint bidirectionnel contrat↔implémentation (OPT-P0-01, 2026-09-12, tests d'accompagnement).
  *
- * 运行方式（引擎纯函数 + 合成夹具仓，Node 直接加载）：
+ * Mode d'exécution (moteur en fonctions pures + dépôt de fixtures synthétiques, chargement direct par Node) :
  *
  *     node --test scripts/contract-lint.test.mjs
  *
- * 覆盖面：
- *   - 归一器单测：方法组展开 / '|' 候选 / '[/seg]' 可选段 / ':param' 泛化 / 查询与注解剥离 /
- *     行级注解跳过 / 相对片段继承 / 非法片段报错；
- *   - 代码面提取：guarded / http.register / defineTool+tools.register / 权限字面量（含逗号多值）；
- *   - 构造性红/绿（合成迷你仓）：新增未声明路由→红（含行号）；api.yaml 幽灵 endpoint→红；
- *     幽灵工具/未声明工具→红；未声明权限点→红；清单齐备→绿；豁免清单命中→透明降级。
+ * Couverture :
+ *   - tests unitaires du normaliseur : déploiement des groupes de méthodes / candidates '|' / segments optionnels '[/seg]' / généralisation ':param' / retrait de query et d'annotations /
+ *     saut des annotations de ligne / héritage des fragments relatifs / erreur sur fragment illégal ;
+ *   - extraction de la surface code : guarded / http.register / defineTool+tools.register / littéraux de permission (valeurs multiples par virgule incluses) ;
+ *   - rouge/vert constructifs (mini-dépôt synthétique) : route nouvelle non déclarée → rouge (avec numéro de ligne) ; endpoint fantôme d'api.yaml → rouge ;
+     outil fantôme/outil non déclaré → rouge ; point de permission non déclaré → rouge ; manifeste complet → vert ; entrée d'exemption trouvée → dégradation transparente.
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -23,7 +23,7 @@ import {
   generalizePath, extractCodeSurface, extractEndpointLines,
 } from './contract-lint.mjs'
 
-// -- 归一器单测 --
+// -- Tests unitaires du normaliseur --
 
 test('方法组展开：GET/PUT 拆为两条', () => {
   const { routes, unparseable } = parseEndpointLine('GET/PUT /api/a · POST /api/b')
@@ -77,7 +77,7 @@ test('代码面提取：guarded/http.register/工具/权限字面量（含逗号
   const surface = extractCodeSurface([
     "  guarded('GET', '/api/x/:id', 'x.read', handler)",
     "  http.register('POST', '/api/y', handler, { access: 'guarded', permission: 'x.write' })",
-    "  http.register('OPTIONS', '/api/y', preflight)", // CORS 预检不入契约
+    "  http.register('OPTIONS', '/api/y', preflight)", // le préflight CORS n'entre pas dans le contrat
     "  t.register(defineTool({ name: 'x_tool', permission: 'x.invoke,a.b' }))",
   ].join('\n'))
   assert.deepEqual(surface.routes.map((r) => `${r.method} ${r.path}`), ['GET /api/x/:*', 'POST /api/y'])
@@ -85,7 +85,7 @@ test('代码面提取：guarded/http.register/工具/权限字面量（含逗号
   assert.ok(surface.perms.includes('a.b') && surface.perms.includes('x.invoke'))
 })
 
-// -- 构造性红/绿（合成迷你仓） --
+// -- Rouge/vert constructifs (mini-dépôt synthétique) --
 
 async function makeFixtureRepo({ apiYaml, code, pluginYaml = "id: p\npermissions:\n  - x.read\n  - x.write\n", permissionsYaml = 'plugin: p\npoints:\n  - x.read\n  - x.write\n' }) {
   const root = await mkdtemp(join(tmpdir(), 'contract-lint-'))

@@ -1,10 +1,10 @@
 /**
- * @dsh-ops/plugin-audit —— 安全与审计（贯穿各模块，方案 §七）。
+ * @dsh-ops/plugin-audit —— sécurité et audit (transversal à tous les modules, plan §7).
  *
- * - 四类审计日志：认证 / 授权 / 调用 / 变更，统一 schema、只追加。
- * - 告警规则引擎：阈值/异常模式声明式配置，事件驱动评估。
- * - 成本归集：按令牌链归集 Token 消耗，应用/组织维度穿透。
- * - 审批中心：全平台 L4 高危操作汇聚（Skill 上架、Agent 上线、下线/吊销/删除）。
+ * - Quatre familles de journaux d'audit : authentification / autorisation / appels / modifications, schema unifié, append-only.
+ * - Moteur de règles d'alerte : configuration déclarative des seuils/motifs d'anomalie, évaluation pilotée par événements.
+ * - Consolidation des coûts : agrégation de la consommation de jetons par chaîne de jetons, traversée par application/organisation.
+ * - Centre d'approbations : convergence des opérations L4 à haut risque de toute la plateforme (mise en avant de Skills, mise en ligne d'Agents, retrait/révocation/suppression).
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -13,25 +13,25 @@ import { t } from '../../platform-i18n/src/index.ts'
 import * as auditTools from './tools.ts'
 
 // ---------------------------------------------------------------------------
-// 数据模型
+// Modèle de données
 // ---------------------------------------------------------------------------
 
 export type AuditType = 'auth' | 'authz' | 'invoke' | 'change'
 
 /**
- * 结论级证据锚点（IAW 交接 5-1，additive）：Agent 结论与数据事实的绑定单元。
- * kind 值域：dataset 数据集 / field 字段 / window 时间窗 / query 命中行 / doc 文档。
+ * Ancres de preuve au niveau conclusion (IAW passation 5-1, additif) : unité de liaison entre les conclusions d'un Agent et les faits de données.
+ * Domaine de kind : dataset jeu de données / field champ / window fenêtre temporelle / query lignes trouvées / doc document.
  */
 export interface EvidenceAnchor {
   kind: 'dataset' | 'field' | 'window' | 'query' | 'doc'
-  /** 引用标识：数据集编号 / 字段路径 / 查询 id 等（生产方契约）。 */
+  /** Identifiant de référence : numéro de jeu de données / chemin de champ / id de requête etc. (contrat du producteur). */
   id: string
   name?: string
-  /** 时间窗锚点（window/query 类）：结论所依据的数据区间。 */
+  /** Ancre de fenêtre temporelle (types window/query) : intervalle de données sur lequel la conclusion repose. */
   timeWindow?: { from: string; to: string }
-  /** 命中行数（query 类）。 */
+  /** Nombre de lignes trouvées (type query). */
   hitRows?: number
-  /** 引用时点质量分 0-100（dataset/field 类，登记快照不回写）。 */
+  /** Score de qualité à la date de référence 0-100 (types dataset/field, l'instantané enregistré n'est pas réécrit). */
   qualityScore?: number
 }
 
@@ -47,33 +47,33 @@ export interface AuditLogRecord extends RecordBase {
   result: 'ok' | 'denied' | 'error'
   detail: string
   actChain?: Array<{ name: string; type: string }>
-  /** 场景维度（IAW 交接 5-2，additive）：面板任务/诊断等带场景编号的动作落此维度，供审计时间线反查。 */
+  /** Dimension scénario (IAW passation 5-2, additif) : les actions portant un numéro de scénario comme tâches/diagnostics de panneau atterrissent ici, pour la recherche inverse dans la chronologie d'audit. */
   sceneCode?: string
-  /** 证据锚点（IAW 交接 5-1，additive）：直接内联（invoke 类结论事件）或引用证据登记 id。 */
+  /** Ancres de preuve (IAW passation 5-1, additif) : inlinées directement (événements de conclusion de type invoke) ou référence à l'id d'un enregistrement de preuve. */
   evidence?: EvidenceAnchor[]
   evidenceIds?: string[]
-  // -- 冷热分层与哈希链（W3-T5，契约 §14，additive） --
-  /** 全链 trace id（可选）：MCP 网关调用等带 trace 的事件随记录落此维度，GET /api/audit/logs?traceId= 精确检索。 */
+  // -- Stratification froide/chaude et chaîne de hachage (W3-T5, contrat §14, additif) --
+  /** trace id de bout en bout (optionnel) : les événements portant un trace comme les appels de la passerelle MCP atterrissent ici, recherche exacte via GET /api/audit/logs?traceId=. */
   traceId?: string
-  /** 哈希链前驱（record() 单点计算）：链首记录为空串。 */
+  /** Prédécesseur de la chaîne de hachage (calculé en point unique dans record()) : chaîne vide pour la tête de chaîne. */
   prevHash?: string
-  /** 本记录哈希：sha256(prevHash + canonicalJSON(本记录业务字段))——canonicalJSON 键序稳定，
-   *  且排除 createdAt/updatedAt（insert 期注入，非业务事实）与 prevHash/hash 自身；校验口径见 record()。 */
+  /** Hash de cet enregistrement : sha256(prevHash + canonicalJSON(champs métier de cet enregistrement)) — canonicalJSON a un ordre de clés stable,
+   *  et exclut createdAt/updatedAt (injectés à l'insertion, hors faits métier) ainsi que prevHash/hash eux-mêmes ; périmètre de validation voir record(). */
   hash?: string
-  /** 策略决策 id（W3-T5 契约 §11/§16，additive）：PDP 裁决 id（pd_ 前缀）——回答「为什么被允许」。
-   *  与 mcp:calls 的热数据同源；热数据滚动清理后审计侧仍可回查决策依据。 */
+  /** id de décision de stratégie (contrat W3-T5 §11/§16, additif) : id d'arbitrage du PDP (préfixe pd_) — répond à « pourquoi cela a été permis ».
+   *  Même source que les données chaudes de mcp:calls ; après le nettoyage glissant des données chaudes, l'audit peut toujours reconsulter les motifs de décision. */
   decisionId?: string
-  /** 策略决策原因（结构化文本，additive）：deny 原因可检索（如 ORG_SCOPE_DENIED / RISK_UNREGISTERED）。 */
+  /** Motif de décision de stratégie (texte structuré, additif) : motifs deny consultables (p. ex. ORG_SCOPE_DENIED / RISK_UNREGISTERED). */
   decisionReasons?: string[]
 }
 
-/** 证据登记（IAW 交接 5-1）：锚点包独立落库发 id，会话消息/审计事件以 evidenceId 引用。 */
+/** Enregistrement de preuve (IAW passation 5-1) : le paquet d'ancres est validé puis stocké avec émission d'un id ; messages de session/événements d'audit le référencent par evidenceId. */
 export interface EvidenceRecord extends RecordBase {
   sceneCode?: string
-  /** 绑定的会话消息（dsh 消息 id）与频道（可选）。 */
+  /** Message de session lié (id de message dsh) et canal (optionnels). */
   messageId?: string
   sessionId?: string
-  /** 结论主体（user:<id> / agent:<id>）。 */
+  /** Sujet de la conclusion (user:<id> / agent:<id>). */
   subject?: string
   anchors: EvidenceAnchor[]
   note?: string
@@ -107,22 +107,22 @@ export interface CostRecord extends RecordBase {
   appId?: string
   agentId?: string
   mcpServiceId?: string
-  /** 连接器纳管资源归集维度（connector:<service> 的 service 段）。 */
+  /** Dimension de consolidation des ressources de gouvernance des connecteurs (segment service de connector:<service>). */
   connectorService?: string
   llmTokens: number
   toolCalls: number
   costYuan: number
   /**
-   * 计价覆盖率（#14 additive）：priced=费率在配的事件数；notPriced=因费率未配置/全零费率
-   * 而零成本的事件数。下游不得把 0 成本读成「无消耗」——覆盖率是门禁判断「成本是否可归集」的依据。
-   * 存量记录无此两字段（缺省按 0 计，不计入覆盖率分母）。
+   * Taux de couverture de tarification (#14 additif) : priced = événements dont le tarif est en vigueur ; notPriced = événements à coût zéro
+   * pour cause de tarif non configuré ou tarif entièrement nul. L'aval ne doit pas lire 0 comme « pas de consommation » — la couverture fonde le jugement des portes sur « le coût est-il consolidable ».
+   * Les enregistrements existants n'ont pas ces deux champs (comptés 0 par défaut, hors dénominateur de couverture).
    */
   pricedEvents?: number
   notPricedEvents?: number
   /**
-   * 存量未计数标记（#14 复核 additive）：覆盖率字段引入前已聚合的桶，既有 portion 的
-   * priced/notPriced 不可知（事件级权威口径见 /api/usage/summary 的零费率快照识别）。
-   * costReport 据此把行标为 coverage=legacy/mixed，门禁不再把「存量未知」误读成「在档 0」。
+   * Marque d'existence non comptée (#14 relecture, additif) : buckets agrégés avant l'introduction des champs de couverture, dont le
+   * priced/notPriced de la portion existante est inconnu (le périmètre d'autorité au niveau événement : identification d'instantané à tarif zéro de /api/usage/summary).
+   * costReport marque la ligne coverage=legacy/mixed en conséquence ; les portes ne lisent plus « existant inconnu » comme « 0 enregistré ».
    */
   legacyUncounted?: boolean
 }
@@ -133,7 +133,7 @@ export interface ApprovalRecord extends RecordBase {
   payload: Record<string, unknown>
   requesterId: string
   requesterName: string
-  /** superseded（2026-11-02 同目标收口）：本单目标已由另一张同目标审批单执行完成，自动收口、无需处理。 */
+  /** superseded (clôture même objectif 2026-11-02) : l'objectif de ce dossier a été exécuté par un autre dossier de même objectif, clôture automatique, rien à traiter. */
   status: 'pending' | 'approved' | 'rejected' | 'executed' | 'failed' | 'superseded'
   approverId?: string
   approverName?: string
@@ -141,26 +141,26 @@ export interface ApprovalRecord extends RecordBase {
   createdAt: string
   decidedAt?: string
   execution?: { result: string; error?: string; at: string }
-  /** 同目标收口依据：使本单失去意义的那张已执行审批单 id（status=superseded 时必有）。 */
+  /** Fondement de la clôture même objectif : id du dossier d'approbation déjà exécuté qui a privé celui-ci d'objet (toujours présent si status=superseded). */
   supersededBy?: string
-  /** 风险级（WP-10/L1）：high 级审批通过需二次确认（服务端强制），且默认落公司级终审标记。 */
+  /** Niveau de risque (WP-10/L1) : l'approbation d'un dossier de niveau high exige une double confirmation (forcée côté serveur) et pose par défaut la marque de revue finale au niveau entreprise. */
   riskLevel?: 'high' | 'medium' | 'low'
-  /** 公司级终审标记（WP-10/L1，additive）：终审人与时间在审计可追溯（action=approval.final_review）。 */
+  /** Marque de revue finale au niveau entreprise (WP-10/L1, additif) : relecteur et horodatage traçables dans l'audit (action=approval.final_review). */
   finalReview?: { approverId: string; approverName: string; at: string }
-  /** 组织归属（R11 多公司收口，2026-10-14）：审批单按组织子树过滤的数据源。
-   *  agent.* 类单由 createApproval 从 payload.agentId 自动推导；存量单无此字段对非 `*` 不可见。 */
+  /** Appartenance organisationnelle (clôture multi-entreprises R11, 2026-10-14) : source de données du filtrage des dossiers d'approbation par sous-arbre organisationnel.
+   *  Les dossiers agent.* sont déduits automatiquement par createApproval depuis payload.agentId ; les dossiers existants sans ce champ sont invisibles aux non `*`. */
   orgId?: string
 }
 
 export type ApprovalExecutor = (payload: Record<string, unknown>, approverId: string) => Promise<unknown>
 
 // ---------------------------------------------------------------------------
-// 哈希链（W3-T5，契约 §14）：canonicalJSON（键序稳定序列化）
+// Chaîne de hachage (W3-T5, contrat §14) : canonicalJSON (sérialisation à ordre de clés stable)
 // ---------------------------------------------------------------------------
 
 /**
- * canonicalJSON：递归键排序的稳定序列化（同一条记录任意时刻重算结果逐字节一致）。
- * 数组保序；exclude 键（如 hash 自身）在对象层剔除。
+ * canonicalJSON : sérialisation stable à clés triées récursivement (le recalcul du même enregistrement à tout instant est identique octet par octet).
+ * Les tableaux conservent leur ordre ; les clés exclude (comme hash lui-même) sont retirées au niveau objet.
  */
 export function canonicalJson(value: unknown, exclude: string[] = []): string {
   const skip = new Set(exclude)
@@ -169,9 +169,9 @@ export function canonicalJson(value: unknown, exclude: string[] = []): string {
     if (input === undefined) return 'null'
     if (typeof input !== 'object') return JSON.stringify(input) ?? 'null'
     if (Array.isArray(input)) return `[${input.map(walk).join(',')}]`
-    // 键序稳定 + 与 JSON.stringify 语义对齐：值为 undefined 的键直接跳过（JSON 落盘同样丢弃
-    // 该键）。若渲染为 null，则「内存对象重算的哈希」与「落盘记录重算的哈希」分叉——
-    // 哈希链对最关键的 MCP 调用记录将不可校验（W4 安全审计 P0-1 根因）。
+    // Ordre de clés stable + aligné sur la sémantique de JSON.stringify : les clés à valeur undefined sont directement sautées (la sérialisation JSON les abandonne
+    // pareillement). Si on les rendait null, « le hash recalculé sur l'objet en mémoire » et « le hash recalculé sur l'enregistrement stocké » divergeraient —
+    // la chaîne de hachage deviendrait invérifiable pour les enregistrements d'appels MCP, les plus critiques (cause racine de l'audit sécurité W4 P0-1).
     const keys = Object.keys(input as Record<string, unknown>)
       .filter((key) => !skip.has(key) && (input as Record<string, unknown>)[key] !== undefined)
       .sort()
@@ -180,33 +180,33 @@ export function canonicalJson(value: unknown, exclude: string[] = []): string {
   return walk(value)
 }
 
-/** 审计哈希链记录参与哈希的字段口径：业务字段全量，排除落库期注入的 createdAt/updatedAt 与链字段自身。 */
+/** Périmètre des champs participant au hash d'un enregistrement de la chaîne d'audit : tous les champs métier, hors createdAt/updatedAt injectés au stockage et les champs de chaîne eux-mêmes. */
 const AUDIT_HASH_EXCLUDE = ['createdAt', 'updatedAt', 'prevHash', 'hash']
 
-/** 按记录重算哈希（校验面与写入面单点同源）：sha256(prevHash + canonicalJSON(业务字段))。 */
+/** Recalcule le hash d'un enregistrement (validation et écriture partagent la même source en point unique) : sha256(prevHash + canonicalJSON(champs métier)). */
 export function auditHashOf(record: { prevHash?: string; hash?: string; [key: string]: unknown }, prevHash: string): string {
   return sha256Hex(prevHash + canonicalJson(record, AUDIT_HASH_EXCLUDE))
 }
 
 // ---------------------------------------------------------------------------
-// 审批负载卫生与独立规则源（OPT-P2-02，2026-09-12）
+// Hygiène des charges d'approbation et source de règles indépendante (OPT-P2-02, 2026-09-12)
 // ---------------------------------------------------------------------------
 
 /**
- * 独立最小化规则源（OPT-P2-02）：审批执行约束独立于主授权判定。
- * ⚠ 共享故障域声明：同进程同权限同代码——本表不构成密码学级"独立保护"，
- *   只是把二次确认/敏感面口径从执行器实现抽出为可评审、可 diff 的静态工件
- *   （完整声明见 docs/shared-failure-domain-declaration.md）。
+ * Source de règles minimale indépendante (OPT-P2-02) : les contraintes d'exécution des approbations sont indépendantes du jugement d'autorisation principal.
+ * ⚠ Déclaration de domaine de défaillance partagé : même processus, mêmes permissions, même code — cette table ne constitue pas une « protection indépendante » de niveau cryptographique,
+ *   elle ne fait qu'extraire des périmètres de double confirmation/facette sensible des implémentations d'exécuteurs vers un artefact statique exposable en revue et en diff
+ *   (déclaration complète : docs/shared-failure-domain-declaration.md).
  */
 export interface ApprovalKindRule {
-  /** 高风险通过是否必须显式二次确认（缺省沿用 riskLevel==='high' 的既有口径）。 */
+  /** Le passage d'un haut risque exige-t-il une double confirmation explicite (défaut : périmètre existant riskLevel==='high'). */
   requiresConfirmed?: boolean
-  /** 敏感入参面：mask=掩码后入库；reject=直接拒绝开单（适用于执行需要原文的 kind）。 */
+  /** Facette d'entrées sensibles : mask = masquage puis stockage ; reject = refus direct d'ouvrir le dossier (pour les kind dont l'exécution exige le texte original). */
   sensitiveInputPolicy: 'mask' | 'reject'
 }
 
 const APPROVAL_KIND_RULES: Record<string, ApprovalKindRule> = {
-  // 连接器 admin 续调需要原文 input 执行——敏感入参不能掩码（会以 *** 下发数据面），只能拒绝开单
+  // La relance admin des connecteurs exige l'input original pour exécuter — les entrées sensibles ne peuvent pas être masquées (elles partiraient en *** vers le plan de données), seul le refus d'ouvrir le dossier est possible
   'connector.action.admin': { sensitiveInputPolicy: 'reject' },
   'connector.connect': { sensitiveInputPolicy: 'mask' },
   'connector.offline': { sensitiveInputPolicy: 'mask' },
@@ -217,9 +217,9 @@ export function approvalKindRule(kind: string): ApprovalKindRule {
 }
 
 /**
- * L4 高危审批缺省即 high（QA A-06）：连接器网关下线/建连/admin 续调、MCP 下线、NAS 分享、
- * 面板卡片动作与行业激活此前未标 riskLevel:'high'——一次 approve 即执行、无二次确认，
- * 与 WP-10「高危操作需显式二次确认」口径冲突。中央闸兜底：调用方未显式声明时按 high 落库。
+ * Les approbations L4 à haut risque sont high par défaut (QA A-06) : mise hors ligne de la passerelle de connecteurs/établissement de lien/relance admin, mise hors ligne MCP, partage NAS,
+ * actions de cartes du panneau et activations sectorielles ne portaient pas riskLevel:'high' — un approve suffisait à exécuter, sans double confirmation,
+ * en conflit avec le périmètre WP-10 « les opérations à haut risque exigent une double confirmation explicite ». Filet central : si l'appelant ne déclare pas explicitement, stockage en high.
  */
 const HIGH_RISK_APPROVAL_KINDS = new Set([
   'connector.offline', 'connector.connect', 'connector.action.admin',
@@ -227,12 +227,12 @@ const HIGH_RISK_APPROVAL_KINDS = new Set([
 ])
 
 /**
- * 同目标在途单收口（2026-11-02）：生命周期类审批对「同一资源 + 同一动作」只应有一张在途单。
- * 背景：人工提交 Agent 上线单后，治理 Agent 又对同一 agentId 另开一张并批掉——资源已 online，
- * 人工那张却永久挂在待审批（再点通过会被状态机拒绝而落 failed），控制台看起来像「数据未同步」。
- * 两道闸：开单命中在途同目标单直接复用（幂等，不再新增，留痕 approval.reuse）；某张执行成功后
- * 其余同目标在途单自动置 superseded（留痕 approval.superseded）。仅登记「执行效果只取决于资源 id」
- * 的 kind——connector.action.admin 等带独立入参的动作单不参与（不同入参是不同动作，不能合并）。
+ * Clôture des dossiers en cours sur un même objectif (2026-11-02) : pour les approbations de cycle de vie, il ne doit y avoir qu'un seul dossier en cours par « même ressource + même action ».
+ * Contexte : après le dépôt humain d'un dossier de mise en ligne d'Agent, l'Agent de gouvernance en ouvrait un autre sur le même agentId et le validait — la ressource est online,
+ * mais le dossier humain restait suspendu en attente pour toujours (une validation ultérieure serait refusée par la machine à états et tomberait failed), la console donnait l'impression d'un « défaut de synchronisation des données ».
+ * Deux portes : au dépôt, une correspondance avec un dossier en cours du même objectif réutilise directement ce dossier (idempotent, pas de nouveau dossier, trace approval.reuse) ; après l'exécution réussie d'un dossier,
+ * les autres dossiers en cours du même objectif passent automatiquement superseded (trace approval.superseded). Ne sont enregistrés que les kind dont
+ * « l'effet d'exécution ne dépend que de l'id de ressource » — les dossiers d'action à paramètres propres comme connector.action.admin n'y participent pas (des paramètres différents sont des actions différentes, pas de fusion).
  */
 const APPROVAL_TARGET_FIELD: Record<string, string> = {
   'agent.online': 'agentId', 'agent.offline': 'agentId', 'agent.unfreeze': 'agentId',
@@ -240,7 +240,7 @@ const APPROVAL_TARGET_FIELD: Record<string, string> = {
   'mcp.offline': 'serviceId',
 }
 
-/** 同目标键：kind + 目标资源 id；未登记 kind 或负载缺目标 id → undefined（不参与收口）。 */
+/** Clé de même objectif : kind + id de ressource cible ; kind non enregistré ou charge sans id de cible → undefined (hors clôture). */
 export function approvalTargetKey(kind: string, payload: Record<string, unknown> | undefined): string | undefined {
   const field = APPROVAL_TARGET_FIELD[kind]
   const value = field ? payload?.[field] : undefined
@@ -248,26 +248,26 @@ export function approvalTargetKey(kind: string, payload: Record<string, unknown>
 }
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 export class AuditService extends Service {
   static readonly provide = 'audit'
 
   private executors = new Map<string, ApprovalExecutor>()
-  /** 补偿注册表（OPT-P2-02）：kind → 不可逆动作失败后的补偿编排。 */
+  /** Registre des compensations (OPT-P2-02) : kind → orchestration de compensation après l'échec d'une action irréversible. */
   private compensations = new Map<string, (payload: Record<string, unknown>, error: Error) => Promise<unknown>>()
   private deniedCounter = new Map<string, number[]>()
-  /** REL-11 读侧加固：已发过 warning 的脏成本资源（进程内去重，防告警风暴）。 */
+  /** Durcissement de la lecture REL-11 : ressources à coûts sales déjà alertées (déduplication dans le processus, anti-tempête d'alertes). */
   private warnedDirtyCostResources = new Set<string>()
-  /** 哈希链链首（W3-T5 §14）：启动时取集合最后一条的 hash 续链（重启不破链）。 */
+  /** Tête de la chaîne de hachage (W3-T5 §14) : au démarrage, le hash de la dernière entrée de la collection prolonge la chaîne (le redémarrage ne la brise pas). */
   private chainTip = ''
   private chainReady = false
 
   constructor(ctx: Context) {
     super(ctx, 'audit')
 
-    // 事件驱动的审计埋点：各模块状态变更自动落审计日志
+    // Instrumentation d'audit pilotée par événements : les changements d'état de chaque module atterrissent automatiquement dans les journaux d'audit
     const auditOf = (type: AuditType, action: string, result: AuditLogRecord['result'] = 'ok') =>
       (payload: unknown): void => {
         const p = payload as Record<string, any>
@@ -297,14 +297,14 @@ export class AuditService extends Service {
     })
     ctx.platformBus.on(PlatformEvents.McpDeployed, auditOf('change', 'mcp.service.deploy'))
     ctx.platformBus.on(PlatformEvents.McpOfflined, auditOf('change', 'mcp.service.offline'))
-    // W1-T2（MCP 治理 §6）：Secret Broker 凭证读取留痕（payload 仅 serviceId/credentialRef 元数据，零明文）
+    // W1-T2 (gouvernance MCP §6) : traçabilité des lectures d'identifiants du Secret Broker (payload en métadonnées seules serviceId/credentialRef, zéro clair)
     ctx.platformBus.on(PlatformEvents.McpSecretAccess, auditOf('change', 'mcp.credential.access'))
-    // 应用外部凭证托管（issue #19）：取值逐次留痕（payload 仅 appId/key/result 元数据，零明文）
+    // Hébergement d'identifiants externes d'application (issue #19) : trace à chaque lecture (payload en métadonnées seules appId/key/result, zéro clair)
     ctx.platformBus.on(PlatformEvents.AppSecretAccess, auditOf('change', 'app.credential.access'))
-    // 资产使用凭证（2026-10-31）：Agent 提报使用事实逐次留痕（使用凭证=资产经营侧的重要证据）
+    // Identifiants d'utilisation d'actifs (2026-10-31) : trace à chaque déclaration de faits d'utilisation par l'Agent (l'identifiant d'usage = preuve importante côté exploitation des actifs)
     ctx.platformBus.on(PlatformEvents.UsageAssetReported, auditOf('invoke', 'asset.usage.report'))
-    // 平台工具面调用留痕（2026-11-02）：/mcp 与 REST 工具桥每次调用逐次落账（actorId=成员
-    // userId，human PAT 调用直接与成员关联）；actorType 按 ConnectorInvoked 同口径映射
+    // Traçabilité des appels d'outils plateforme (2026-11-02) : chaque appel via /mcp et le pont d'outils REST est comptabilisé individuellement (actorId = userId du membre,
+    // un appel PAT humain est directement rattaché au membre) ; actorType mappé selon le même périmètre que ConnectorInvoked
     ctx.platformBus.on(PlatformEvents.ToolInvoked, (payload) => {
       const p = payload as { name: string; isError: boolean; durationMs?: number; surface?: string; error?: string; actorType?: string; actorId?: string; actorName?: string; actChain?: Array<{ name: string; type: string }> }
       this.record({
@@ -332,8 +332,8 @@ export class AuditService extends Service {
     })
     ctx.platformBus.on(PlatformEvents.McpInvoked, (payload) => {
       const p = payload as { ok: boolean; latencyMs: number; serviceId: string; name: string; callerName: string; errorRate?: number; traceId?: string; decisionId?: string; decisionReasons?: string[]; status?: string }
-      // 结果分档（W4 安全审计 P0-4）：策略拒绝（denied）与上游故障（error）必须可区分——
-      // 否则「为什么被允许/拒绝」在审计里退化为同一种失败。
+      // Classement des résultats (audit sécurité W4 P0-4) : refus de stratégie (denied) et panne amont (error) doivent rester distinguables —
+      // sinon « pourquoi permis/refusé » se dégrade dans l'audit en un seul type d'échec.
       const result: 'ok' | 'denied' | 'error' = p.ok ? 'ok' : p.status === 'denied' ? 'denied' : 'error'
       this.record({
         type: 'invoke', actorType: p.callerType ?? 'machine', actorId: p.callerId ?? '', actorName: p.callerName ?? '',
@@ -341,14 +341,14 @@ export class AuditService extends Service {
         result,
         detail: `latency=${p.latencyMs}ms${p.ok ? '' : result === 'denied' ? ' 策略拒绝' : ' 调用失败'}`,
         actChain: p.actChain,
-        // 全链 trace（W3-T5 §14，可选维度）：随 mcp.invoked payload v2 落审计，支持 ?traceId= 还原调用链
+        // Trace de bout en bout (W3-T5 §14, dimension optionnelle) : atterrit dans l'audit avec le payload v2 de mcp.invoked, reconstitution de la chaîne d'appel via ?traceId=
         ...(p.traceId ? { traceId: p.traceId } : {}),
-        // 决策依据（W3-T5 §11/§16）：allow/deny 均可回查「为什么被允许/拒绝」
+        // Motifs de décision (W3-T5 §11/§16) : allow comme deny permettent de reconsulter « pourquoi permis/refusé »
         ...(p.decisionId ? { decisionId: p.decisionId } : {}),
         ...(p.decisionReasons?.length ? { decisionReasons: p.decisionReasons } : {}),
       })
     })
-    // 连接器纳管（open-connector 融合）：invoke 日志透传 actChain + runId（runId 无独立字段，进 resourceId）
+    // Gouvernance des connecteurs (fusion open-connector) : le journal d'invoke transmet actChain + runId (runId sans champ dédié, dans resourceId)
     ctx.platformBus.on(PlatformEvents.ConnectorInvoked, (payload) => {
       const p = payload as {
         ok?: boolean; service?: string; actionId?: string; runId?: string
@@ -376,7 +376,7 @@ export class AuditService extends Service {
     ctx.platformBus.on(PlatformEvents.ConnectorConnected, auditOf('change', 'connector.connected'))
     ctx.platformBus.on(PlatformEvents.ConnectorDisconnected, auditOf('change', 'connector.disconnected'))
     ctx.platformBus.on(PlatformEvents.ConnectorPermGroupChanged, auditOf('change', 'connector.permgroup.changed'))
-    // QA E-03：镜像失败类事件此前只走总线半程（audit 无订阅、无告警）——补齐审计留痕 + 告警接线
+    // QA E-03 : les événements de type échec miroir ne parcouraient auparavant que la moitié du bus (pas d'abonnement audit, pas d'alerte) — compléter la trace d'audit + le câblage des alertes
     ctx.platformBus.on(PlatformEvents.ConnectorPolicyMirrorFailed, (payload) => {
       const p = payload as { groupId?: string; groupName?: string; reason?: string }
       this.record({
@@ -490,8 +490,8 @@ export class AuditService extends Service {
       })
     })
 
-    // T2 收口（M2）：远程接入降级事件落审计——此前 connect.degraded 只到总线为止，
-    // audit 无订阅，「以为在管远端其实在管本机」类语义漂移在审计链上不可见（降级必须显式留痕）。
+    // Clôture T2 (M2) : les événements de dégradation de l'accès distant atterrissent dans l'audit — auparavant connect.degraded s'arrêtait au bus,
+    // sans abonnement audit ; les dérives sémantiques du type « croire gérer le distant alors qu'on gère le local » étaient invisibles dans la chaîne d'audit (la dégradation doit laisser une trace explicite).
     ctx.platformBus.on('connect.degraded', (payload) => {
       const p = payload as { reason?: string; tool?: string; detail?: string; at?: string }
       this.record({
@@ -502,8 +502,8 @@ export class AuditService extends Service {
       })
     })
 
-    // 计量管道消费（v1.2 第 2 步）：usage.recorded → 财务口径投影 + 真实成本归集。
-    // 消费幂等由 usage 事件 idempotency_key 保障（at-least-once 投递 + 幂等消费）。
+    // Consommation du pipeline de mesure (v1.2 étape 2) : usage.recorded → projection au périmètre financier + consolidation des coûts réels.
+    // L'idempotence de consommation est garantie par l'idempotency_key des événements usage (livraison at-least-once + consommation idempotente).
     ctx.usage.consume('audit', (event) => {
       ctx.usage.project('audit', event)
       const agentId = event.subject.startsWith('agent:') ? event.subject.slice(6) : undefined
@@ -513,8 +513,8 @@ export class AuditService extends Service {
       const tokens = event.meters
         .filter((meter) => meter.key === 'input_tokens' || meter.key === 'output_tokens' || meter.key === 'tokens')
         .reduce((sum, meter) => sum + meter.value, 0)
-      // REL-11 读侧加固：存量脏事件（价格簿曾写入非数值费率）的 cost_cents 非有限时按 0 归集，
-      // 防 NaN 污染成本台账；同一资源只发一次 warning 告警
+      // Durcissement de la lecture REL-11 : pour les événements sales existants (le livre de prix avait écrit des tarifs non numériques), un cost_cents non fini est consolidé à 0,
+      // contre la pollution NaN du registre de coûts ; une seule alerte warning par ressource
       const rawCostCents = event.pricing.cost_cents
       const safeCostCents = Number.isFinite(rawCostCents) ? rawCostCents : 0
       if (!Number.isFinite(rawCostCents) && !this.warnedDirtyCostResources.has(event.resource)) {
@@ -525,8 +525,8 @@ export class AuditService extends Service {
           resourceType: 'usage_event', resourceId: event.resource,
         })
       }
-      // #14（2026-10-29）：未定价判定——零成本且（零费率快照 或 显式 cost_status='not_priced'）。
-      // 费率在配但量小取整为 0 的事件仍算已定价（priced），不污染覆盖率。
+      // #14 (2026-10-29) : jugement de non-tarification — coût zéro et (instantané à tarif zéro ou cost_status='not_priced' explicite).
+      // Un événement au tarif en vigueur mais de faible volume arrondi à 0 reste compté priced, sans polluer la couverture.
       const notPricedEvent = safeCostCents === 0
         && ((event.pricing as { cost_status?: string }).cost_status === 'not_priced' || event.pricing.rate?.nonbillable === true)
       this.addCost({
@@ -537,16 +537,16 @@ export class AuditService extends Service {
         ...(connectorService !== undefined ? { connectorService } : {}),
         llmTokens: event.resource.startsWith('model:') ? tokens : 0,
         toolCalls: event.resource.startsWith('mcp:') || connectorService !== undefined ? 1 : 0,
-        // QA B-06：成本口径取 cost_cents（内部成本）——此前取 charge_cents（应收口径）充当成本，
-        // 价格簿一旦调非零即以成本名义呈现应收金额（M0 禁止的结算语义残留）；charge 恒 0 仅快照兼容
+        // QA B-06 : le périmètre de coût prend cost_cents (coût interne) — auparavant charge_cents (périmètre à facturer) jouait le rôle de coût,
+        // dès qu'un prix passait non nul, le montant à facturer était présenté comme coût (résidu de sémantique de règlement interdit par M0) ; charge toujours 0, compatibilité instantané seulement
         costYuan: Math.round(safeCostCents * 100) / 10_000,
-        // #14：计价覆盖率——零成本且（零费率快照 or 显式 not_priced 标注）计为未定价，不与真零成本混读
+        // #14 : taux de couverture de tarification — coût zéro et (instantané à tarif zéro ou mention not_priced explicite) = non tarifié, pas de confusion avec le vrai coût zéro
         ...(notPricedEvent ? { pricedEvents: 0, notPricedEvents: 1 } : { pricedEvents: 1, notPricedEvents: 0 }),
       })
     })
   }
 
-  // -- 集合 ---------------------------------------------------------------
+  // -- Collections ---------------------------------------------------------------
 
   logs(): Collection<AuditLogRecord> {
     return this.ctx.opsStorage.collection<AuditLogRecord>('audit:logs')
@@ -572,13 +572,13 @@ export class AuditService extends Service {
     return this.ctx.opsStorage.collection<EvidenceRecord>('audit:evidence')
   }
 
-  // -- 审计日志 -----------------------------------------------------------
+  // -- Journaux d'audit -----------------------------------------------------------
 
   /**
-   * 唯一写入点（append-only）：单点计算哈希链——hash = sha256(prevHash + canonicalJSON(业务字段))，
-   * 链首 prevHash=''。启动续链：首次写入前取集合最后一条的 hash 作链首（重启/换进程不破链，
-   * 集合无清理逻辑，天然全序）。校验口径：对存量记录 strip prevHash/hash 后重算并与 hash 比对
-   * （auditHashOf 导出，W4 验收/外部分析共用同一实现）。
+   * Point d'écriture unique (append-only) : calcul de la chaîne de hachage en point unique — hash = sha256(prevHash + canonicalJSON(champs métier)),
+   * prevHash='' en tête de chaîne. Prolongation au démarrage : avant la première écriture, le hash de la dernière entrée de la collection devient la tête (redémarrage/changement de processus sans rupture,
+   * la collection n'a pas de logique de purge, ordre total naturel). Périmètre de validation : pour les enregistrements existants, retirer prevHash/hash, recalculer et comparer au hash
+   * (auditHashOf exporté ; la recette W4 et l'analyse externe partagent la même implémentation).
    */
   record(entry: Omit<AuditLogRecord, 'id' | 'createdAt' | 'updatedAt'>): AuditLogRecord {
     if (!this.chainReady) {
@@ -593,7 +593,7 @@ export class AuditService extends Service {
     return this.logs().insert({ ...record, prevHash, hash } as AuditLogRecord)
   }
 
-  /** 当前链尾哈希（ndjson 导出附尾行 _chainTip；外部对账入口）。 */
+  /** Hash courant de la queue de chaîne (l'export ndjson ajoute une ligne finale _chainTip ; entrée de réconciliation externe). */
   chainTipHash(): string {
     if (!this.chainReady) {
       const all = this.logs().all()
@@ -603,9 +603,9 @@ export class AuditService extends Service {
   }
 
   /**
-   * ndjson 流式导出（契约 §14，append-only 导出）：行序=时间序（createdAt 升序），
-   * 每行一条完整审计记录（含 prevHash/hash 可校验），尾行 {"_chainTip": "<lastHash>"}。
-   * 直接写响应（Content-Type application/x-ndjson），权限点同既有 audit.read。
+   * Export ndjson en flux (contrat §14, export append-only) : ordre des lignes = ordre chronologique (createdAt ascendant),
+   * une ligne = un enregistrement d'audit complet (avec prevHash/hash vérifiables), dernière ligne {"_chainTip": "<lastHash>"}.
+   * Écriture directe dans la réponse (Content-Type application/x-ndjson), point de permission identique au audit.read existant.
    */
   exportNdjson(exchange: { res: { writeHead(status: number, headers: Record<string, string>): unknown; end(text?: string): unknown } }, filter: { since?: string; until?: string } = {}): void {
     const rows = this.logs().find((log) => {
@@ -619,11 +619,11 @@ export class AuditService extends Service {
     exchange.res.end(`${lines.join('\n')}\n`)
   }
 
-  // -- 证据锚点（IAW 交接 5-1） ---------------------------------------------
+  // -- Ancres de preuve (IAW passation 5-1) ---------------------------------------------
 
   /**
-   * 证据登记：锚点包校验后落库发 id。校验为结构性校验（kind 值域 / id 必填 / 窗口与行数形态），
-   * 不校验引用的数据集是否真实存在——那属于数据要素域（resource datasets）的对账职责。
+   * Enregistrement de preuve : le paquet d'ancres est validé puis stocké avec émission d'un id. La validation est structurelle (domaine de kind / id obligatoire / forme des fenêtres et lignes),
+   * sans vérifier l'existence réelle du jeu de données référencé — cela relève de la réconciliation du domaine des données (resource datasets).
    */
   recordEvidence(input: {
     anchors: EvidenceAnchor[]
@@ -657,26 +657,26 @@ export class AuditService extends Service {
     return this.evidence().get(id)
   }
 
-  // -- 场景时间线（IAW 交接 5-2） -------------------------------------------
+  // -- Chronologie de scénarios (IAW passation 5-2) -------------------------------------------
 
   /**
-   * 场景/任务维度审计时间线：带 sceneCode 维度的审计日志倒序时间线（面板概览「最近动态」
-   * 与场景抽屉的数据源；无 sceneCode 维度的全量审计仍走 query()/logs）。
-   * REL-10：证据登记（audit:evidence）同样带 sceneCode，但此前 timeline 只查 audit:logs——
-   * 证据登记 200 后场景时间线查不到（断链，IAW 5-1→5-2）。现把命中 sceneCode 的证据记录以
-   * entryType='evidence' 条目合并进时间线（按时间统一排序）；证据锚点引用 log id 时在对应
-   * log 条目上计算式回填 evidenceIds（只改响应，不改持久化 schema）。既有字段只增不改。
+   * Chronologie d'audit par dimension scénario/tâche : chronologie inversée des journaux d'audit portant la dimension sceneCode (source de données du « récent »
+   * du panneau et du tiroir de scénario ; l'audit intégral sans dimension sceneCode passe toujours par query()/logs).
+   * REL-10 : les enregistrements de preuve (audit:evidence) portent aussi sceneCode, mais la timeline ne consultait qu'audit:logs —
+   * après un enregistrement de preuve 200, la chronologie du scénario ne le voyait pas (rupture de chaîne, IAW 5-1→5-2). Désormais les enregistrements de preuve touchant sceneCode
+   * sont fusionnés dans la chronologie comme entrées entryType='evidence' (tri temporel unifié) ; quand une ancre de preuve référence un id de log, evidenceIds est rétrorempli
+   * de façon calculée sur l'entrée de log correspondante (modification de la réponse seule, schema de persistance inchangé). Champs existants : croissance seule.
    */
   timeline(filter: { sceneCode?: string; since?: string; limit?: number } = {}): { total: number; items: Array<{
     id: string; at: string
-    /** 条目类型标记（REL-10，additive）：'log'=审计日志 / 'evidence'=证据锚点登记（IAW 5-1）。 */
+    /** Marque de type d'entrée (REL-10, additif) : 'log' = journal d'audit / 'evidence' = enregistrement d'ancre de preuve (IAW 5-1). */
     entryType: 'log' | 'evidence'
-    /** 审计四类；evidence 条目无审计类型语义，缺省。 */
+    /** Les quatre familles d'audit ; les entrées evidence n'ont pas de sémantique de type d'audit, défaut. */
     type?: AuditType
     action: string; actorName: string
     resourceType: string; resourceId: string; resourceName: string
     result: AuditLogRecord['result']; detail: string; sceneCode?: string; evidenceIds: string[]
-    /** evidence 条目专有（additive）：锚点包与登记备注。 */
+    /** Propre aux entrées evidence (additif) : paquet d'ancres et note d'enregistrement. */
     anchors?: EvidenceAnchor[]; note?: string
   }> } {
     const all = this.logs().find((log) => {
@@ -689,7 +689,7 @@ export class AuditService extends Service {
       if (filter.since && evd.createdAt < filter.since) return false
       return true
     })
-    // 锚点引用 log id 时计算式回填 evidenceIds（响应层合并去重，不落库）
+    // Quand une ancre référence un id de log, evidenceIds est rétrorempli de façon calculée (fusion et déduplication à la couche réponse, sans stockage)
     const anchorRefs = new Map<string, string[]>()
     if (evidences.length > 0) {
       const logIds = new Set(all.map((log) => log.id))
@@ -738,7 +738,7 @@ export class AuditService extends Service {
     q?: string
     since?: string
     sceneCode?: string
-    /** 全链 trace 精确匹配（W3-T5 §14）：与 mcp.invoked 落审计的 traceId 维度对齐。 */
+    /** Correspondance exacte du trace de bout en bout (W3-T5 §14) : alignée sur la dimension traceId des mcp.invoked inscrits à l'audit. */
     traceId?: string
     limit?: number
   }): { total: number; items: AuditLogRecord[] } {
@@ -769,11 +769,11 @@ export class AuditService extends Service {
     return result
   }
 
-  // -- 告警 ---------------------------------------------------------------
+  // -- Alertes ---------------------------------------------------------------
 
   createAlertRule(input: Omit<AlertRuleRecord, 'id' | 'createdAt' | 'updatedAt'>): AlertRuleRecord {
-    // REL-12：创建入口入参校验收口——此前缺 name、非有限 threshold 也能 200 建档（无 name 规则
-    // 告警不可读，非法阈值使「>阈值」比较语义失真）。非法即抛错（路由 guarded 统一映射 400 BAD_REQUEST）
+    // REL-12 : convergence de la validation des entrées du point de création — auparavant, un 200 archivait sans name ni threshold fini (une règle
+    // sans name rend l'alerte illisible, un seuil illégal fausse la comparaison « > seuil »). Toute illégalité lève (la route guarded mappe uniformément en 400 BAD_REQUEST)
     if (typeof input.name !== 'string' || input.name.trim() === '') throw new Error(t('告警规则 name 必填（非空字符串）'))
     if (typeof input.metric !== 'string' || input.metric.trim() === '') throw new Error(t('告警规则 metric 必填（非空字符串）'))
     if (!Number.isFinite(input.threshold)) throw new Error(t('告警规则 threshold 必须为有限数值，收到：{value}', { value: String(input.threshold) }))
@@ -781,7 +781,7 @@ export class AuditService extends Service {
     return this.alertRules().insert({ id: newId('rule'), ...input })
   }
 
-  /** 告警评估入口：各事件源调用，匹配规则则触发告警。 */
+  /** Entrée d'évaluation des alertes : appelée par chaque source d'événements, déclenche une alerte en cas de correspondance de règle. */
   evaluateAlerts(metric: string, context: Record<string, unknown>): void {
     for (const rule of this.alertRules().find((item) => item.enabled && item.metric === metric)) {
       const value = Number(context[metric === 'permission_denied' ? 'count' : metric === 'mcp_unhealthy' ? 'consecutiveFails' : 'value'] ?? 0)
@@ -797,7 +797,7 @@ export class AuditService extends Service {
     }
   }
 
-  /** 直接触发告警（无规则的系统级告警）。 */
+  /** Déclenche directement une alerte (alertes système sans règle). */
   fire(input: Omit<AlertEventRecord, 'id' | 'createdAt' | 'updatedAt' | 'read'>): void {
     this.ctx.platformBus.emit(PlatformEvents.AlertFired, {
       id: newId('alt'), read: false, ...input,
@@ -808,14 +808,14 @@ export class AuditService extends Service {
     this.alerts().update(id, { read: true })
   }
 
-  /** 一键全部已读：把全部未读告警置为已读，返回本次处理的条数。 */
+  /** Tout marquer lu : passe toutes les alertes non lues en lues, renvoie le nombre traité cette fois. */
   markAllAlertsRead(): number {
     const unread = this.alerts().find((alert) => !alert.read)
     for (const alert of unread) this.alerts().update(alert.id, { read: true })
     return unread.length
   }
 
-  // -- 成本 ---------------------------------------------------------------
+  // -- Coûts ---------------------------------------------------------------
 
   addCost(input: Omit<CostRecord, 'id' | 'createdAt' | 'updatedAt'>): void {
     const existing = this.costs().findOne((cost) =>
@@ -829,11 +829,11 @@ export class AuditService extends Service {
         llmTokens: existing.llmTokens + input.llmTokens,
         toolCalls: existing.toolCalls + input.toolCalls,
         costYuan: Math.round((existing.costYuan + input.costYuan) * 1000) / 1000,
-        // #14：覆盖率增量合并（存量桶无字段按 0 起算，additive 不迁移）
+        // #14 : fusion incrémentale de la couverture (buckets existants sans champ partent de 0, additif sans migration)
         pricedEvents: (existing.pricedEvents ?? 0) + (input.pricedEvents ?? 0),
         notPricedEvents: (existing.notPricedEvents ?? 0) + (input.notPricedEvents ?? 0),
-        // #14 复核：覆盖率字段引入前已聚合的桶被新事件合并——既有 portion 的覆盖率不可知，
-        // 标记混合口径，costReport 的 coverage 据此报 mixed 而非谎报 live 100% 覆盖
+        // #14 relecture : les buckets agrégés avant l'introduction des champs de couverture sont fusionnés par de nouveaux événements — la couverture de la portion existante est inconnue,
+        // marquage du périmètre mixte ; le coverage de costReport signale mixed au lieu de mentir avec un live 100% couvert
         ...(existing.pricedEvents === undefined && existing.notPricedEvents === undefined ? { legacyUncounted: true } : {}),
       })
     } else {
@@ -857,11 +857,11 @@ export class AuditService extends Service {
       bucket.llmTokens += cost.llmTokens
       bucket.toolCalls += cost.toolCalls
       bucket.costYuan += cost.costYuan
-      // #14：覆盖率（存量记录无字段不计入分母——门禁按 priced+notPriced>0 判定归集可信度）
+      // #14 : couverture (les enregistrements existants sans champ sont hors dénominateur — les portes jugent la fiabilité de consolidation par priced+notPriced>0)
       bucket.priced += cost.pricedEvents ?? 0
       bucket.notPriced += cost.notPricedEvents ?? 0
-      // #14 复核：coverage 让门禁区分「在档 0」与「存量未知」——legacy = 全部记录早于覆盖率
-      // 字段（priced/notPriced 恒 0 属不可知而非真 0）；mixed = 部分存量未计数；live = 全量在档
+      // #14 relecture : coverage permet aux portes de distinguer « 0 enregistré » et « existant inconnu » — legacy = tous les enregistrements antérieurs aux champs
+      // de couverture (priced/notPriced toujours 0 : inconnu, pas un vrai 0) ; mixed = une partie de l'existant non comptée ; live = tout est enregistré
       const hasCoverage = cost.pricedEvents !== undefined || cost.notPricedEvents !== undefined
       if (hasCoverage && !cost.legacyUncounted) bucket.liveRecords += 1
       else bucket.legacyRecords += 1
@@ -879,17 +879,17 @@ export class AuditService extends Service {
       .sort((a, b) => b.costYuan - a.costYuan)
   }
 
-  // -- 审批中心 -----------------------------------------------------------
+  // -- Centre d'approbations -----------------------------------------------------------
 
-  /** 注册某类审批的执行器（审批通过后自动执行）。 */
+  /** Enregistre l'exécuteur d'une classe d'approbation (exécuté automatiquement après validation). */
   registerExecutor(kind: string, executor: ApprovalExecutor): () => void {
     this.executors.set(kind, executor)
     return () => this.executors.delete(kind)
   }
 
   /**
-   * 注册补偿器（OPT-P2-02）：不可逆动作的执行器失败时按注册表编排补偿并回写审批单。
-   * 补偿器收到（payload, 原错误）；返回值进入 execution.result 留痕。
+   * Enregistre un compensateur (OPT-P2-02) : quand l'exécuteur d'une action irréversible échoue, l'orchestration de compensation du registre s'applique et le dossier est réécrit.
+   * Le compensateur reçoit (payload, erreur d'origine) ; la valeur de retour est tracée dans execution.result.
    */
   registerCompensation(kind: string, compensation: (payload: Record<string, unknown>, error: Error) => Promise<unknown>): () => void {
     this.compensations.set(kind, compensation)
@@ -905,14 +905,14 @@ export class AuditService extends Service {
     riskLevel?: 'high' | 'medium' | 'low'
     orgId?: string
   }): ApprovalRecord {
-    // OPT-P2-02：入审批存储前的敏感面处置——reject 类 kind 直接拒绝开单；其余深度掩码后入库
+    // OPT-P2-02 : traitement de la facette sensible avant le stockage d'approbation — les kind de type reject voient le dossier refusé ; les autres sont profondément masqués avant stockage
     const rule = approvalKindRule(input.kind)
     const sensitivePaths = scanSensitiveKeys(input.payload)
     if (rule.sensitiveInputPolicy === 'reject' && sensitivePaths.length > 0) {
       throw new Error(t('审批拒绝：该类审批以原文入参执行，检出敏感命名入参（{paths}）。敏感值不得进入审批存储，请调整入参后重试（OPT-P2-02）', { paths: sensitivePaths.join('、') }))
     }
-    // 同目标在途单幂等复用（APPROVAL_TARGET_FIELD）：已有 pending 同目标单则直接返回该单、不再新增——
-    // 留痕 approval.reuse 记录第二位申请人的意图；后续 approval_decide 自然收敛到同一张单
+    // Réutilisation idempotente des dossiers en cours de même objectif (APPROVAL_TARGET_FIELD) : un dossier pending du même objectif existant → renvoyer ce dossier directement, sans en créer un nouveau —
+    // la trace approval.reuse consigne l'intention du second demandeur ; le approval_decide suivant converge naturellement vers le même dossier
     const targetKey = approvalTargetKey(input.kind, input.payload)
     const existing = targetKey
       ? this.approvals().findOne((item) => item.status === 'pending' && approvalTargetKey(item.kind, item.payload) === targetKey)
@@ -928,13 +928,13 @@ export class AuditService extends Service {
     }
     const { masked, maskedKeys } = maskSensitivePayload(input.payload)
     const riskLevel = input.riskLevel ?? (HIGH_RISK_APPROVAL_KINDS.has(input.kind) ? 'high' as const : undefined)
-    // R11：组织归属——显式传入优先；agent.* 类单未传时按平台稳定键读 Agent 的 orgId 兜底
-    //（调用方 plugin-agent 零改动即带上归属；entity:agent 跨插件只读与 dashboard 同款惯例）
+    // R11 : appartenance organisationnelle — l'argument explicite prime ; pour les dossiers agent.* sans argument, repli sur l'orgId de l'Agent lu par la clé stable plateforme
+    // (l'appelant plugin-agent obtient l'appartenance sans aucun changement ; la lecture inter-plugins entity:agent suit la même convention que dashboard)
     let orgId = input.orgId
     if (!orgId && input.kind.startsWith('agent.') && input.payload['agentId']) {
       try {
         orgId = this.ctx.opsStorage.collection<{ orgId?: string }>('entity:agent').get(String(input.payload['agentId']))?.orgId
-      } catch { /* 推导失败不阻塞开单（无归属单对非 `*` 不可见） */ }
+      } catch { /* un échec de déduction ne bloque pas l'ouverture du dossier (un dossier sans appartenance est invisible aux non `*`) */ }
     }
     const record = this.approvals().insert({
       id: newId('apr'),
@@ -953,9 +953,9 @@ export class AuditService extends Service {
   }
 
   /**
-   * 审批决策（WP-10 增强）：高风险通过必须显式二次确认（服务端强制，confirmed=true）；
-   * 高风险（或显式 finalReview）通过后落「公司级终审标记」并写入审计（action=approval.final_review，
-   * L1 终审标记审计可追溯）。
+   * Décision d'approbation (renforcement WP-10) : la validation d'un haut risque exige une double confirmation explicite (forcée côté serveur, confirmed=true) ;
+   * après validation d'un haut risque (ou finalReview explicite), pose la « marque de revue finale au niveau entreprise » et l'écrit dans l'audit (action=approval.final_review,
+   * marque de revue finale L1 traçable dans l'audit).
    */
   async decideApproval(
     id: string,
@@ -965,18 +965,18 @@ export class AuditService extends Service {
     opinion?: string,
     options: { confirmed?: boolean; finalReview?: boolean } = {},
   ): Promise<ApprovalRecord> {
-    // REL-01：decision 入参收口——只接受 approve/reject。此前其余值（如 "maybe"）会被
-    // 当作 approve 落入执行器分支真实执行；服务层单点拦截（路由层 guarded 统一转 400）。
+    // REL-01 : convergence de l'entrée decision — seuls approve/reject sont acceptés. Auparavant, toute autre valeur (p. ex. "maybe") tombait
+    // dans la branche approve et s'exécutait réellement ; interception en point unique en couche service (la route guarded mappe uniformément en 400).
     if (decision !== 'approve' && decision !== 'reject') {
       throw new Error(t('非法的审批决策：{decision}（只允许 approve 或 reject）', { decision: String(decision) }))
     }
     const approval = this.approvals().get(id)
     if (!approval) throw new Error(t('审批单不存在：{id}', { id }))
     if (approval.status !== 'pending') throw new Error(t('审批单已处理（{status}）', { status: approval.status }))
-    // 同人审批全类型放开（2026-11-02 业务裁决）：AI 原生组织人员规模小，管理员可对自己
-    // 提报的审批单（含 agent.online 雇佣语义）直接完成审批——2026-09-15 曾放开、2026-10-14
-    // R12 复议收窄仅 agent.online 保留职责分离，本次按最新裁决移除最后一处限制；
-    // 权限点（approval.decide）与高风险 confirmed 二次确认语义不变。
+    // Auto-approbation ouverte pour tous les types (arbitrage métier 2026-11-02) : les organisations natives IA ont peu de personnel, l'administrateur peut
+    // approuver directement ses propres dossiers (y compris la sémantique d'embauche agent.online) — déjà ouvert le 2026-09-15, puis resserré le 2026-10-14
+    // par la relecture R12 qui ne gardait la séparation des responsabilités que pour agent.online ; cette fois, la dernière restriction est levée selon l'arbitrage le plus récent ;
+    // le point de permission (approval.decide) et la sémantique de double confirmation confirmed pour les hauts risques restent inchangés.
     const isHighRisk = approval.riskLevel === 'high'
     if (decision === 'approve' && isHighRisk && options.confirmed !== true) {
       throw new Error(t('高风险审批通过需二次确认（confirmed=true），请在前端确认弹窗中复核后提交'))
@@ -1001,7 +1001,7 @@ export class AuditService extends Service {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error))
         execution = { result: t('执行失败'), error: err.message, at: new Date().toISOString() }
-        // OPT-P2-02：executor 失败不再只有 approval.execution.error——按注册表编排补偿并回写
+        // OPT-P2-02 : l'échec de l'exécuteur ne produit plus seulement approval.execution.error — l'orchestration de compensation du registre s'applique et réécrit
         const compensation = this.compensations.get(approval.kind)
         if (compensation) {
           try {
@@ -1034,14 +1034,14 @@ export class AuditService extends Service {
       ...(needsFinalReview ? { finalReview: { approverId, approverName, at: new Date().toISOString() } } : {}),
     })
     if (needsFinalReview) {
-      // L1 公司级终审标记 → 审计留痕（可按 action=approval.final_review 检索追溯）
+      // Marque de revue finale au niveau entreprise L1 → trace d'audit (recherche rétrospective par action=approval.final_review)
       this.record({
         type: 'change', actorType: 'human', actorId: approverId, actorName: approverName,
         action: 'approval.final_review', resourceType: 'approval', resourceId: id, resourceName: approval.title,
         result: 'ok', detail: `公司级终审标记（风险级 ${approval.riskLevel ?? 'medium'}），审批单 ${id} 终审通过`,
       })
     }
-    // 同目标收口：本单执行成功 → 其余同目标在途单的诉求已被满足，自动置 superseded（失败不收口，保留重试面）
+    // Clôture même objectif : l'exécution de ce dossier réussit → les demandes des autres dossiers en cours du même objectif sont satisfaites, passage automatique en superseded (pas de clôture en échec, surface de reprise conservée)
     if (status === 'executed') this.supersedeSiblings(updated)
     this.ctx.platformBus.emit(PlatformEvents.ApprovalDecided, {
       approvalId: id, title: approval.title, approved: true, approverId, approverName,
@@ -1050,8 +1050,8 @@ export class AuditService extends Service {
   }
 
   /**
-   * 删除审批单（清理驳回单）：仅「已驳回」终态可删——驳回单未执行任何动作，删除只为
-   * 清理待办列表；pending/approved/executed/failed 单含执行事实，一律不可删（审计留痕不受影响）。
+   * Supprime un dossier d'approbation (nettoyage des dossiers rejetés) : seul l'état final « rejeté » est supprimable — un dossier rejeté n'a exécuté aucune action, la suppression ne sert
+   * qu'à nettoyer la liste des tâches ; les dossiers pending/approved/executed/failed contiennent des faits d'exécution, jamais supprimables (la trace d'audit n'est pas affectée).
    */
   deleteApproval(id: string): void {
     const approval = this.approvals().get(id)
@@ -1063,11 +1063,11 @@ export class AuditService extends Service {
   }
 
   /**
-   * 同目标收口（APPROVAL_TARGET_FIELD）：executed 单执行成功后，其余同目标、且在其决策时刻之前
-   * 发起的 pending 单诉求已被满足（再批会被状态机拒绝而落 failed），自动置 superseded 并留痕。
-   * 不发 ApprovalDecided——收口既非通过也非驳回，避免下游把它当驳回通知申请人。
-   * 「决策时刻之前发起」的边界让启动期自愈可复用本方法：执行之后新开的同目标单是合法新诉求
-   * （如上线→下线→再上线），不得误收。返回收口条数。
+   * Clôture même objectif (APPROVAL_TARGET_FIELD) : après l'exécution réussie d'un dossier, les dossiers pending du même objectif déposés avant
+   * son instant de décision sont satisfaits (une validation ultérieure serait refusée par la machine à états et tomberait failed) → passage automatique en superseded avec trace.
+   * Pas d'émission d'ApprovalDecided — la clôture n'est ni une validation ni un rejet, pour éviter que l'aval la prenne pour un rejet et notifie le demandeur.
+   * La frontière « déposé avant l'instant de décision » permet à l'auto-réparation de démarrage de réutiliser cette méthode : un dossier du même objectif ouvert après l'exécution
+   * est une demande légitime nouvelle (p. ex. mise en ligne → retrait → remise en ligne), à ne pas clôturer à tort. Renvoie le nombre de dossiers clôturés.
    */
   supersedeSiblings(executed: Pick<ApprovalRecord, 'id' | 'kind' | 'payload' | 'decidedAt'>): number {
     const targetKey = approvalTargetKey(executed.kind, executed.payload)
@@ -1092,9 +1092,9 @@ export class AuditService extends Service {
   }
 
   /**
-   * 启动期存量自愈（2026-11-02）：收口机制上线前已产生的孤儿单——同目标已有 executed 单且本单在其
-   * 决策之前发起、至今仍 pending——按同一口径补置 superseded。每个目标取最晚执行单为依据；幂等
-   * （无孤儿时零写入）。返回收口条数。
+   * Auto-réparation de l'existant au démarrage (2026-11-02) : dossiers orphelins créés avant la mise en service de la clôture — un dossier du même objectif déjà executed et déposé
+   * avant sa décision, toujours pending aujourd'hui — passe en superseded selon le même périmètre. Pour chaque objectif, le dossier exécuté le plus tard sert de référence ; idempotent
+   * (zéro écriture sans orphelin). Renvoie le nombre de dossiers clôturés.
    */
   reconcileSupersededApprovals(): number {
     const latestExecuted = new Map<string, ApprovalRecord>()
@@ -1110,8 +1110,8 @@ export class AuditService extends Service {
   }
 
   /**
-   * 审批 SLA 报表（WP-10）：窗口内已决审批的「≤2 个工作日」达成率与分项。
-   * 工作日口径：跳过周六/周日后按自然日差累计（法定节假日不做日历——v1 口径在响应中声明）。
+   * Rapport SLA des approbations (WP-10) : taux de respect « ≤ 2 jours ouvrés » et détail des décisions dans la fenêtre.
+   * Périmètre de jour ouvré : après exclusion des samedis/dimanches, cumul par jours calendaires (pas de calendrier des jours fériés — périmètre v1 déclaré dans la réponse).
    */
   slaReport(windowDays = 30): {
     windowDays: number
@@ -1123,7 +1123,7 @@ export class AuditService extends Service {
     calendarNote: string
   } {
     const since = new Date(Date.now() - windowDays * 24 * 3600_000).toISOString()
-    // superseded 为引擎自动收口（非人工决策），不计入 SLA 分母
+    // superseded est une clôture automatique du moteur (pas une décision humaine), hors dénominateur SLA
     const decidedRecords = this.approvals().all()
       .filter((item) => item.decidedAt && item.decidedAt >= since && item.status !== 'superseded')
     const businessDaysBetween = (fromIso: string, toIso: string): number => {
@@ -1157,7 +1157,7 @@ export class AuditService extends Service {
 }
 
 // ---------------------------------------------------------------------------
-// 插件
+// Plugin
 // ---------------------------------------------------------------------------
 
 declare module '@deepseek-ai/cordis' {
@@ -1172,8 +1172,8 @@ export const inject = ['opsStorage', 'platformBus', 'resourceCore', 'iam', 'usag
 export function apply(ctx: Context) {
   ctx.plugin(AuditService)
   ctx.plugin(auditTools)
-  // 启动期存量自愈：收口机制上线前产生的同目标孤儿单（2026-11-02）。本插件不能注入自身服务
-  //（循环等待），以子插件声明 inject 等 audit 就绪后执行一次
+  // Auto-réparation de l'existant au démarrage : dossiers orphelins de même objectif créés avant la mise en service de la clôture (2026-11-02). Ce plugin ne peut pas s'injecter son propre service
+  // (attente circulaire) ; un sous-plugin déclare inject et exécute une fois audit prêt
   ctx.plugin({
     name: 'audit-approval-reconcile',
     inject: ['audit'],

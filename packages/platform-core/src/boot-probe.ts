@@ -1,22 +1,22 @@
 /**
- * 启动健壮性探针（EXEC-CHECKLIST W2）。
+ * Sonde de robustesse du démarrage (EXEC-CHECKLIST W2).
  *
- * 根因：cordis 把服务实现键存于 ctx.root[symbols.isolate][name]（reflect.ts），
- * inject 解析只认同一个 root——注册与消费分属两个 Context 实例时，
- * fiber._checkImpl 读不到实现会静默 delete，fiber 永久 PENDING、零报错。
- * 本模块提供两道防线：双实例断言（装配前 fail-fast）与插件树体检（装配后拒绝带病启动）。
+ * Cause racine : cordis stocke les clés d'implémentation de services dans ctx.root[symbols.isolate][name] (reflect.ts),
+ * la résolution d'inject ne reconnaît qu'un seul root — quand enregistrement et consommation se font dans deux instances Context distinctes,
+ * fiber._checkImpl ne trouve pas l'implémentation et la supprime silencieusement : fiber en PENDING permanent, zéro erreur.
+ * Ce module fournit deux lignes de défense : assertion de double instance (fail-fast avant assemblage) et diagnostic de l'arbre de plugins (refus de démarrage défectueux après assemblage).
  *
- * 内部 API 已对照 @deepseek-ai/cordis 4.0.4 源码核验：
- *   - ctx.reflect._getImpl(name, strict)：strict 时要求提供方 fiber 处于 ACTIVE（reflect.ts）
- *   - ctx.registry.values() → runtime.fibers（DisposableList，可迭代）→ fiber.state/inject/name
- *   - FiberState 是 const enum，编译期内联、运行时不可导入，状态名按 fiber.ts 枚举序还原
+ * API internes vérifiées contre le code source de @deepseek-ai/cordis 4.0.4 :
+ *   - ctx.reflect._getImpl(name, strict) : en strict, exige que le fiber fournisseur soit ACTIVE (reflect.ts)
+ *   - ctx.registry.values() → runtime.fibers (DisposableList, itérable) → fiber.state/inject/name
+ *   - FiberState est un const enum : inliné à la compilation, non importable à l'exécution, noms d'états reconstitués selon l'ordre d'énumération de fiber.ts
  */
 import type { Context, Fiber } from '@deepseek-ai/cordis'
 
-/** globalThis 上的 root 登记键：同一进程只应登记一个 root。 */
+/** Clé d'enregistrement du root sur globalThis : un même processus ne doit enregistrer qu'un seul root. */
 const ROOT_KEY = Symbol.for('ybkk.cordis.root')
 
-/** fiber 生命周期状态名（cordis 4.0.4 fiber.ts 的 const enum 枚举序，运行时按数值还原）。 */
+/** Noms des états du cycle de vie des fiber (ordre du const enum de cordis 4.0.4 fiber.ts, reconstitué par valeur à l'exécution). */
 const FIBER_STATE: Record<number, string> = {
   0: 'PENDING',
   1: 'LOADING',
@@ -29,7 +29,7 @@ const FIBER_STATE: Record<number, string> = {
 const STATE_ACTIVE = 2
 const STATE_FAILED = 3
 
-/** 断言当前进程只存在一个 root Context；发现第二个立即抛错（重复断言同一棵树幂等无副作用）。 */
+/** Affirme que le processus courant ne contient qu'un seul Context root ; lève immédiatement à la découverte d'un second (réaffirmer le même arbre est idempotent, sans effet de bord). */
 export function assertSingleRoot(ctx: Context): void {
   const holder = globalThis as Record<symbol, unknown>
   const existing = holder[ROOT_KEY]
@@ -44,34 +44,34 @@ export function assertSingleRoot(ctx: Context): void {
   holder[ROOT_KEY] ??= ctx.root
 }
 
-/** 单个非 ACTIVE fiber 的诊断快照。 */
+/** Instantané de diagnostic d'un seul fiber non ACTIVE. */
 export interface StuckFiber {
-  /** 插件名（fiber.name：就近具名祖先，缺省 'root'）。 */
+  /** Nom du plugin (fiber.name : ancêtre nommé le plus proche, défaut 'root'). */
   plugin: string
-  /** 生命周期状态名（按数值还原）。 */
+  /** Nom de l'état du cycle de vie (reconstitué par valeur). */
   state: string
-  /** 已声明 inject 但当前作用域拿不到 ACTIVE 实现的服务键。 */
+  /** Clés de services déclarés en inject dont l'implémentation ACTIVE est introuvable dans la portée courante. */
   waiting: string[]
-  /** true = 拦启动（接线未就绪或真实故障）；false = 良性败者 fiber，仅记录不拦截。 */
+  /** true = bloque le démarrage (câblage non prêt ou vraie panne) ; false = fiber perdant bénin, journalisé sans blocage. */
   blocking: boolean
 }
 
-/** 插件树体检结果。 */
+/** Résultat du diagnostic de l'arbre de plugins. */
 export interface TreeHealth {
   ok: boolean
-  /** 必需服务中不可达（当前作用域无 ACTIVE 实现）的名字。 */
+  /** Services requis inaccessibles (aucune implémentation ACTIVE dans la portée courante). */
   unreachable: string[]
-  /** 全部非 ACTIVE 状态的 fiber 快照（含良性败者，诊断视图完整）。 */
+  /** Instantanés de tous les fiber dans un état non ACTIVE (perdants bénins inclus, vue de diagnostic complète). */
   stuck: StuckFiber[]
 }
 
 /**
- * FAILED fiber 的良性豁免：本插件声明 provide 的每个服务名都已被其他 ACTIVE fiber
- * 接管时，它是双注册习语的败者 husk，不再拦截启动。
- * 背景：panel-core/flow-core 的「类经 ctx.plugin 注册 + 同步 new」双注册下，同步 new
- * 先登记实现，类 fiber 异步装载时 provide 撞车失败留 FAILED husk（服务由胜者提供，
- * 功能完好；该错误此前被默认 logger 的纯缓冲 exporter 吞掉，从未可见）。
- * 反之，声明的服务无人接管 = 真实故障，必须拦。
+ * Exemption bénigne des fiber FAILED : quand chaque nom de service déclaré en provide par ce plugin a été
+ * repris par un autre fiber ACTIVE, c'est le husk perdant de l'idiome de double enregistrement, plus aucun blocage du démarrage.
+ * Contexte : sous la double inscription « classe enregistrée via ctx.plugin + new synchrone » de panel-core/flow-core, le new synchrone
+ * enregistre l'implémentation d'abord ; le chargement asynchrone du fiber de classe échoue alors sur le provide et laisse un husk FAILED (le service est fourni par le gagnant,
+ * la fonctionnalité est intacte ; cette erreur était auparavant avalée par l'exporter à pur tampon du logger par défaut, jamais visible).
+ * Inversement, un service déclaré repris par personne = vraie panne, il faut bloquer.
  */
 function failedButCovered(ctx: Context, fiber: Fiber): boolean {
   const declared = (fiber.runtime?.callback as { provide?: string | string[] } | undefined)?.provide
@@ -84,8 +84,8 @@ function failedButCovered(ctx: Context, fiber: Fiber): boolean {
 }
 
 /**
- * 装配完成后体检：必需服务全部可达，且没有任何拦启动的卡死 fiber。
- * 必须在全部 await ctx.plugin 之后调用——此刻所有 fiber 都应已 ACTIVE。
+ * Diagnostic après assemblage : tous les services requis accessibles, et aucun fiber bloqué interdisant le démarrage.
+ * Doit être appelé après tous les await ctx.plugin — à cet instant, tous les fiber devraient être ACTIVE.
  */
 export function probeTree(ctx: Context, required: string[]): TreeHealth {
   const unreachable = required.filter((name) => !ctx.reflect._getImpl(name, true))
@@ -106,7 +106,7 @@ export function probeTree(ctx: Context, required: string[]): TreeHealth {
   return { ok: unreachable.length === 0 && !stuck.some((item) => item.blocking), unreachable, stuck }
 }
 
-/** 把体检结果格式化为可直接抛出的多行文案。 */
+/** Formate le résultat du diagnostic en texte multiligne directement levable. */
 export function formatTreeHealth(h: TreeHealth): string {
   const lines = ['插件树未健康，拒绝启动']
   if (h.unreachable.length > 0) {

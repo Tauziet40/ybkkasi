@@ -1,10 +1,10 @@
 /**
- * @dsh-ops/plugin-agent —— Agent 本体管理（方案 §五）。
+ * @dsh-ops/plugin-agent —— gestion du corps des Agents (plan §5).
  *
- * 基于 resource-core 底座：属性表 schema + 生命周期状态机 + 依赖图全部复用，
- * 本插件只声明 Agent 差异 schema 与运营监测逻辑。
- * 注册即纳管：创建 Agent 颁发唯一 ID 与机器身份凭证（authn，含 usage.write，
- * Agent 可自推直连消耗的计量），上线走 L4 审批，下线联动吊销凭证、通知绑定用户、保留审计数据。
+ * Basé sur le socle resource-core : la table d'attributs schema + la machine à états du cycle de vie + le graphe de dépendances sont tous réutilisés,
+ * ce plugin ne déclare que le schema propre aux Agents et la logique de supervision opérationnelle.
+ * Enregistrer = gouverner : la création d'un Agent émet un ID unique et un identifiant machine (authn, incluant usage.write,
+ * l'Agent peut auto-déclarer la mesure de sa consommation en direct) ; la mise en ligne passe par l'approbation L4, la mise hors ligne entraîne la révocation des identifiants, la notification des utilisateurs liés, la conservation des données d'audit.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -22,7 +22,7 @@ import { AGENT_TYPE_SPEC } from './schema.ts'
 import { buildAgentOnboardingPrompt, type AgentOnboardingCredential } from './onboarding.ts'
 
 // ---------------------------------------------------------------------------
-// 数据模型（Agent 专属扩展记录）
+// Modèle de données (enregistrements d'extension propres aux Agents)
 // ---------------------------------------------------------------------------
 
 export interface AgentBindingRecord extends RecordBase {
@@ -41,16 +41,16 @@ export interface AgentUsageRecord extends RecordBase {
   okCalls: number
   tokens: number
   totalLatencyMs: number
-  /** 来源维度：usage.recorded 回灌归集的调用数（模型网关等，无延迟数据）；calls 含该部分。 */
+  /** Dimension source : nombre d'appels consolidés par réinjection usage.recorded (passerelle de modèles etc., données sans latence) ; calls inclut cette part. */
   gwCalls?: number
-  /** 日活跃用户数（提报语义：同日多次上报取最大；网关归集不产生该字段）。 */
+  /** Nombre d'utilisateurs actifs journaliers (sémantique de déclaration : maximum sur plusieurs remontées du même jour ; la consolidation passerelle ne produit pas ce champ). */
   dau?: number
-  /** 对话用户去重统计（提报侧传 userIds，平台侧即刻哈希脱敏，同日取并集；不落明文）。 */
+  /** Statistique dédupliquée des utilisateurs en conversation (le côté déclaration transmet userIds, la plateforme hache et anonymise immédiatement, union sur le même jour ; jamais en clair). */
   userHashes?: string[]
 }
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 export class AgentRegistryService extends Service {
@@ -62,12 +62,12 @@ export class AgentRegistryService extends Service {
     super(ctx, 'agentRegistry')
     ctx.resourceCore.registerType(AGENT_TYPE_SPEC)
 
-    // 调用监测：MCP 网关以 Agent 为主体调用时自动归集运行指标
+    // Supervision des appels : la passerelle MCP consolide automatiquement les métriques d'exécution quand un Agent est le sujet de l'appel
     ctx.platformBus.on(PlatformEvents.McpInvoked, (payload) => {
       const p = payload as { callerType: string; callerId: string; ok: boolean; tokens: number; latencyMs: number }
       if (p.callerType !== 'agent') return
       this.recordUsage(p.callerId, { calls: 1, okCalls: p.ok ? 1 : 0, tokens: p.tokens, latencyMs: p.latencyMs }, 'mcp')
-      // 行为监测：频次突增检测（10 分钟窗口超过 120 次）
+      // Supervision comportementale : détection de pic de fréquence (fenêtre de 10 minutes dépassant 120 appels)
       const nowMs = Date.now()
       const times = (this.usageCounter.get(p.callerId) ?? []).filter((t) => nowMs - t < 10 * 60_000)
       times.push(nowMs)
@@ -84,14 +84,14 @@ export class AgentRegistryService extends Service {
       }
     })
 
-    // 调用统计口径补全：订阅 usage.recorded 回灌模型网关等非 MCP 调用（McpInvoked 只覆盖 MCP 网关）。
-    // 防双计规则（三条，缺一即双计/脏计）：
-    //   1. 只认 subject=agent:<id> 且 Agent 存在的事件——seed 历史数据与悬空主体不计；
-    //   2. resource mcp:* 一律跳过——MCP 网关对同一调用双发 McpInvoked（上方监听已计），
-    //      自推计量误报 mcp:* 时同样跳过（网关已计，宁缺勿重）；
-    //   3. meters 含 downloads/installs 观测键跳过——Skill 下载/安装是生命周期事件而非调用。
-    // 消费幂等：经 usage.consume 消费水位（INSERT OR IGNORE），replay/死信重投不会重复回灌；
-    // 投影义务：所有消费方必须 project（usage.reconcile 全量比对，缺投影即「对账不平」告警）。
+    // Complément du périmètre de statistiques d'appels : abonnement à usage.recorded pour réinjecter les appels non MCP comme ceux de la passerelle de modèles (McpInvoked ne couvre que la passerelle MCP).
+    // Règles anti-double-compte (trois, il en manque une = double compte/compte sale) :
+    //   1. n'admettre que les événements subject=agent:<id> avec Agent existant — les données historiques seed et les sujets orphelins ne comptent pas ;
+    //   2. resource mcp:* toujours sauté — la passerelle MCP émet en double McpInvoked pour le même appel (le listener ci-dessus l'a déjà compté),
+    //      l'auto-déclaration de mesure signalant à tort mcp:* est sautée pareillement (la passerelle l'a compté, mieux vaut manquer que dupliquer) ;
+    //   3. meters contenant les clés d'observation downloads/installs → sauté — le téléchargement/l'installation de Skill sont des événements de cycle de vie, pas des appels.
+    // Idempotence de consommation : via le niveau de consommation usage.consume (INSERT OR IGNORE), replay/reprise de lettres mortes ne réinjecte pas en double ;
+    // Obligation de projection : tous les consommateurs doivent projeter (usage.reconcile compare en intégralité, l'absence de projection déclenche l'alerte « réconciliation déséquilibrée »).
     ctx.usage.consume('agent-registry', (event) => {
       ctx.usage.project('agent-registry', event)
       if (!event.subject.startsWith('agent:')) return
@@ -99,14 +99,14 @@ export class AgentRegistryService extends Service {
       if (!ctx.resourceCore.collection('agent').get(agentId)) return
       if (event.resource.startsWith('mcp:')) return
       if (event.meters.some((meter) => meter.key === 'downloads' || meter.key === 'installs')) return
-      // 网关仅在成功返回后计量：回灌事件按成功调用计；延迟无数据不摊薄均值（见 metrics）
+      // La passerelle ne mesure qu'après un retour en succès : les événements réinjectés comptent comme appels réussis ; l'absence de données de latence ne dilue pas la moyenne (voir metrics)
       const tokens = event.meters
         .filter((meter) => meter.key === 'input_tokens' || meter.key === 'output_tokens' || meter.key === 'tokens')
         .reduce((sum, meter) => sum + meter.value, 0)
       this.recordUsage(agentId, { calls: 1, okCalls: 1, tokens, latencyMs: 0 }, 'gateway')
     })
 
-    // Skill 弃用 → 通知引用 Agent 的负责人（存量引用告警）
+    // Dépréciation d'un Skill → notification des responsables des Agents qui le référencent (alerte sur références existantes)
     ctx.platformBus.on(PlatformEvents.SkillDeprecated, (payload) => {
       const p = payload as { skillId: string; name: string }
       for (const record of ctx.resourceCore.dependencies().find((item) => item.kind === 'skill' && item.toId === p.skillId)) {
@@ -131,15 +131,15 @@ export class AgentRegistryService extends Service {
     return this.ctx.opsStorage.collection<AgentUsageRecord>('agent:usage')
   }
 
-  // -- 模型目录单一事实源（issue #8） -------------------------------------
-  // attrs.model 不再维护静态枚举：可选值 = 模型网关目录（modelgw:models）。
-  // 登记 / PATCH（提供了 model 时）/ 上线门禁三处 fail-fast 校验「目录中存在」；
-  // 渠道是否 online、endpoint 是否就绪属运行时事实，由 modelgw invoke 权威 enforce
-  //（上线后再掉线的场景配置期门禁也拦不住）。
+  // -- Source de vérité unique du catalogue de modèles (issue #8) -------------------------------------
+  // attrs.model ne maintient plus d'énumération statique : valeurs possibles = catalogue de la passerelle de modèles (modelgw:models).
+  // Enregistrement / PATCH (quand model est fourni) / porte de mise en ligne : trois endroits valident en fail-fast « présent dans le catalogue » ;
+  // le statut online du canal et la disponibilité de l'endpoint sont des faits d'exécution, appliqués avec autorité par modelgw invoke
+  // (une déconnexion après mise en ligne n'est pas interceptable par les portes de la phase de configuration).
 
-  /** 模型目录 slugs（modelgw 未装配时返回 null——校验跳过，维持 legacy 行为）。
-   *  cordis 严格注入下直访 ctx.modelGateway 会被 get trap 硬抛「without inject」，
-   *  须走 ctx.reflect.get 软读（同 exec_claim 的 dsh-bridge softRead 口径）。 */
+  /** slugs du catalogue de modèles (null si modelgw n'est pas assemblé — validation sautée, comportement legacy conservé).
+   *  Sous injection stricte cordis, l'accès direct à ctx.modelGateway lève dur via le get trap « without inject »,
+   *  il faut passer par une lecture douce ctx.reflect.get (même périmètre que le softRead dsh-bridge d'exec_claim). */
   private modelCatalogSlugs(): string[] | null {
     try {
       const ctxAny = this.ctx as unknown as { reflect?: { get?: (key: string, optional?: boolean) => unknown } }
@@ -155,9 +155,9 @@ export class AgentRegistryService extends Service {
     }
   }
 
-  /** 校验 attrs.model 在模型目录中存在（不校验 online 状态），不存在抛中文错误并列出可用 slugs。
-   *  空目录放行（引导期豁免）：全新部署一个模型都没登记时，不得把 Agent 登记也锁死——
-   *  目录一旦有登记（成为实际可选面），未登记 slug 一律拒绝。modelgw 缺席（异常装配）同样跳过。 */
+  /** Valide que attrs.model existe dans le catalogue de modèles (sans vérifier le statut online) ; sinon lève une erreur en français listant les slugs disponibles.
+   *  Catalogue vide = passage (exemption de période d'amorçage) : sur un déploiement neuf où aucun modèle n'est enregistré, l'enregistrement d'Agent ne doit pas être verrouillé —
+   *  dès que le catalogue contient au moins une entrée (devenant la surface réellement optionnelle), tout slug non enregistré est refusé. Absence de modelgw (assemblage anormal) : saut pareillement. */
   assertModelInCatalog(model: unknown): void {
     const slug = String(model ?? '').trim()
     if (!slug) return
@@ -168,12 +168,12 @@ export class AgentRegistryService extends Service {
     }
   }
 
-  // -- 注册 -------------------------------------------------------------
+  // -- Enregistrement -------------------------------------------------------------
 
   /**
-   * R7 组织化：汇报线环校验（create/update 涉及 managerId 时调用，保证组织架构是有根森林）。
-   * managerId 为空直接过（不参与汇报线）；指向自身抛错（「汇报线不得指向自己」）；
-   * 指向不存在的 Agent 抛错；沿 managerId 向上回溯（步数上限 100），回到自身抛错（「汇报线成环」）。
+   * Organigramme R7 : validation de cycles de la ligne de reporting (appelée quand create/update touche managerId, garantit que l'organisation est une forêt enracinée).
+   * managerId vide → passe directement (hors ligne de reporting) ; pointant vers soi-même → lève (« la ligne de reporting ne peut pas pointer vers soi ») ;
+   * pointant vers un Agent inexistant → lève ; remontée le long de managerId (plafond de 100 pas), retour à soi-même → lève (« cycle dans la ligne de reporting »).
    */
   assertOrgChartAcyclic(agentId: string, managerId: string | undefined): void {
     const manager = String(managerId ?? '').trim()
@@ -186,10 +186,10 @@ export class AgentRegistryService extends Service {
       const node = collection.get(current)
       if (!node) throw new Error(t('汇报上级 Agent 不存在：{id}', { id: current }))
       const next = String(node.attrs['managerId'] ?? '').trim()
-      if (!next) return // 回溯到顶（链路上无环）
+      if (!next) return // remontée jusqu'au sommet (pas de cycle sur la chaîne)
       current = next
     }
-    // 步数上限兜底：不含自身的既有环数据或超深链路在此截断，同样拒绝
+    // Filet du plafond de pas : les données de cycles préexistants sans soi-même ou les chaînes trop profondes sont tronquées ici, refus pareillement
     throw new Error(t('汇报线成环（或层级超过 100 级）：请修正 managerId'))
   }
 
@@ -208,8 +208,8 @@ export class AgentRegistryService extends Service {
     }
     this.assertModelInCatalog(attrs['model'])
     const agent = this.ctx.resourceCore.create('agent', { ...input, attrs })
-    // R7 组织化：managerId 环校验。id 由 create 内部生成、创建前无从自指，故创建后校验、
-    // 失败即回滚（此刻尚未颁发凭证、未发注册事件，直接从集合移除即干净回滚）。
+    // R7 organigramme : validation de cycles de managerId. L'id est généré en interne par create, impossible de s'auto-référencer avant création, d'où validation après création,
+    // échec = rollback immédiat (à cet instant, aucun identifiant émis ni événement d'enregistrement émis ; la suppression de la collection suffit à un rollback propre).
     if (String(attrs['managerId'] ?? '').trim()) {
       try {
         this.assertOrgChartAcyclic(agent.id, String(attrs['managerId']))
@@ -220,17 +220,17 @@ export class AgentRegistryService extends Service {
     }
     let credential
     if (input.withCredential !== false) {
-      // usage.write：Agent 绕过平台网关直连外部资源时须自推计量（POST /api/usage/record）
+      // usage.write : quand l'Agent contourne la passerelle plateforme pour se connecter en direct à des ressources externes, il doit auto-déclarer sa mesure (POST /api/usage/record)
       credential = this.ctx.authn.createMachineCredential({
         name: `agent:${(agent as any).slug}`,
         refType: 'agent',
         refId: agent.id,
-      // connector.invoke：连接器纳管（open-connector 融合）与 mcp.invoke 同级的独立调用权限点
-      // agent.write：注册后凭自身凭证即可完成接入验证后的资料提报更新（PATCH /api/agents/:id）
-      // modelgw.invoke：模型网关调用（LLM 是 Agent 的第一消耗品；计量经 usage.recorded 回灌本台账）
-      // exec.read/exec.write：执行中枢 exec_* 工具（R10 心跳唤醒/待办拉取；目录条目由 apply() 启动期补录）
-      // agent.a2a.invoke：A2A 协作调用（跨员工派活/续答/取消）。OBO 令牌 scope = 人类 ∩ 本凭证，
-      //   此前凭证缺此点导致「人类无法以代表身份发起协作」（E-2/Q-6），故入默认凭证范围。
+      // connector.invoke : point de permission d'appel autonome au même niveau que mcp.invoke (intégration open-connector)
+      // agent.write : après enregistrement, l'Agent met à jour lui-même ses informations déclarées avec son propre identifiant (PATCH /api/agents/:id)
+      // modelgw.invoke : appel de la passerelle de modèles (le LLM est le premier consommable de l'Agent ; la mesure réinjecte ce registre via usage.recorded)
+      // exec.read/exec.write : outils exec_* du centre d'exécution (réveils heartbeat R10/tirage de tâches ; entrées de catalogue complétées au démarrage par apply())
+      // agent.a2a.invoke : appels de collaboration A2A (confier un travail entre employés/poursuite/annulation). scope du jeton OBO = humain ∩ cet identifiant,
+      //   l'absence de ce point sur l'identifiant empêchait « un humain d'initier une collaboration en tant que représentant » (E-2/Q-6), d'où son inclusion dans le périmètre par défaut.
       scopes: ['mcp.invoke', 'skill.read', 'agent.read', 'agent.write', 'agent.a2a.invoke', 'usage.write', 'connector.invoke', 'modelgw.invoke', 'exec.read', 'exec.write'],
       })
     }
@@ -245,8 +245,8 @@ export class AgentRegistryService extends Service {
   }
 
   /**
-   * 生成 Agent 接入提示词（注册同款模板，平台侧单一事实源，与 app 同构）：
-   * rotate=true 轮换机器凭证 secret（旧值立即失效）并随提示词返回；rotate=false 仅含 client_id。
+   * Génère le prompt d'intégration de l'Agent (même gabarit qu'à l'enregistrement, source de vérité unique côté plateforme, isomorphe à app) :
+   * rotate=true renouvelle le secret de l'identifiant machine (l'ancienne valeur est invalidée immédiatement) et le renvoie avec le prompt ; rotate=false n'inclut que client_id.
    */
   buildOnboardingPrompt(agentId: string, origin: string, opts: { rotate?: boolean } = {}): {
     agentName: string
@@ -270,7 +270,7 @@ export class AgentRegistryService extends Service {
     return { agentName: agent.name, prompt: buildAgentOnboardingPrompt(agent, credential, origin), credential, rotated }
   }
 
-  /** 用户绑定：记录"哪些用户可使用该 Agent"，使用即授权留痕。 */
+  /** Liaison utilisateurs : enregistre « quels utilisateurs peuvent utiliser cet Agent », chaque usage trace l'autorisation. */
   bindUser(agentId: string, userId: string, actor: string): AgentBindingRecord {
     const agent = this.ctx.resourceCore.get('agent', agentId)
     if (!agent) throw new Error(t('Agent 不存在：{id}', { id: agentId }))
@@ -299,7 +299,7 @@ export class AgentRegistryService extends Service {
     return this.bindings().find((item) => item.agentId === agentId)
   }
 
-  /** on-behalf-of：用户通过 Agent 行事时签发身份透传令牌。 */
+  /** on-behalf-of : quand un utilisateur agit via un Agent, émission d'un jeton de transmission d'identité. */
   issueOnBehalfOfToken(agentId: string, verifiedUser: import('../../plugin-authn/src/index.ts').VerifiedPrincipal): { token: string; actChain: unknown[] } {
     const principal = this.machinePrincipal(agentId)
     if (!principal) throw new Error(t('该 Agent 尚未注册机器身份，请先在注册时勾选颁发凭证'))
@@ -307,13 +307,13 @@ export class AgentRegistryService extends Service {
     return { token, actChain: record.actChain }
   }
 
-  // -- SSO 客户端（Agent ↔ 平台身份源打通；owner 自助签发，dev-plan-agent-host-unification M2） --
+  // -- Client SSO (branchement Agent ↔ source d'identité plateforme ; auto-émission par le owner, dev-plan-agent-host-unification M2) --
 
   /**
-   * 上线门禁模式（AGENT_SSO_ENFORCE）：
-   *   '1'（默认）= 未纳管拒审——须有关联 OIDC 客户端、登记 entryUrl 免登通道，或声明 headless（纯后台，须已颁发机器凭证）；
-   *   'oidc'    = 必须签发关联 OIDC 客户端（最严，headless 声明不适用）；
-   *   '0'       = 关闭门禁（仅建议开发环境）。
+   * Mode de la porte de mise en ligne (AGENT_SSO_ENFORCE) :
+   *   '1' (défaut) = refus d'examen sans gouvernance — exige un client OIDC associé, une entryUrl de canal sans login enregistrée, ou une déclaration headless (pur backend, identifiant machine déjà émis obligatoire) ;
+   *   'oidc'    = émission d'un client OIDC associé obligatoire (le plus strict, la déclaration headless ne s'applique pas) ;
+   *   '0'       = porte désactivée (déconseillé hors développement).
    */
   static ssoEnforceMode(): '1' | 'oidc' | '0' {
     const raw = String(process.env.AGENT_SSO_ENFORCE ?? '1').trim().toLowerCase()
@@ -323,9 +323,9 @@ export class AgentRegistryService extends Service {
   }
 
   /**
-   * owner-based 授权（对齐 app 侧）+ 机器环回自助例外：口径统一在 AppRegistryService.ssoManageDecision
-   * （human = owner / authn.oidc.write；机器绑定本 Agent 时可自助，但回调集须全为环回）。
-   * 控制台路由层已先行调用同口径守卫并 403，此处服务层兜底防绕行。
+   * Autorisation owner-based (alignée côté app) + exception d'auto-service en boucle locale machine : périmètre unifié dans AppRegistryService.ssoManageDecision
+   * (human = owner / authn.oidc.write ; une machine liée à cet Agent peut s'auto-servir, mais l'ensemble de callbacks doit être intégralement en boucle locale).
+   * La couche de routes console appelle déjà la même garde et renvoie 403 ; cette couche service est le filet anti-contournement.
    */
   assertSsoManage(
     agent: { id: string; name: string; ownerId: string },
@@ -341,7 +341,7 @@ export class AgentRegistryService extends Service {
     return this.ctx.oidc.clientsForAgent(agentId).find((client) => OidcService.isClientActive(client))
   }
 
-  /** 签发 Agent 关联 OIDC 客户端（name=Agent 名，回填 refType='agent'/refId）；secret 仅本次返回。 */
+  /** Émet le client OIDC associé à l'Agent (name=nom de l'Agent, refType='agent'/refId renseigné en retour) ; le secret n'est renvoyé qu'une fois. */
   createSsoClient(agentId: string, input: {
     redirectUris: string[]
     clientType?: 'confidential' | 'public'
@@ -390,11 +390,11 @@ export class AgentRegistryService extends Service {
     return clients[0]!
   }
 
-  // -- 生命周期（L4 审批流）----------------------------------------------
+  // -- Cycle de vie (flux d'approbation L4)----------------------------------------------
 
   /**
-   * SSO 门禁校验（上线前身份纳管）：返回 active 客户端 clientId（供审批单快照），违规抛错并指路。
-   * 入口点（requestOnline 挂单时）+ 执行点（审批执行器）双重复核，对齐 app 侧门禁语义。
+   * Contrôle de la porte SSO (gouvernance d'identité avant mise en ligne) : renvoie le clientId du client active (pour l'instantané du dossier d'approbation), lève en indiquant la voie en cas d'infraction.
+   * Double revérification au point d'entrée (dépôt de dossier requestOnline) et au point d'exécution (exécuteur d'approbation), alignée sur la sémantique de porte côté app.
    */
   assertOnlineGate(agent: { id: string; name: string; attrs: Record<string, unknown> }): string | undefined {
     const mode = AgentRegistryService.ssoEnforceMode()
@@ -406,9 +406,9 @@ export class AgentRegistryService extends Service {
     }
     const entryUrl = String(agent.attrs['entryUrl'] ?? '').trim()
     if (entryUrl) return undefined
-    // headless 第三纳管通道：Work Body 等纯后台执行体既无交互界面（no entryUrl 可登记）、
-    // 也无需浏览器回调（no OIDC 授权码流程）——显式声明后凭已颁发的机器身份凭证放行。
-    // 凭证即身份锚点：未颁发凭证的 headless 声明放行等于无主体上线，故一并拦截。
+    // Troisième canal de gouvernance headless : les corps d'exécution purement backend comme Work Body n'ont aucune interface (aucune entryUrl à enregistrer),
+    // ni besoin de callbacks navigateur (pas de flux de code d'autorisation OIDC) — après déclaration explicite, passage autorisé sur la foi de l'identifiant machine déjà émis.
+    // L'identifiant est l'ancre d'identité : autoriser une déclaration headless sans identifiant équivaut à une mise en ligne sans sujet, d'où le blocage conjoint.
     if (agent.attrs['headless'] === true) {
       if (!this.machinePrincipal(agent.id)) {
         throw new Error(t('上线门禁：headless（无交互界面）声明要求 Agent 已颁发机器身份凭证（当前未颁发）——请先颁发凭证再重试'))
@@ -423,12 +423,12 @@ export class AgentRegistryService extends Service {
     if (!agent) throw new Error(t('Agent 不存在：{id}', { id: agentId }))
     const errors = this.ctx.resourceCore.validateAttrs('agent', agent.attrs, 'online')
     if (errors.length > 0) throw new Error(t('上线条件不满足：{errors}', { errors: errors.join('；') }))
-    // 上线门禁：底层模型必须是模型目录已登记的 slug（issue #8——「上线成功、派发才报模型不存在」在此拦截）
+    // Porte de mise en ligne : le modèle sous-jacent doit être un slug enregistré dans le catalogue de modèles (issue #8 — « mise en ligne réussie, erreur modèle inexistant à la distribution » interceptée ici)
     this.assertModelInCatalog(agent.attrs['model'])
     const ssoClientId = this.assertOnlineGate(agent)
     return this.ctx.audit.createApproval({
       kind: 'agent.online',
-      // WP-10/L1：L4 高危操作统一高风险——通过需二次确认，通过即落公司级终审标记
+      // WP-10/L1 : les opérations L4 à haut risque sont uniformément à haut risque — validation exige une double confirmation, l'approbation inscrit la marque de revue finale au niveau entreprise
       riskLevel: 'high',
       title: t('Agent 上线：{name}', { name: agent.name }),
       payload: { agentId, requesterId: requester.id, ...(ssoClientId ? { ssoClientId } : {}) },
@@ -441,9 +441,9 @@ export class AgentRegistryService extends Service {
     const agent = this.ctx.resourceCore.get('agent', agentId)
     if (!agent) throw new Error(t('Agent 不存在：{id}', { id: agentId }))
     if (!reason?.trim()) throw new Error(t('下线必须填写原因（护栏要求）'))
-    // REL-02：开单前状态预检（与 requestOnline 的 validateAttrs 同风格的入口护栏，口径直接读生命周期状态机）：
-    // 只有状态机允许流转到 offline 的状态（trial/online）才可开下线审批单，否则批准后执行器必然失败、
-    // 凭证吊销联动也不生效（白挂 L4 单）。执行期 transition 复核保留（双保险不动）。
+    // REL-02 : pré-contrôle de l'état avant l'ouverture du dossier (garde d'entrée dans le style du validateAttrs de requestOnline, périmètre lu directement sur la machine à états du cycle de vie) :
+    // seuls les états où la machine autorise la transition vers offline (trial/online) peuvent ouvrir un dossier d'approbation de mise hors ligne, sinon l'exécuteur échouerait après approbation,
+    // et la révocation des identifiants ne se déclencherait pas (dossier L4 blanc). La revérification de transition en exécution est conservée (double filet inchangé).
     const canOffline = this.ctx.resourceCore.availableTransitions('agent', agentId).some((item) => item.action === 'offline')
     if (!canOffline) {
       const stateLabel = this.ctx.resourceCore.stateLabel('agent', agent.status).label
@@ -452,7 +452,7 @@ export class AgentRegistryService extends Service {
     const impact = this.ctx.resourceCore.impact('agent', agentId)
     return this.ctx.audit.createApproval({
       kind: 'agent.offline',
-      // WP-10/L1：L4 高危操作统一高风险——通过需二次确认，通过即落公司级终审标记
+      // WP-10/L1 : les opérations L4 à haut risque sont uniformément à haut risque — validation exige une double confirmation, l'approbation inscrit la marque de revue finale au niveau entreprise
       riskLevel: 'high',
       title: t('Agent 下线：{name}', { name: agent.name }),
       payload: { agentId, reason, impact: impact.map((item) => `${item.name}（${item.type}）`) },
@@ -470,7 +470,7 @@ export class AgentRegistryService extends Service {
   offline(agentId: string, actor: string, reason: string) {
     const result = this.ctx.resourceCore.transition('agent', agentId, 'offline', actor, reason)
     this.ctx.platformBus.emit(PlatformEvents.AgentOfflined, { id: agentId, name: result.entity.name, actor, reason, type: 'agent', slug: result.entity.slug })
-    // 下线联动：吊销机器凭证（authn 事件监听执行）、通知绑定用户
+    // Liaison de mise hors ligne : révocation des identifiants machine (exécutée par l'écoute d'événements authn), notification des utilisateurs liés
     const principal = this.machinePrincipal(agentId)
     if (principal) this.ctx.authn.disablePrincipal(principal.id, 'Agent 下线联动')
     for (const binding of this.boundUsers(agentId)) {
@@ -495,7 +495,7 @@ export class AgentRegistryService extends Service {
     return this.ctx.resourceCore.transition('agent', agentId, 'submit_trial', actor).entity
   }
 
-  /** 删除后的关联清理：用户绑定、依赖边与机器凭证（禁用即吊销全部令牌）；用量记录与审计数据保留。 */
+  /** Nettoyage des liens après suppression : liaisons utilisateurs, arêtes de dépendance et identifiants machine (désactiver = révoquer tous les jetons) ; enregistrements d'usage et données d'audit conservés. */
   purge(agentId: string): void {
     for (const binding of this.bindings().find((item) => item.agentId === agentId)) this.bindings().remove(binding.id)
     for (const record of this.ctx.resourceCore.dependencies().find((item) => item.fromId === agentId || item.toId === agentId)) {
@@ -505,20 +505,20 @@ export class AgentRegistryService extends Service {
     if (principal && principal.status === 'active') this.ctx.authn.disablePrincipal(principal.id, 'Agent 删除联动')
   }
 
-  // -- 冻结（R10：执行中枢预算联动）---------------------------------------
+  // -- Gel (R10 : liaison budget du centre d'exécution)---------------------------------------
 
-  /** 冻结态查询：attrs.frozenAt 非空即冻结（执行中枢调度入口与预算联动共用判据）。 */
+  /** Requête de l'état de gel : attrs.frozenAt non vide = gelé (critère partagé par l'entrée d'ordonnancement du centre d'exécution et la liaison budget). */
   isFrozen(agentId: string): boolean {
     return Boolean(this.ctx.resourceCore.collection('agent').get(agentId)?.attrs['frozenAt'])
   }
 
   /**
-   * 冻结 Agent（预算超限联动）：attrs 层软态——不动生命周期状态、不吊销凭证；
-   * 设 frozenAt/frozenReason、落审计、广播 agent.frozen，并创建 agent.unfreeze 高危审批单
-   * （人工解冻通道），返回审批单 id。幂等保护：已冻结抛错（重复冻结往往意味着联动重复触发，
-   * 应显式失败而非静默覆盖既有冻结原因）。
-   * 注意：frozenAt/frozenReason 不在 schema 字段表内（不给控制台表单编辑），故直写集合——
-   * resourceCore.update 只合并 schema 字段，但以整 attrs 为基底，后续 PATCH 会保留这两个软态键。
+   * Gèle un Agent (liaison dépassement de budget) : état soft au niveau attrs — ni le cycle de vie ni les identifiants ne sont touchés ;
+   * pose frozenAt/frozenReason, inscrit l'audit, diffuse agent.frozen, et crée un dossier d'approbation à haut risque agent.unfreeze
+   * (canal de dégel humain), renvoie l'id du dossier. Protection idempotente : lève si déjà gelé (un gel répété signale souvent un déclenchement en double de la liaison,
+   * il faut échouer explicitement plutôt qu'écraser silencieusement le motif de gel existant).
+   * Note : frozenAt/frozenReason ne figurent pas dans la table des champs du schema (pas d'édition par formulaire console), d'où l'écriture directe dans la collection —
+   * resourceCore.update ne fusionne que les champs du schema, mais sur la base de l'attrs entier, les PATCH suivants conservent ces deux clés d'état soft.
    */
   freezeAgent(agentId: string, reason: string, actor?: string): string {
     const collection = this.ctx.resourceCore.collection('agent')
@@ -534,12 +534,12 @@ export class AgentRegistryService extends Service {
       action: 'agent.frozen', resourceType: 'agent', resourceId: agentId, resourceName: agent.name,
       result: 'ok', detail: reason,
     })
-    // 事件名平台侧会登记，直接字符串 emit（与 audit.authz.denied 同风格）
+    // Le nom d'événement est enregistré côté plateforme, émission directe par chaîne (même style que audit.authz.denied)
     this.ctx.platformBus.emit('agent.frozen', { agentId, reason, actor })
     const approval = this.ctx.audit.createApproval({
       kind: 'agent.unfreeze',
       title: t('Agent「{name}」预算超限冻结，申请解冻', { name: agent.name }),
-      // 预算熔断属高危治理动作，解冻同样按 L4 高危口径（approve 需二次确认）
+      // La disjonction de budget est une action de gouvernance à haut risque ; le dégel suit pareillement le périmètre L4 à haut risque (approve exige une double confirmation)
       riskLevel: 'high',
       payload: { agentId, reason },
       requesterId: actor ?? 'exec-hub',
@@ -548,7 +548,7 @@ export class AgentRegistryService extends Service {
     return approval.id
   }
 
-  /** 解冻 Agent：清空 frozenAt/frozenReason，落审计并广播 agent.unfrozen。 */
+  /** Dégèle un Agent : vide frozenAt/frozenReason, inscrit l'audit et diffuse agent.unfrozen. */
   unfreezeAgent(agentId: string, by?: string): void {
     const collection = this.ctx.resourceCore.collection('agent')
     const agent = collection.get(agentId)
@@ -566,9 +566,9 @@ export class AgentRegistryService extends Service {
     this.ctx.platformBus.emit('agent.unfrozen', { agentId, by })
   }
 
-  // -- 监测 -------------------------------------------------------------
+  // -- Supervision -------------------------------------------------------------
 
-  /** 归集/回灌入口：source=mcp（McpInvoked，带延迟）| gateway（usage.recorded 回灌，无延迟）。 */
+  /** Entrée de consolidation/réinjection : source=mcp (McpInvoked, avec latence) | gateway (réinjection usage.recorded, sans latence). */
   recordUsage(agentId: string, usage: { sessions?: number; calls: number; okCalls: number; tokens: number; latencyMs: number }, source: 'mcp' | 'gateway' = 'mcp'): void {
     const date = new Date().toISOString().slice(0, 10)
     const gwDelta = source === 'gateway' ? usage.calls : 0
@@ -607,9 +607,9 @@ export class AgentRegistryService extends Service {
   }
 
   /**
-   * Agent 自主提报运营指标（REST /api/agents/:id/metrics-report、工具 agent_metrics_report 汇入）。
-   * 接入义务（与 AI 应用 metrics-report 同级）：语义对齐——同日 dau 取最大、会话数累加、
-   * 用户去重集取并集；userIds 平台侧即刻哈希脱敏后入库，不落明文；可指定 date 补录历史（YYYY-MM-DD）。
+   * Auto-déclaration par l'Agent de ses métriques opérationnelles (REST /api/agents/:id/metrics-report, convergé par l'outil agent_metrics_report).
+   * Obligation d'intégration (au même niveau que metrics-report des Applications IA) : alignement sémantique — dau du même jour = maximum, sessions cumulées,
+   * ensemble dédupliqué d'utilisateurs = union ; userIds sont hachés et anonymisés côté plateforme avant stockage, jamais en clair ; date possible pour compléter l'historique (YYYY-MM-DD).
    */
   reportUsage(agentId: string, report: { dau?: number; sessions?: number; userIds?: string[]; uniqueUsers?: number; date?: string }): void {
     const agent = this.ctx.resourceCore.get('agent', agentId)
@@ -648,28 +648,28 @@ export class AgentRegistryService extends Service {
         ...(hashes.length > 0 ? { userHashes: hashes } : {}),
       })
     }
-    // R10 计量入账：合并落库后把当日 sessions 计入 usage 预算窗口（agent:<slug> 资源行）
+    // Comptabilisation de mesure R10 : après fusion en base, inscrit les sessions du jour dans la fenêtre de budget usage (ligne de ressource agent:<slug>)
     this.meterDailySessions(agent, date, mergedSessions)
   }
 
   /**
-   * R10 计量入账（metrics-report 专用）：把「合并后当日 sessions」登记为 usage 事件，
-   * 供 /api/usage/summary 的 byResource 出现 agent:<slug> 行、执行中枢预算联动据此熔断。
-   * - 价格簿行为结论：无匹配规则时 priceOf 直接抛错（资源 X 无计价规则），且默认 agent:* 前缀
-   *   规则的计价键是 calls（WP-07 反馈回传口径），与本处 sessions 不同——故首次入账前按
-   *   「精确 pattern 优先于前缀」为该 Agent 播种一条零成本 sessions 规则（只补缺不覆盖，
-   *   防冲掉运营对精确条目的调价），保证提报永不因价格缺失失败；
-   * - 幂等：idempotency_key=agent-metrics:<agentId>:<date>，usage.record 走 insertOrIgnore，
-   *   但同键不同内容会被拒绝——故先探同键事件，同日补报只计首次快照（跳过后续入账）；
-   * - org 缺失（usage 事件 org 必填）跳过入账；其余意外失败只告警不阻塞提报主流程
-   *   （计量面是观测属性，与 panel/skillhub 的「计量失败不阻塞」先例一致）。
+   * Comptabilisation de mesure R10 (spécifique metrics-report) : enregistre les « sessions du jour après fusion » comme événement usage,
+   * pour faire apparaître une ligne agent:<slug> dans le byResource de /api/usage/summary et permettre à la liaison budget du centre d'exécution de disjoncter.
+   * - Conclusion sur le comportement du livre de prix : sans règle correspondante, priceOf lève directement (ressource X sans règle de tarification), et la règle par défaut du préfixe agent:*
+   *   a pour clé de tarification calls (périmètre de retour WP-07), différent des sessions d'ici — donc avant la première comptabilisation, on sème pour cet Agent une règle sessions à coût zéro
+   *   selon « pattern exact prioritaire au préfixe » (complète seulement l'absence, n'écrase pas,
+   *   pour ne pas annuler les retarifications opérationnelles des entrées exactes), garantissant que la déclaration n'échoue jamais faute de prix ;
+   * - Idempotence : idempotency_key=agent-metrics:<agentId>:<date>, usage.record passe par insertOrIgnore,
+   *   mais une même clé avec un contenu différent est refusée — on sonde donc d'abord l'événement de même clé ; un complément du même jour ne compte que le premier instantané (comptabilisations suivantes sautées) ;
+   * - org manquant (org obligatoire sur l'événement usage) → comptabilisation sautée ; tout autre échec inattendu alerte sans bloquer le flux principal de déclaration
+   *   (la mesure est un attribut d'observation, cohérent avec le précédent « l'échec de mesure ne bloque pas » de panel/skillhub).
    */
   private meterDailySessions(agent: { id: string; slug: string; orgId: string }, date: string, sessions: number): void {
     try {
       const idempotencyKey = `agent-metrics:${agent.id}:${date}`
-      // 同日已入账（首次快照口径）：本地台账仍照常合并，usage 事件不重复计
+      // Déjà comptabilisé le jour même (périmètre du premier instantané) : le registre local fusionne quand même, l'événement usage ne compte pas en double
       if (this.ctx.txnStore.one('usage_events', { idempotency_key: idempotencyKey })) return
-      if (!agent.orgId) return // usage 事件 org 必填，缺 org 时放弃入账（不阻塞提报）
+      if (!agent.orgId) return // org obligatoire sur l'événement usage ; sans org, on renonce à comptabiliser (sans bloquer la déclaration)
       const pattern = `agent:${agent.slug}`
       if (!this.ctx.usage.priceBook().findOne((item) => item.pattern === pattern)) {
         this.ctx.usage.upsertPrice({
@@ -710,7 +710,7 @@ export class AgentRegistryService extends Service {
     const tokens = rows.reduce((sum, row) => sum + row.tokens, 0)
     const latency = rows.reduce((sum, row) => sum + row.totalLatencyMs, 0)
     const gwCalls = rows.reduce((sum, row) => sum + (row.gwCalls ?? 0), 0)
-    // 均值分母只取带延迟数据的调用（MCP 网关口径）：网关回灌事件无延迟，摊薄会失真
+    // Le dénominateur de la moyenne ne prend que les appels avec données de latence (périmètre passerelle MCP) : les événements réinjectés par la passerelle n'ont pas de latence, les diluer fausserait
     const latencyCalls = Math.max(calls - gwCalls, 0)
     return {
       sessions: rows.reduce((sum, row) => sum + row.sessions, 0),
@@ -719,7 +719,7 @@ export class AgentRegistryService extends Service {
       tokens,
       avgLatencyMs: latencyCalls === 0 ? 0 : Math.round(latency / latencyCalls),
       lastActiveAt: rows.at(-1)?.updatedAt ?? '',
-      // 运营口径（提报）：今日 DAU 与今日对话用户去重数
+      // Périmètre opérationnel (déclaration) : DAU du jour et nombre d'utilisateurs en conversation dédupliqué du jour
       dau: today?.dau ?? 0,
       uniqueUsers: today?.userHashes?.length ?? 0,
       gwCalls,
@@ -740,7 +740,7 @@ export class AgentRegistryService extends Service {
 }
 
 // ---------------------------------------------------------------------------
-// 插件
+// Plugin
 // ---------------------------------------------------------------------------
 
 declare module '@deepseek-ai/cordis' {
@@ -755,17 +755,17 @@ export const inject = ['opsStorage', 'platformBus', 'resourceCore', 'authn', 'oi
 export function apply(ctx: Context) {
   const registry = new AgentRegistryService(ctx)
   ctx.plugin(agentTools)
-  // REL-05 守卫：onboarding-prompt 的 rotate=true 会立即作废旧机器凭证 secret 并一次性明文返回新
-  // secret——与同插件 obo-token（QA A-07）同口径收敛：仅 owner / 绑定用户 / 平台管理员（'*'）可轮换；
-  // 另允许该 Agent 自身机器凭证自助轮换（与 ssoManage「机器绑定本 Agent 可自助」同哲学，既有接入
-  // 流程依赖）。路由处理器在 console（非本插件所有权），故在本插件内以 httpServer 中间件在 HTTP
-  // 边界单点拦截；rotate=false（仅取 client_id）不受影响，令牌校验失败交由 console 鉴权中间件统一 401。
+  // Garde REL-05 : le rotate=true d'onboarding-prompt invalide immédiatement l'ancien secret de l'identifiant machine et renvoie le nouveau en clair une seule
+  // fois — même convergence de périmètre que obo-token du même plugin (QA A-07) : seul owner / utilisateur lié / administrateur plateforme ('*') peut renouveler ;
+  // on autorise aussi l'auto-renouvellement par l'identifiant machine de l'Agent lui-même (même philosophie que ssoManage « une machine liée à cet Agent peut s'auto-servir », dont dépend
+  // le flux d'intégration existant). Le handler de route est dans console (hors propriété de ce plugin), d'où une interception en point unique à la frontière HTTP par un middleware httpServer
+  // dans ce plugin ; rotate=false (client_id seul) n'est pas affecté, l'échec de validation de jeton est traité en 401 unifié par le middleware d'authentification console.
   ctx.httpServer.use((exchange) => {
     if (exchange.method !== 'POST' || !/^\/api\/agents\/[^/]+\/onboarding-prompt$/.test(exchange.path)) return
     if ((exchange.body ?? {}).rotate !== true) return
     const agentId = exchange.path.split('/')[3]!
     const agent = ctx.resourceCore.get('agent', agentId)
-    if (!agent) return // Agent 不存在由原路由处理器报错，此处不干预
+    if (!agent) return // l'inexistence de l'Agent est signalée par le handler de route d'origine, ici sans interférence
     let verified: import('../../plugin-authn/src/index.ts').VerifiedPrincipal
     try {
       const header = String(exchange.headers['authorization'] ?? '')
@@ -789,17 +789,17 @@ export function apply(ctx: Context) {
     exchange.fail(403, 'FORBIDDEN', t('仅 Agent 负责人、绑定用户或平台管理员可轮换「{name}」的机器凭证 secret（对齐 obo-token 守卫口径，REL-05）', { name: agent.name }))
     return true
   })
-  // R7 组织化环校验挂载点决策：console 的 PATCH /api/agents/:id 直接调 resourceCore.update('agent')
-  // 绕过本插件服务层（resourceCore 对 update 不发平台事件，Collection.onChange 的监听器异常也
-  // 只会被吞掉、无法让请求失败），故沿用上方 REL-05 的做法——在 HTTP 边界以中间件单点拦截：
-  // 仅当本次 PATCH 的 attrs 含 managerId 时，按 update() 的合并语义（该字段以本次提交值为准）
-  // 预演环校验，违规 400；其余 PATCH（不含 managerId）原样放行，不触碰既有行为。
+  // Décision du point de montage de la validation de cycles R7 : le PATCH /api/agents/:id de console appelle directement resourceCore.update('agent')
+  // en contournant la couche service de ce plugin (resourceCore n'émet pas d'événement plateforme sur update, et les exceptions des listeners Collection.onChange
+  // ne sont qu'avalées, incapables de faire échouer la requête), d'où la reprise de l'approche REL-05 ci-dessus — interception en point unique à la frontière HTTP par middleware :
+  // seulement si l'attrs de ce PATCH contient managerId, on rejoue la validation de cycle selon la sémantique de fusion d'update() (ce champ prend la valeur soumise),
+  // 400 en cas d'infraction ; les autres PATCH (sans managerId) passent tels quels, sans toucher au comportement existant.
   ctx.httpServer.use((exchange) => {
     if (exchange.method !== 'PATCH' || !/^\/api\/agents\/[^/]+$/.test(exchange.path)) return
     const patchAttrs = ((exchange.body ?? {}) as { attrs?: Record<string, unknown> }).attrs
     if (!patchAttrs || patchAttrs['managerId'] === undefined) return
     const agentId = exchange.path.split('/')[3]!
-    if (!ctx.resourceCore.get('agent', agentId)) return // Agent 不存在由原路由处理器报错，此处不干预
+    if (!ctx.resourceCore.get('agent', agentId)) return // l'inexistence de l'Agent est signalée par le handler de route d'origine, ici sans interférence
     try {
       registry.assertOrgChartAcyclic(agentId, String(patchAttrs['managerId'] ?? ''))
     } catch (error) {
@@ -807,10 +807,10 @@ export function apply(ctx: Context) {
       return true
     }
   })
-  // L4 审批执行器（闭包直持实例，避免插件注入自身服务的循环等待）
+  // Exécuteur d'approbation L4 (l'instance est tenue par la fermeture, évite l'attente circulaire d'auto-injection du plugin)
   ctx.effect(() => ctx.audit.registerExecutor('agent.online', async (payload) => {
-    // 上线门禁执行期复核：审批挂单期间 SSO 客户端可能被禁用/entryUrl 可能被清——
-    // 重跑完整门禁，失效则执行失败留痕（对齐 app 侧点 2 兜底语义）
+    // Revérification en exécution de la porte de mise en ligne : pendant l'examen du dossier, le client SSO peut être désactivé/entryUrl vidée —
+    // on rejoue la porte complète, tout échec fait échouer l'exécution avec trace (aligné sur la sémantique de filet du point 2 côté app)
     const agent = ctx.resourceCore.get('agent', String(payload.agentId))
     if (agent) registry.assertOnlineGate(agent)
     return registry.online(String(payload.agentId), 'approval-center')
@@ -818,15 +818,15 @@ export function apply(ctx: Context) {
   ctx.effect(() => ctx.audit.registerExecutor('agent.offline', async (payload) => {
     return registry.offline(String(payload.agentId), 'approval-center', String(payload.reason ?? '审批通过下线'))
   }))
-  // R10：解冻审批执行器——agent.unfreeze 高危单通过后清冻结态（approve 即解冻，approverId 入审计）
+  // R10 : exécuteur d'approbation de dégel — une fois le dossier à haut risque agent.unfreeze validé, l'état de gel est levé (approve = dégel, approverId inscrit à l'audit)
   ctx.effect(() => ctx.audit.registerExecutor('agent.unfreeze', async (payload, approverId) => {
     registry.unfreezeAgent(String(payload.agentId ?? ''), approverId || 'approval-center')
     return { unfrozen: true }
   }))
-  // R10：执行中枢权限点补录——默认机器凭证要带 exec.read/exec.write，而 plugin-authn 的
-  // createMachineCredential 按权限目录白名单校验 scopes（防拼错），目录缺这两点会导致注册 Agent
-  // 直接失败。本插件无权改 iam 文件，故启动期向 iam 的 PermissionCatalog（运行时 RBAC 注册权威，
-  // 控制台角色编辑器同源读取）幂等补两条；iam 先于本插件加载，数组实例同一。
+  // R10 : complétion des points de permission du centre d'exécution — l'identifiant machine par défaut doit porter exec.read/exec.write, or le
+  // createMachineCredential de plugin-authn valide les scopes contre la liste blanche du catalogue de permissions (anti-faute de frappe) ; l'absence de ces deux points ferait échouer l'enregistrement d'Agent
+  // directement. Ce plugin ne peut modifier les fichiers d'iam, d'où au démarrage un complément idempotent de deux entrées vers le PermissionCatalog d'iam (autorité d'enregistrement RBAC à l'exécution,
+  // même source que l'éditeur de rôles de la console) ; iam est chargé avant ce plugin, l'instance de tableau est la même.
   for (const entry of [
     { point: 'exec.read', label: '读取执行中枢待办与心跳', group: '执行中枢' },
     { point: 'exec.write', label: '执行中枢待办领取与回写', group: '执行中枢' },
@@ -841,7 +841,7 @@ export function apply(ctx: Context) {
   migrateAgentCredentialA2aInvoke(ctx)
 }
 
-/** 一次性迁移：为存量 Agent 机器凭证补 agent.a2a.invoke（OBO 协作调用面；先例 agent-scopes-exec-rw-v1）。 */
+/** Migration unique : complète agent.a2a.invoke sur les identifiants machine des Agents existants (facette d'appel de collaboration OBO ; précédent agent-scopes-exec-rw-v1). */
 function migrateAgentCredentialA2aInvoke(ctx: Context): void {
   const markers = ctx.opsStorage.collection<{ id: string; doneAt: string }>('agent:migrations')
   const MARK = 'agent-scopes-a2a-invoke-v1'
@@ -863,7 +863,7 @@ function migrateAgentCredentialA2aInvoke(ctx: Context): void {
   if (patched > 0) ctx.logger('agent').info(`存量 Agent 凭证迁移完成：${patched} 条补入 agent.a2a.invoke`)
 }
 
-/** 一次性迁移：为存量 Agent 机器凭证补 connector.invoke（幂等标记，先例 agent-scopes-usage-write-v1）。 */
+/** Migration unique : complète connector.invoke sur les identifiants machine des Agents existants (marque d'idempotence, précédent agent-scopes-usage-write-v1). */
 function migrateAgentCredentialConnectorInvoke(ctx: Context): void {
   const markers = ctx.opsStorage.collection<{ id: string; doneAt: string }>('agent:migrations')
   const MARK = 'agent-scopes-connector-invoke-v1'
@@ -885,7 +885,7 @@ function migrateAgentCredentialConnectorInvoke(ctx: Context): void {
   if (patched > 0) ctx.logger('agent').info(`存量 Agent 凭证迁移完成：${patched} 条补入 connector.invoke`)
 }
 
-/** 一次性迁移：为存量 Agent 机器凭证补 usage.write（幂等标记，防止覆盖后续人工调整的 scopes）。 */
+/** Migration unique : complète usage.write sur les identifiants machine des Agents existants (marque d'idempotence, évite d'écraser des scopes ajustés manuellement ensuite). */
 function migrateAgentCredentialScopes(ctx: Context): void {
   const markers = ctx.opsStorage.collection<{ id: string; doneAt: string }>('agent:migrations')
   const MARK = 'agent-scopes-usage-write-v1'
@@ -907,7 +907,7 @@ function migrateAgentCredentialScopes(ctx: Context): void {
   if (patched > 0) ctx.logger('agent').info(`存量 Agent 凭证迁移完成：${patched} 条补入 usage.write`)
 }
 
-/** 一次性迁移：为存量 Agent 机器凭证补 agent.write（注册后可凭自身凭证提报更新资料，先例 agent-scopes-usage-write-v1）。 */
+/** Migration unique : complète agent.write sur les identifiants machine des Agents existants (mise à jour des informations déclarées avec son propre identifiant après enregistrement, précédent agent-scopes-usage-write-v1). */
 function migrateAgentCredentialAgentWrite(ctx: Context): void {
   const markers = ctx.opsStorage.collection<{ id: string; doneAt: string }>('agent:migrations')
   const MARK = 'agent-scopes-agent-write-v1'
@@ -929,7 +929,7 @@ function migrateAgentCredentialAgentWrite(ctx: Context): void {
   if (patched > 0) ctx.logger('agent').info(`存量 Agent 凭证迁移完成：${patched} 条补入 agent.write`)
 }
 
-/** 一次性迁移：为存量 Agent 机器凭证补 modelgw.invoke（先例 agent-scopes-connector-invoke-v1）。 */
+/** Migration unique : complète modelgw.invoke sur les identifiants machine des Agents existants (précédent agent-scopes-connector-invoke-v1). */
 function migrateAgentCredentialModelgwInvoke(ctx: Context): void {
   const markers = ctx.opsStorage.collection<{ id: string; doneAt: string }>('agent:migrations')
   const MARK = 'agent-scopes-modelgw-invoke-v1'
@@ -951,7 +951,7 @@ function migrateAgentCredentialModelgwInvoke(ctx: Context): void {
   if (patched > 0) ctx.logger('agent').info(`存量 Agent 凭证迁移完成：${patched} 条补入 modelgw.invoke`)
 }
 
-/** 一次性迁移：为存量 Agent 机器凭证补 exec.read/exec.write（执行中枢 exec_* 工具所需，先例 agent-scopes-modelgw-invoke-v1）。 */
+/** Migration unique : complète exec.read/exec.write sur les identifiants machine des Agents existants (requis par les outils exec_* du centre d'exécution, précédent agent-scopes-modelgw-invoke-v1). */
 function migrateAgentCredentialExecScopes(ctx: Context): void {
   const markers = ctx.opsStorage.collection<{ id: string; doneAt: string }>('agent:migrations')
   const MARK = 'agent-scopes-exec-rw-v1'
@@ -961,7 +961,7 @@ function migrateAgentCredentialExecScopes(ctx: Context): void {
     (item) => item.type === 'machine' && item.refType === 'agent' && item.status === 'active'
       && !(item.scopes.includes('exec.read') && item.scopes.includes('exec.write')),
   )) {
-    // 两点合并补齐（Set 去重：只缺其一时不会重复另一点）
+    // Complétion fusionnée des deux points (déduplication par Set : quand un seul manque, l'autre n'est pas ajouté en double)
     ctx.authn.principals().update(principal.id, { scopes: [...new Set([...principal.scopes, 'exec.read', 'exec.write'])] })
     ctx.audit.record({
       type: 'change', actorType: 'system', actorId: 'agent-migration', actorName: '凭证范围迁移',

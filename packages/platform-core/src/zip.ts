@@ -1,19 +1,19 @@
 /**
- * 零依赖 ZIP 打包器（STORED/DEFLATE）。
+ * Empaqueteur ZIP sans dépendance (STORED/DEFLATE).
  *
- * 用于 Skill 上架时由 SKILL.md 内容现场生成 skill.zip（项目约束：无第三方依赖、
- * 无构建步骤）。实现 ZIP 规范的最小闭合子集：本地文件头 + 数据 + 中央目录 + EOCD，
- * 压缩走 node:zlib deflateRaw，CRC32 查表实现。产出的 zip 可被主流解压工具识别。
+ * Sert à générer skill.zip à la volée depuis le contenu de SKILL.md lors de la mise en place d'un Skill (contraintes du projet : pas de dépendance tierce,
+ * pas d'étape de build). Implémente le sous-ensemble fermé minimal de la spécification ZIP : en-tête de fichier local + données + répertoire central + EOCD,
+ * compression via deflateRaw de node:zlib, CRC32 par table. Le zip produit est reconnu par les outils d'extraction courants.
  */
 import { deflateRawSync } from 'node:zlib'
 
 export interface ZipEntryInput {
-  /** zip 内的相对路径（统一使用 / 分隔符）。 */
+  /** Chemin relatif dans le zip (séparateur / partout). */
   path: string
   content: string | Buffer
 }
 
-// CRC-32 (IEEE 802.3) 查表
+// Table CRC-32 (IEEE 802.3)
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256)
   for (let n = 0; n < 256; n++) {
@@ -33,7 +33,7 @@ function crc32(buf: Buffer): number {
   return (crc ^ 0xffffffff) >>> 0
 }
 
-/** 打包一组文件为 zip（Buffer）。目录条目自动省略（由解压方按路径创建）。 */
+/** Empaquette un groupe de fichiers en zip (Buffer). Les entrées de répertoire sont automatiquement omises (créées par l'extracteur selon les chemins). */
 export function createZip(entries: ZipEntryInput[]): Buffer {
   const localParts: Buffer[] = []
   const centralParts: Buffer[] = []
@@ -48,14 +48,14 @@ export function createZip(entries: ZipEntryInput[]): Buffer {
     const method = useDeflate ? 8 : 0
     const crc = crc32(data)
 
-    // 本地文件头（version 20 足够支持 deflate；通用位标志 0x0800 = UTF-8 文件名）
+    // En-tête de fichier local (version 20 suffit pour deflate ; drapeau général 0x0800 = noms de fichiers UTF-8)
     const local = Buffer.alloc(30)
     local.writeUInt32LE(0x04034b50, 0)
     local.writeUInt16LE(20, 4)
     local.writeUInt16LE(0x0800, 6)
     local.writeUInt16LE(method, 8)
     local.writeUInt16LE(0, 10) // time
-    local.writeUInt16LE(0x21, 12) // date（1980-02-01，占位固定值保证可复现）
+    local.writeUInt16LE(0x21, 12) // date (1980-02-01, valeur fixe d'occupation garantissant la reproductibilité)
     local.writeUInt32LE(crc, 14)
     local.writeUInt32LE(payload.length, 18)
     local.writeUInt32LE(data.length, 22)
@@ -63,7 +63,7 @@ export function createZip(entries: ZipEntryInput[]): Buffer {
     local.writeUInt16LE(0, 28)
     localParts.push(local, nameBuf, payload)
 
-    // 中央目录条目
+    // Entrées du répertoire central
     const central = Buffer.alloc(46)
     central.writeUInt32LE(0x02014b50, 0)
     central.writeUInt16LE(20, 4) // version made by

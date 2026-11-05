@@ -1,37 +1,37 @@
 #!/usr/bin/env node
 /**
- * refresh-governance-mcp-tokens.mjs —— 治理双身份 MCP 令牌自愈刷新（DSH 侧）。
+ * refresh-governance-mcp-tokens.mjs — auto-réparation par rafraîchissement des jetons MCP des deux identités de gouvernance (côté DSH).
  *
- * 背景：平台机器令牌（client-credentials 换牌）有效期 2 小时（authn.verify 固定 TTL），
- * 客户端侧存的是静态 Bearer，过期即调用失败。DSH 不会自行续期，故需主动刷新。
+ * Contexte : les jetons machine de la plateforme (échange client-credentials) valent 2 heures (TTL fixé par authn.verify),
+ * le client stocke un Bearer statique qui échoue dès expiration. DSH ne se renouvelle pas tout seul, d'où un rafraîchissement proactif nécessaire.
  *
- * 本脚本做四件事（幂等、可反复跑）：
- *   ① 读 ~/.ybkkasi/../ybkkasi/data/governance-credentials.json 取 clientId/clientSecret（不轮换 secret）
- *   ② 经 POST /api/auth/client-credentials 为 operator / reviewer 各换一把新令牌
- *   ③ 经 DSH 连接器 HTTP API（POST http://127.0.0.1:7777/mcp-connector/api，method=configure）
- *      把新令牌写回 DSH 连接并重建 MCP 客户端（DSH 侧重建后即刻生效，无需重启宿主）
- *   ④ 写回核验（防假绿，2026-10-28）：重读 DSH 存储，硬断言两条连接 updatedAt 距今
- *      ≤ --max-staleness-min（默认 120）且存储令牌未过期——连接器"应答 ok 但没落盘"
- *      时脚本以非零退出，gov-token 作业 GT-01 不再被假绿掩盖
+ * Ce script fait quatre choses (idempotent, réexécutable) :
+ *   ① lit ~/.ybkkasi/../ybkkasi/data/governance-credentials.json pour clientId/clientSecret (secret non tourné)
+ *   ② via POST /api/auth/client-credentials, échange un nouveau jeton pour operator / reviewer
+ *   ③ via l'API HTTP du connecteur DSH (POST http://127.0.0.1:7777/mcp-connector/api, method=configure)
+ *      réécrit le nouveau jeton dans la connexion DSH et reconstruit le client MCP (effectif immédiatement côté DSH après reconstruction, sans redémarrer l'hôte)
+ *   ④ contre-vérification d'écriture (anti-faux-vert, 2026-10-28) : relit le stockage DSH, assertion dure que updatedAt des deux connexions date
+ *      de ≤ --max-staleness-min (défaut 120) et que le jeton stocké n'est pas expiré — si le connecteur
+ *      « répond ok sans persister », le script sort en non-zéro et le job gov-token GT-01 n'est plus masqué par un faux vert
  *
- * 失败告警出口（防静默，2026-10-28；全链路只依赖平台能力与 DSH 基座，不引入任何外部 webhook）：
- *   本脚本层（DSH 基座本地，平台不可达时也成立）：
- *     · 追加一条 JSONL 到 <data-dir>/governance-refresh-alerts.jsonl（org daily 作业 D-GOV-ALERTS 计入当日摘要硬失败）
- *     · macOS 本机通知（osascript display notification；launchd gui 域可直接弹出）
- *   作业层（平台可见，org/automation/jobs/gov-token.mjs 负责）：硬失败边缘触发时向平台研发部面板发告警工件，
- *     控制台面板即刻可见；需外推到钉钉群的由平台钉钉桥接（企业应用凭据在平台侧）承接，本地零配置。
+ * Sortie d'alerte d'échec (anti-silence, 2026-10-28 ; toute la chaîne ne dépend que des capacités plateforme et du socle DSH, aucun webhook externe) :
+ *   couche script (local au socle DSH, valable même quand la plateforme est injoignable) :
+ *     · append d'une ligne JSONL dans <data-dir>/governance-refresh-alerts.jsonl (le job org daily D-GOV-ALERTS comptera un échec dur dans le résumé du jour)
+ *     · notification locale macOS (osascript display notification ; le domaine launchd gui peut l'afficher directement)
+ *   couche job (visible plateforme, porté par org/automation/jobs/gov-token.mjs) : sur déclenchement au bord d'un échec dur, envoie un artefact d'alerte au panneau du service R&D plateforme,
+ *     visible immédiatement dans le panneau console ; l'extrusion vers le groupe DingTalk est prise en charge par le pont DingTalk plateforme (identifiants de l'app d'entreprise côté plateforme), zéro config locale.
  *
- * 不打印任何 secret/令牌原文，只报到期时刻。
+ * N'imprime aucun secret/jeton en clair, ne rapporte que l'échéance.
  *
- * 用法：
+ * Usage :
  *   node scripts/refresh-governance-mcp-tokens.mjs [--data-dir <dir>] [--dsh-url http://127.0.0.1:7777]
  *       [--skip-if-fresh] [--fresh-window-min 90] [--force]
  *
- *   --skip-if-fresh   仅当 DSH 里存的令牌剩余寿命 < fresh-window-min 时才换牌+重建（定时器用，避免无谓重建连接）
- *                     窗口 2026-10-28 由 30 调为 90：TTL 120 分钟 + 每小时巡检下，30 分钟窗口只要漏掉一次
- *                     定时触发令牌即过期；90 分钟窗口保证任意单次漏触发都不会断（代价是每小时重建一次连接）
- *   --force           无条件刷新（忽略新鲜度判断）
- *   --max-staleness-min  写回核验允许的 updatedAt 最大陈旧度（默认 120 分钟；skip 路径令牌新鲜 ⇒ 必然 ≤ 30 分钟）
+ *   --skip-if-fresh   n'échange et ne reconstruit que si la durée de vie restante du jeton stocké dans DSH est < fresh-window-min (pour les minuteurs, évite les reconstructions inutiles)
+ *                     fenêtre passée de 30 à 90 le 2026-10-28 : avec un TTL de 120 min + inspection horaire, une seule occurrence manquée
+ *                     de déclenchement horaire suffit à expirer le jeton ; 90 minutes garantit qu'aucun manquement isolé ne coupe (coût : une reconstruction de connexion par heure)
+ *   --force           rafraîchissement inconditionnel (ignore le jugement de fraîcheur)
+ *   --max-staleness-min  staleness maximale d'updatedAt admise par la contre-vérification d'écriture (défaut 120 min ; chemin skip, jeton frais ⇒ forcément ≤ 30 min)
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -57,20 +57,20 @@ const ALERTS_FILE = join(DATA_DIR, 'governance-refresh-alerts.jsonl')
 const log = (msg) => console.log(`[gov-refresh] ${msg}`)
 
 /**
- * 硬失败告警出口（脚本层，任一失败不掩盖原始错误、不影响退出码；平台不可达时也成立）：
- *   ① 落盘 JSONL（org daily 作业 D-GOV-ALERTS 消费，进当日摘要硬失败）
- *   ② macOS 本机通知（DSH 基座所在机器；osascript display notification，launchd gui 域可直接弹出）
- * 平台侧可见的面板告警由 org gov-token 作业在检测到本脚本非零退出时边缘触发投递（见文件头）。
+ * Sortie d'alerte d'échec dur (couche script ; tout échec ne masque pas l'erreur d'origine ni le code de sortie ; valable même plateforme injoignable) :
+ *   ① écriture JSONL (consommée par le job org daily D-GOV-ALERTS, entre dans l'échec dur du résumé du jour)
+ *   ② notification locale macOS (machine hébergeant le socle DSH ; osascript display notification, domaine launchd gui affiche directement)
+ * L'alerte panneau visible côté plateforme est poussée par le job org gov-token au bord d'une sortie non-zéro de ce script (voir en-tête du fichier).
  */
 const alert = async (msg) => {
   try {
     mkdirSync(DATA_DIR, { recursive: true })
     appendFileSync(ALERTS_FILE, JSON.stringify({ at: new Date().toISOString(), platform: PLATFORM_URL, error: String(msg).slice(0, 300) }) + '\n')
-  } catch { /* ① 落盘失败不掩盖原始错误 */ }
+  } catch { /* ① un échec d'écriture ne masque pas l'erreur d'origine */ }
   if (process.platform === 'darwin') {
     try {
       execFileSync('osascript', ['-e', `display notification ${JSON.stringify(String(msg).slice(0, 200))} with title "gov-refresh 治理令牌刷新失败" sound name "Basso"`], { stdio: 'ignore', timeout: 5000 })
-    } catch { /* ② 本机通知不可用（无 GUI 会话等）即跳过 */ }
+    } catch { /* ② notification locale indisponible (pas de session GUI etc.) → saut */ }
   }
 }
 const fail = async (msg) => { console.error(`[gov-refresh] ✘ ${msg}`); await alert(msg); process.exit(1) }
@@ -78,7 +78,7 @@ const fail = async (msg) => { console.error(`[gov-refresh] ✘ ${msg}`); await a
 if (!existsSync(CRED_FILE)) await fail(`凭证文件不存在：${CRED_FILE}（先跑 scripts/register-governance-credentials.mjs）`)
 const cred = JSON.parse(readFileSync(CRED_FILE, 'utf8'))
 
-/** 换牌取机器令牌（client-credentials）。网络层异常同样走告警出口。 */
+/** Échange un jeton machine (client-credentials). Les anomalies réseau passent aussi par la sortie d'alerte. */
 const exchange = async (entry, label) => {
   let response
   let payload = null
@@ -96,7 +96,7 @@ const exchange = async (entry, label) => {
   return payload.data
 }
 
-/** 通过 DSH 连接器 API 更新连接并重建客户端。网络层异常同样走告警出口。 */
+/** Met à jour la connexion via l'API connecteur DSH et reconstruit le client. Les anomalies réseau passent aussi par la sortie d'alerte. */
 const configure = async (params, label) => {
   let response
   let payload = null
@@ -119,7 +119,7 @@ const targets = [
   { key: 'reviewer', serverName: 'ybkk-governance-review', label: 'ybkk-governance-review（评审官）', dshKey: 'custom-ybkk-governance-review' },
 ]
 
-/** 读 DSH 连接存储里已配置的令牌，算剩余寿命（分钟）。读不到返回 null（按「不新鲜」处理）。 */
+/** Lit le jeton configuré dans le stockage de connexions DSH et calcule la durée de vie restante (minutes). Renvoie null si illisible (traité comme « pas frais »). */
 const storedTokenTtlMin = (dshKey) => {
   try {
     if (!existsSync(DSH_STORE)) return null
@@ -165,8 +165,8 @@ for (const target of targets) {
 
 log(`完成：刷新 ${refreshed} 条、跳过 ${skipped} 条（secret 未轮换，无需重新登记）`)
 
-// ---- ④ 写回核验（防假绿）：连接器"应答 ok"不等于"落盘成功"。重读存储硬断言：
-//      两条连接存在、updatedAt 距今 ≤ MAX_STALENESS_MIN、存储令牌未过期。任一不满足即非零退出。
+// ---- ④ Contre-vérification d'écriture (anti-faux-vert) : « le connecteur répond ok » ne vaut pas « écriture réussie ». Relit le stockage et affirme dur :
+//      les deux connexions existent, updatedAt ≤ MAX_STALENESS_MIN, jeton stocké non expiré. Un seul manquement = sortie non-zéro.
 const readStore = () => {
   try { return JSON.parse(readFileSync(DSH_STORE, 'utf8')) } catch { return null }
 }

@@ -1,8 +1,8 @@
 /**
- * 契约清单 lint：校验全部平台插件 manifest（plugin.yaml + manifest/*.yaml）可解析。
- * 使用与市场契约解析器相同的 YAML 子集解析器（platform-core yaml.ts）——
- * 平台自己的清单与第三方五面走同一套语法口径（吃自己的狗粮）。
- * 用法：npm run lint:manifests
+ * Lint des manifestes de contrat : valide que les manifest de tous les plugins plateforme (plugin.yaml + manifest/*.yaml) sont analysables.
+ * Utilise le même analyseur du sous-ensemble YAML que l'analyseur de contrats du marketplace (platform-core yaml.ts) —
+ * les manifestes de la plateforme elle-même et les cinq facettes tierces suivent la même syntaxe (on mange sa propre nourriture pour chiens).
+ * Usage : npm run lint:manifests
  */
 import { readdir, readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
@@ -31,7 +31,7 @@ for (const pkg of await readdir(packagesDir, { withFileTypes: true })) {
     await readFile(pluginYaml, 'utf8')
     files = ['plugin.yaml', ...files]
   } catch {
-    // 无 plugin.yaml 的包跳过
+    // paquets sans plugin.yaml sautés
   }
   for (const rel of files) {
     total++
@@ -48,8 +48,8 @@ for (const pkg of await readdir(packagesDir, { withFileTypes: true })) {
   }
 }
 
-// -- 行业场景图谱（review-dsh-agent-panel-v2 Phase 2）：packages/*/scenegraphs/*.json 逐个过 validateScenegraph
-// 与运行时装载（scenegraph.ts）同一套规则，故意配错即红
+// -- Graphes de scénarios sectoriels (review-dsh-agent-panel-v2 Phase 2) : chaque packages/*/scenegraphs/*.json passe par validateScenegraph
+// avec les mêmes règles que le chargement à l'exécution (scenegraph.ts) ; une erreur volontaire = rouge
 let sgTotal = 0
 let sgFailed = 0
 for (const pkg of await readdir(packagesDir, { withFileTypes: true })) {
@@ -78,7 +78,7 @@ for (const pkg of await readdir(packagesDir, { withFileTypes: true })) {
 
 console.log(`\n清单校验：${total - failed}/${total} 通过；场景图谱：${sgTotal - sgFailed}/${sgTotal} 通过`)
 
-// -- 契约↔实现双向一致性（OPT-P0-01，2026-09-12）：代码注册面 ↔ 清单声明面双向比对 --
+// -- Cohérence bidirectionnelle contrat↔implémentation (OPT-P0-01, 2026-09-12) : surface d'enregistrement du code ↔ surface déclarative du manifeste --
 const contract = await runContractLint(root)
 const exemptCount = contract.diffs.filter((d) => d.severity === 'exempt').length
 console.log(`契约比对：路由 代码${contract.stats.codeRoutes}/清单${contract.stats.manifestRoutes} · 工具 代码${contract.stats.codeTools}/清单${contract.stats.manifestTools} · 差异 ${contract.diffs.filter((d) => d.severity === 'red').length} 红 ${contract.diffs.filter((d) => d.severity === 'warn').length} 警${exemptCount > 0 ? ` · ${exemptCount} 豁免（见 scripts/contract-lint.exemptions.json）` : ''}`)
@@ -88,7 +88,7 @@ for (const diff of contract.diffs) {
 }
 if (!contract.ok) console.error('契约比对存在红项：实现与清单漂移，拒绝放行')
 
-// -- 定时器卫生（OPT-P3-02）：setInterval 必须就近配 unref（保活语义需注释豁免）或文件内存在 clearInterval 生命周期管理 --
+// -- Hygiène des minuteurs (OPT-P3-02) : chaque setInterval doit être suivi d'un unref proche (une sémantique de keepalive exige une exemption commentée) ou le fichier doit gérer son cycle par clearInterval --
 const timerReport = await scanTimerHygiene(packagesDir)
 console.log(`定时器卫生：${timerReport.total} 处 setInterval，${timerReport.violations} 处违规`)
 for (const message of timerReport.messages) console.error(`  ⚠ [timer_hygiene] ${message}`)

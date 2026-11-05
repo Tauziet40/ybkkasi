@@ -1,6 +1,6 @@
 /**
- * 逐插件引导打点（诊断用，不入库）：复刻 boot-all 序列，定位挂起插件。
- * 用法：node scripts/boot-trace.mjs 7417 ./data-trace
+ * Instrumentation du démarrage plugin par plugin (diagnostic, sans stockage) : réplique la séquence de boot-all pour localiser les plugins suspendus.
+ * Usage : node scripts/boot-trace.mjs 7417 ./data-trace
  */
 import { Context } from '@deepseek-ai/cordis'
 import * as platformCore from '../packages/platform-core/src/index.ts'
@@ -52,7 +52,7 @@ await step('app', () => ctx.plugin(app))
 await step('connect(host)', () => ctx.plugin(connect, { role: 'host' }))
 await step('update', () => ctx.plugin(update))
 await step('portal', () => ctx.plugin(portal))
-// 包装 console.apply：捕获静默异常 / 静默跳过（0ms 之谜）
+// Enveloppe console.apply : capture les exceptions silencieuses / les sauts silencieux (le mystère des 0 ms)
 const consoleApplyOrig = consolePlugin.apply
 const consoleWrapped = {
   name: consolePlugin.name,
@@ -80,4 +80,4 @@ try {
   process.stdout.write(`${res.status} ${await res.text()}\n`)
 } catch (error) { process.stdout.write(`ERR ${error.message}\n`) }
 console.log(`[trace] DEMO_SEED=${process.env.DEMO_SEED ?? '(unset)'}`)
-await new Promise(() => {}) // 保持进程存活供外部探活
+await new Promise(() => {}) // maintient le processus en vie pour la sonde externe

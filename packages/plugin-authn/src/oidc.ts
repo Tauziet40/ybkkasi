@@ -1,24 +1,24 @@
 /**
- * OIDC Provider（生态设计 v1.2 第 6 步，模式 B：平台作为外部应用的身份源）。
+ * OIDC Provider (conception écosystème v1.2 étape 6, mode B : la plateforme comme source d'identité des applications externes).
  *
- * 授权码模式（浏览器授权流）：
- *   GET  /oauth/authorize —— 校验 client/redirect_uri/scope/强制 PKCE(S256)，落授权请求，
- *                            302 平台授权页 /#/oauth/authorize?req=<id>（失败一律 302 平台错误页，
- *                            绝不携带外部 redirect_uri，防开放重定向）；
- *   POST /api/authn/oidc/authorize —— 登录用户在授权页确认（human-only）→ 签发一次性 code →
- *                            返回回跳地址（含 code/state/iss，RFC 9207 防 mix-up）；
- *   POST /oauth/token —— code 换 RS256 令牌对；client_secret_basic 与 client_secret_post 双认证，
- *                            form-encoded 与 JSON 双编码；refresh_token 轮转 grant；
- *   GET  /oauth/userinfo —— NormalizedProfile（org/角色/租户），冻结/离职即时 401；
- *   GET  /oauth/end_session —— RP 发起登出（id_token_hint 定位 client，回跳命中 postLogoutUris）；
- *   POST /oauth/revoke —— RFC 7009 令牌吊销（access jti 黑名单 / refresh 整链）。
+ * Mode code d'autorisation (flux d'autorisation navigateur) :
+ *   GET  /oauth/authorize — valide client/redirect_uri/scope/PKCE forcé (S256), enregistre la requête d'autorisation,
+ *                            302 vers la page d'autorisation plateforme /#/oauth/authorize?req=<id> (tout échec → 302 vers la page d'erreur plateforme,
+ *                            jamais avec le redirect_uri externe, anti-redirection ouverte) ;
+ *   POST /api/authn/oidc/authorize — l'utilisateur connecté confirme sur la page (human-only) → émission d'un code à usage unique →
+ *                            renvoi de l'adresse de retour (avec code/state/iss, anti-mix-up RFC 9207) ;
+ *   POST /oauth/token — le code échange une paire de jetons RS256 ; double authentification client_secret_basic et client_secret_post,
+ *                            double encodage form-encoded et JSON ; grant refresh_token en rotation ;
+ *   GET  /oauth/userinfo — NormalizedProfile (org/rôles/tenant), gelé/départ → 401 immédiat ;
+ *   GET  /oauth/end_session — logout initié par le RP (id_token_hint localise le client, retour si postLogoutUris trouvé) ;
+ *   POST /oauth/revoke — révocation de jetons RFC 7009 (liste noire jti des access / chaîne entière des refresh).
  *
- * 密钥：RS256 数组化 JWKS（kid 匹配验签，签名恒用最新 key；旧 key 24h 宽限保留验签）。
- * CORS：纯前端（public + PKCE）客户端在浏览器跨域直调 /oauth/token、/oauth/userinfo、
- *      /oauth/revoke 与 discovery 端点——允许来源 = 已登记客户端 redirect_uri 的 origin
- *      ∪ OIDC_CORS_ORIGINS（逗号分隔），OPTIONS 预检统一 204（见 allowedCorsOrigins）。
- * 注意：/oauth/* 与 /.well-known/* 不受控制台 Bearer 中间件约束（协议公开端点）；
- *      /api/authn/oidc/auth-requests/:id 为公开查询（仅回显客户端名/scope，不泄露 redirect_uri）。
+ * Clés : JWKS en tableau RS256 (vérification par correspondance kid, signature toujours avec la clé la plus récente ; ancienne clé conservée 24 h en grâce pour vérification).
+ * CORS : les clients purement frontend (public + PKCE) appellent en cross-origin navigateur /oauth/token, /oauth/userinfo,
+ *      /oauth/revoke et les points discovery — origines autorisées = origin des redirect_uri des clients enregistrés
+ *      ∪ OIDC_CORS_ORIGINS (séparés par virgules), préflight OPTIONS répond uniformément 204 (voir allowedCorsOrigins).
+ * Note : /oauth/* et /.well-known/* ne sont pas soumis au middleware Bearer console (points protocole publics) ;
+ *      /api/authn/oidc/auth-requests/:id est une requête publique (n'affiche que le nom du client/scope, ne divulgue pas redirect_uri).
  */
 import { createHash, generateKeyPairSync, randomUUID, sign as rsSign, verify as rsVerify, createPublicKey } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
@@ -28,7 +28,7 @@ import { Service } from '@deepseek-ai/cordis'
 import { PlatformEvents, sha256Hex, newId, generateSecret, type Collection, type RecordBase } from '../../platform-core/src/index.ts'
 import { t } from '../../platform-i18n/src/index.ts'
 
-/** OIDC 协议端点错误（RFC 6749 §5.2 状态码归位：invalid_grant 等 400、invalid_client 401）。 */
+/** Erreurs des points de protocole OIDC (remise en place des statuts RFC 6749 §5.2 : invalid_grant etc. → 400, invalid_client → 401). */
 export class OidcEndpointError extends Error {
   status: number
   error: string
@@ -46,21 +46,21 @@ export interface OidcClientRecord extends RecordBase {
   clientId: string
   clientSecretHash: string
   redirectUris: string[]
-  /** 关联资源（'app'=AI 应用 / 'agent'=Agent 本体；详情页 owner 自助签发时回填）。 */
+  /** Ressource associée ('app' = Application IA / 'agent' = corps d'Agent ; renseigné lors de l'auto-émission par le owner depuis la page de détail). */
   refType?: 'app' | 'agent'
   refId?: string
-  /** 缺省 active（旧数据零迁移）。 */
+  /** active par défaut (zéro migration des anciennes données). */
   status?: 'active' | 'disabled'
-  /** 授权页是否需要用户显式勾选同意。 */
+  /** La page d'autorisation exige-t-elle un consentement explicite de l'utilisateur. */
   consentRequired?: boolean
-  /** RP 发起登出的合法回跳地址白名单。 */
+  /** Liste blanche des adresses de retour légitimes pour un logout initié par le RP. */
   postLogoutUris?: string[]
   description?: string
-  /** confidential（持有 secret）/ public（纯前端 SPA，免 secret + 强制 PKCE + 不发 refresh）。 */
+  /** confidential (détient un secret) / public (SPA pure frontend, sans secret + PKCE forcé + pas de refresh). */
   clientType?: 'confidential' | 'public'
 }
 
-/** 浏览器授权流第一跳落库的授权请求（5 分钟、单次消费）。 */
+/** Requête d'autorisation stockée au premier saut du flux navigateur (5 min, consommation unique). */
 export interface OidcAuthRequestRecord extends RecordBase {
   clientId: string
   redirectUri: string
@@ -81,14 +81,14 @@ export interface OidcCodeRecord extends RecordBase {
   state: string
   nonce?: string
   scope: string
-  /** PKCE（S256）：换 token 必须携带匹配的 code_verifier（当前强制）。 */
+  /** PKCE (S256) : l'échange de token doit porter le code_verifier correspondant (actuellement forcé). */
   codeChallenge?: string
   codeChallengeMethod?: 'S256'
   expiresAt: string
   usedAt?: string
 }
 
-/** OIDC refresh token（轮转一次一换；重放整链吊销；库存仅哈希）。 */
+/** refresh token OIDC (rotation à chaque usage ; rejeu → révocation de la chaîne entière ; stockage en hash seul). */
 export interface OidcRefreshRecord extends RecordBase {
   clientId: string
   userId: string
@@ -101,7 +101,7 @@ export interface OidcRefreshRecord extends RecordBase {
   expiresAt: string
 }
 
-/** RFC 7009：无状态 access token（JWT）的 jti 吊销黑名单。 */
+/** RFC 7009 : liste noire de révocation des jti des access token sans état (JWT). */
 export interface OidcDeniedJtiRecord extends RecordBase {
   jti: string
   expiresAt: string
@@ -113,23 +113,23 @@ interface OidcKeyMaterial {
   publicPem: string
   kid: string
   createdAt: string
-  /** 轮换退役时间：24h 宽限期内保留验签与 JWKS 公布。 */
+  /** Horodatage de retrait de la rotation : 24 h de grâce conservant la vérification et la publication JWKS. */
   retiredAt?: string
 }
 
-/** 旧密钥的验签/JWKS 宽限期（与平台会话签名密钥轮换惯例对齐）。 */
+/** Période de grâce de vérification/JWKS des anciennes clés (alignée sur la convention de rotation des clés de signature de session de la plateforme). */
 const KEY_GRACE_MS = 24 * 3600_000
-/** 授权码与授权请求 TTL（5 分钟）。 */
+/** TTL du code d'autorisation et de la requête d'autorisation (5 min). */
 const AUTHREQ_TTL_MS = (Number(process.env.OIDC_AUTHREQ_TTL_SECONDS ?? 300) || 300) * 1000
 const CODE_TTL_MS = (Number(process.env.OIDC_CODE_TTL_SECONDS ?? 300) || 300) * 1000
-/** access token TTL（默认 2h，环境变量可调）。 */
+/** TTL de l'access token (défaut 2 h, ajustable par variable d'environnement). */
 const ACCESS_TTL_SECONDS = Number(process.env.OIDC_ACCESS_TTL_SECONDS ?? 7200) || 7200
-/** refresh token TTL（默认 7d）。 */
+/** TTL du refresh token (défaut 7 j). */
 const REFRESH_TTL_SECONDS = Number(process.env.OIDC_REFRESH_TTL_SECONDS ?? 604800) || 604800
 
 export class OidcService extends Service {
   static readonly provide = 'oidc'
-  /** authn：复用登录限流；resourceCore：OIDC 客户端关联应用名回显（resource-core 先于本服务就绪，无环）。 */
+  /** authn : réutilise la limitation de connexion ; resourceCore : écho du nom d'application associé aux clients OIDC (resource-core prêt avant ce service, pas de cycle). */
   static readonly inject = ['authn', 'resourceCore']
 
   private keys: OidcKeyMaterial[]
@@ -151,8 +151,8 @@ export class OidcService extends Service {
     ctx.effect(() => () => {
       if (this.cleanupTimer) clearInterval(this.cleanupTimer)
     })
-    // -- 生命周期联动（真实事件名，见 platform-core/src/bus.ts） --------------------------
-    // 应用下线/归档 → 关联客户端禁用（refresh 链一并吊销）；上线/恢复 → 重新启用；改名 → 同步
+    // -- Cascades du cycle de vie (noms d'événements réels, voir platform-core/src/bus.ts) --------------------------
+    // Application retirée/archivée → client associé désactivé (chaînes de refresh révoquées ensemble) ; remise en ligne/restauration → réactivation ; renommage → synchronisation
     ctx.platformBus.on(PlatformEvents.AppOfflined, (payload) => {
       const { id } = payload as { id: string }
       for (const client of this.clientsForApp(id)) this.disableClient(client.id, t('应用下线联动'))
@@ -169,7 +169,7 @@ export class OidcService extends Service {
       const { id, name } = payload as { id: string; name: string }
       for (const client of this.clientsForApp(id)) this.updateClient(client.id, { name })
     })
-    // Agent 下线 → 关联客户端禁用（refresh 链一并吊销）；上线/恢复 → 重新启用（OIDC-agent 关联）
+    // Agent mis hors ligne → client associé désactivé (chaînes de refresh révoquées ensemble) ; remise en ligne/restauration → réactivation (association OIDC-agent)
     ctx.platformBus.on(PlatformEvents.AgentOfflined, (payload) => {
       const { id } = payload as { id: string }
       for (const client of this.clientsForAgent(id)) this.disableClient(client.id, t('Agent 下线联动'))
@@ -178,7 +178,7 @@ export class OidcService extends Service {
       const { id } = payload as { id: string }
       for (const client of this.clientsForAgent(id)) this.enableClient(client.id)
     })
-    // 账号冻结/注销 → 该用户全部 OIDC refresh 链即时失效（无需等过期）
+    // Compte gelé/désactivé → toutes les chaînes de refresh OIDC de cet utilisateur s'invalident immédiatement (sans attendre l'expiration)
     ctx.platformBus.on(PlatformEvents.UserFrozen, (payload) => {
       const { userId, reason } = payload as { userId: string; reason: string }
       this.revokeUserRefreshChains(userId, t('账号冻结联动：{reason}', { reason }))
@@ -186,18 +186,18 @@ export class OidcService extends Service {
   }
 
   /**
-   * 签发方 issuer（#15，2026-10-29）：解析优先级——
-   *   1. OIDC_ISSUER 显式声明（多域名/严格部署的固定锚点，最高优先）；
-   *   2. 按请求派生：x-forwarded-host/host + x-forwarded-proto（反代场景，与 console requestOrigin
-   *      同口径）+ externalBase 前缀——公网域名部署时 discovery/签发/校验自动对齐，远程 SSO 开箱可用；
-   *   3. 回落 http://127.0.0.1:<port><base>（本机调试）。
-   * 不传请求上下文时保持旧行为（env ?? 环回）——非请求面调用（测试/内部校验）零感知。
+   * Émetteur issuer (#15, 2026-10-29) : priorité de résolution —
+   *   1. déclaration explicite OIDC_ISSUER (ancre fixe des déploiements multi-domaines/stricts, priorité maximale) ;
+   *   2. dérivation par requête : x-forwarded-host/host + x-forwarded-proto (scénario reverse proxy, même périmètre que requestOrigin de console
+   *      ) + préfixe externalBase — sur un déploiement à domaine public, discovery/émission/vérification s'alignent automatiquement, le SSO distant marche d'emblée ;
+   *   3. repli http://127.0.0.1:<port><base> (débogage local).
+   * Sans contexte de requête, comportement historique conservé (env ?? boucle locale) — les appels hors facette requête (tests/validations internes) ne perçoivent rien.
    *
-   * 安全审查 P1-06（2026-10-31）：请求派生受外部头（x-forwarded-host/host）影响，公网上可被
-   * 伪造头改写 discovery 元数据。收敛规则：
-   *   - OIDC_ISSUER 已设 → 永远返回固定值，不再按请求派生（固定发行方）；
-   *   - 未设时仅当派生 host 命中 OIDC_TRUSTED_HOSTS 白名单（逗号分隔精确匹配）才采信，
-   *     否则回落环回（fail-closed）——公网部署必须二选一显式配置。
+   * Revue sécurité P1-06 (2026-10-31) : la dérivation par requête dépend d'en-têtes externes (x-forwarded-host/host) et peut, sur Internet public,
+   * être falsifiée pour réécrire les métadonnées de discovery. Règles de convergence :
+   *   - OIDC_ISSUER défini → valeur fixe toujours renvoyée, plus de dérivation par requête (émetteur fixe) ;
+   *   - non défini : l'hôte dérivé n'est admis que s'il figure dans la liste blanche OIDC_TRUSTED_HOSTS (correspondance exacte, séparée par virgules),
+   *     sinon repli sur la boucle locale (fail-closed) — un déploiement public doit configurer explicitement l'un des deux.
    */
   issuer(origin?: { headers: import('node:http').IncomingHttpHeaders }): string {
     if (process.env.OIDC_ISSUER) return process.env.OIDC_ISSUER
@@ -205,7 +205,7 @@ export class OidcService extends Service {
     return derived ?? `http://127.0.0.1:${this.ctx.httpServer.port}${this.ctx.httpServer.externalBase}`
   }
 
-  /** 按请求头派生对外 issuer（host 缺失/不在可信白名单返回 undefined 走回落）。 */
+  /** Dérive l'issuer externe depuis les en-têtes de requête (undefined si host absent/hors liste blanche → repli). */
   private deriveIssuerFromRequest(origin?: { headers: import('node:http').IncomingHttpHeaders }): string | undefined {
     if (!origin) return undefined
     const header = (name: string): string | undefined => {
@@ -216,9 +216,9 @@ export class OidcService extends Service {
     if (!host) return undefined
     const trusted = new Set(String(process.env.OIDC_TRUSTED_HOSTS ?? '')
       .split(',').map((item) => item.trim().toLowerCase()).filter(Boolean))
-    // 回环主机隐式可信（dsh-bridge 同源回跳等本机流程依赖）：伪造 Host: 127.x 只能把
-    // 重定向指回攻击者自己的机器，无目标可伤；非回环主机必须显式登记白名单。
-    // host 头可带端口（127.0.0.1:7300），经 URL 解析取裸主机名再比对。
+    // Hôtes en boucle locale implicitement dignes de confiance (les flux locaux comme les retours same-origin dsh-bridge en dépendent) : un Host: 127.x falsifié ne peut rediriger
+    // que vers la propre machine de l'attaquant, aucune cible à blesser ; les hôtes hors boucle locale doivent être explicitement enregistrés dans la liste blanche.
+    // L'en-tête host peut porter un port (127.0.0.1:7300) : parsing URL pour extraire le nom d'hôte nu avant comparaison.
     let hostname = ''
     try { hostname = new URL(`http://${host}`).hostname.toLowerCase() } catch { hostname = '' }
     const loopback = hostname === 'localhost' || hostname === '::1' || hostname === '0.0.0.0' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)
@@ -227,14 +227,14 @@ export class OidcService extends Service {
     return `${proto}://${host}${this.webBase()}`
   }
 
-  /** JWT 校验可接受的 issuer 集合：OIDC_ISSUER 已设即仅固定值；未设时并入可信白名单派生值。 */
+  /** Ensemble des issuers acceptables pour la vérification JWT : OIDC_ISSUER défini → valeur fixe seule ; sinon union avec les valeurs dérivées de la liste blanche de confiance. */
   private acceptedIssuers(origin?: { headers: import('node:http').IncomingHttpHeaders }): string[] {
     const staticIssuer = this.issuer()
     const derived = this.deriveIssuerFromRequest(origin)
     return derived !== undefined && derived !== staticIssuer ? [staticIssuer, derived] : [staticIssuer]
   }
 
-  /** 平台 SPA 内部页面的对外前缀（独立形态 ''，dsh 挂载形态 '/rq'）。 */
+  /** Préfixe externe des pages internes de la SPA plateforme ('' en forme autonome, '/rq' en forme montée dsh). */
   private webBase(): string {
     return this.ctx.httpServer?.externalBase ?? ''
   }
@@ -277,9 +277,9 @@ export class OidcService extends Service {
     return (client.status ?? 'active') === 'active'
   }
 
-  // -- 客户端生命周期 -------------------------------------------------------
+  // -- Cycle de vie des clients -------------------------------------------------------
 
-  /** 对外脱敏（QA SEC-02）：clientSecretHash 为凭证哈希，客户端列表/详情响应一律不外发（对齐 principals 的脱敏口径）；内部校验仍走 clients()/clientByClientId() 原始记录。 */
+  /** Anonymisation externe (QA SEC-02) : clientSecretHash est un hash d'identifiant, jamais expédié dans les réponses de liste/détail des clients (même périmètre d'anonymisation que principals) ; la validation interne passe toujours par les enregistrements bruts clients()/clientByClientId(). */
   private publicClient<C extends OidcClientRecord>(client: C): Omit<C, 'clientSecretHash'> {
     const { clientSecretHash, ...safe } = client
     void clientSecretHash
@@ -298,7 +298,7 @@ export class OidcService extends Service {
   }): { client: Omit<OidcClientRecord, 'clientSecretHash'>; clientSecret: string } {
     const clientType = input.clientType ?? 'confidential'
     const clientId = 'oc-' + newId('id').slice(3)
-    // public 客户端无 secret（强制 PKCE、不发 refresh）；confidential 一次性生成
+    // Les clients public n'ont pas de secret (PKCE forcé, pas de refresh) ; les confidential le génèrent une fois
     const clientSecret = clientType === 'public' ? '' : generateSecret('ocs')
     const client = this.clients().insert({
       id: newId('oc'),
@@ -332,7 +332,7 @@ export class OidcService extends Service {
     return this.publicClient(this.clients().update(id, patch))
   }
 
-  /** 轮换 secret：旧值立即失效，新值仅本次返回。 */
+  /** Rotation du secret : ancienne valeur invalidée immédiatement, la nouvelle n'est renvoyée que cette fois. */
   rotateSecret(id: string): { client: Omit<OidcClientRecord, 'clientSecretHash'>; clientSecret: string } {
     const client = this.clients().get(id)
     if (!client) throw new Error(t('OIDC 客户端不存在：{id}', { id }))
@@ -353,12 +353,12 @@ export class OidcService extends Service {
     return this.publicClient(this.clients().update(id, { status: 'active' }))
   }
 
-  // -- 浏览器授权流 ---------------------------------------------------------
+  // -- Flux d'autorisation navigateur ---------------------------------------------------------
 
-  /** 允许对外签发的 scope 白名单（不得任意申请并原样进 JWT）。 */
+  /** Liste blanche des scopes émis (aucune demande arbitraire ne doit entrer telle quelle dans le JWT). */
   static readonly ALLOWED_SCOPES = ['openid', 'profile', 'email']
 
-  /** 授权码格式校验（S256 应为 43-128 位 base64url）。 */
+  /** Validation du format du code d'autorisation (S256 : 43-128 caractères base64url attendus). */
   private static assertPkceChallenge(challenge: string | undefined): void {
     if (challenge === undefined || !/^[A-Za-z0-9_-]{43,128}$/.test(challenge)) {
       throw new OidcEndpointError(302, 'invalid_request', t('缺少或非法的 code_challenge（本 Provider 强制 PKCE S256，43-128 位 base64url）'))
@@ -366,8 +366,8 @@ export class OidcService extends Service {
   }
 
   /**
-   * 发起授权（GET /oauth/authorize）：协议面校验 → 落授权请求 → 302 平台授权页。
-   * 任一校验失败抛 OidcEndpointError（路由层统一 302 平台错误页，不携带外部 redirect_uri）。
+   * Initie l'autorisation (GET /oauth/authorize) : validation de la facette protocole → enregistrement de la requête → 302 vers la page d'autorisation plateforme.
+   * Tout échec de validation lève OidcEndpointError (la couche de routes répond uniformément 302 vers la page d'erreur plateforme, sans redirect_uri externe).
    */
   beginAuthorization(input: {
     responseType?: string
@@ -411,7 +411,7 @@ export class OidcService extends Service {
     })
   }
 
-  /** 授权页公开查询（不泄露 redirect_uri / secret 等内部字段）。 */
+  /** Requête publique de la page d'autorisation (ne divulgue pas redirect_uri / secret ni les champs internes). */
   authRequestInfo(reqId: string): { clientName: string; appRef?: { id: string; name: string }; scope: string; consentRequired: boolean } {
     const req = this.authRequests().get(reqId)
     if (!req || req.consumedAt || new Date(req.expiresAt).getTime() < Date.now()) {
@@ -434,9 +434,9 @@ export class OidcService extends Service {
   }
 
   /**
-   * 授权页确认（POST /api/authn/oidc/authorize，human-only）：
-   * 校验授权请求 →（需要同意时必须显式 consent）→ 签发一次性 code → 返回回跳地址。
-   * consent 显式为 false → access_denied 回跳 + denied 事件；缺省 → 400（未表达同意）。
+   * Confirmation de la page d'autorisation (POST /api/authn/oidc/authorize, human-only) :
+   * validation de la requête d'autorisation → (consentement explicite obligatoire si exigé) → émission d'un code à usage unique → renvoi de l'adresse de retour.
+   * consent explicitement false → retour access_denied + événement denied ; défaut → 400 (consentement non exprimé).
    */
   completeAuthorization(input: { reqId: string; userId: string; consent?: boolean }, origin?: { headers: import('node:http').IncomingHttpHeaders }): { location: string } {
     const req = this.authRequests().get(input.reqId)
@@ -451,7 +451,7 @@ export class OidcService extends Service {
     if (user.status !== 'active') throw new Error(t('账号状态异常，无法授权'))
     if (client.consentRequired === true && input.consent !== true) {
       if (input.consent === undefined) throw new Error(t('该应用要求显式同意后才能授权'))
-      // 显式拒绝：redirect_uri 已在白名单内，按 RFC 回跳 access_denied
+      // Refus explicite : redirect_uri déjà dans la liste blanche, retour access_denied selon RFC
       this.authRequests().update(req.id, { consumedAt: new Date().toISOString() })
       this.ctx.platformBus.emit(PlatformEvents.OidcAuthorizeDenied, {
         reqId: req.id, clientId: client.clientId, clientName: client.name, userId: user.id, userName: user.displayName,
@@ -463,7 +463,7 @@ export class OidcService extends Service {
     this.ctx.platformBus.emit(PlatformEvents.OidcAuthorizeGranted, {
       reqId: req.id, clientId: client.clientId, clientName: client.name, userId: user.id, userName: user.displayName, scope: req.scope,
     })
-    // iss 回跳参数（RFC 9207 防 mix-up）——#15：按请求面派生，与 discovery 一致
+    // Paramètre de retour iss (anti-mix-up RFC 9207) — #15 : dérivé de la facette requête, cohérent avec discovery
     return { location: withQuery(req.redirectUri, { code, state: req.state, iss: this.issuer(origin) }) }
   }
 
@@ -484,9 +484,9 @@ export class OidcService extends Service {
     return code
   }
 
-  // -- 换牌 / 刷新 -----------------------------------------------------------
+  // -- Échange / rafraîchissement -----------------------------------------------------------
 
-  /** 客户端认证：Basic 与 Post 双形态；public 客户端免 secret。失败计入暴力破解锁定。 */
+  /** Authentification du client : formes Basic et Post ; les clients public sont exemptés de secret. Les échecs alimentent le verrouillage anti-force-brute. */
   private authenticateClient(clientId: string | undefined, clientSecret: string | undefined): OidcClientRecord {
     const invalidClient = (description: string): OidcEndpointError =>
       new OidcEndpointError(401, 'invalid_client', description, { 'www-authenticate': 'Basic realm="dsh-ops-oidc"' })
@@ -497,7 +497,7 @@ export class OidcService extends Service {
     if ((client.clientType ?? 'confidential') === 'confidential') {
       if (!clientSecret) throw invalidClient(t('缺少 client_secret'))
       if (client.clientSecretHash !== sha256Hex(clientSecret)) {
-        // client_secret 同样纳入失败锁定（不得暴力猜测机密）
+        // Le client_secret alimente aussi le verrouillage d'échecs (pas de devinette de secrets par force brute)
         this.ctx.authn.recordLoginFailure(`oidc-token:${clientId}`)
         throw invalidClient(t('client_secret 错误'))
       }
@@ -507,7 +507,7 @@ export class OidcService extends Service {
   }
 
   /**
-   * /oauth/token：authorization_code（PKCE 强制校验、code 单次消费）与 refresh_token（轮转 + 重放整链吊销）。
+   * /oauth/token : authorization_code (PKCE validé forcé, code à consommation unique) et refresh_token (rotation + révocation de chaîne au rejeu).
    */
   token(input: {
     grantType: string
@@ -534,7 +534,7 @@ export class OidcService extends Service {
     if (new Date(record.expiresAt).getTime() < Date.now()) throw bad(t('授权码已过期'))
     if (record.clientId !== client.clientId) throw bad(t('授权码与客户端不匹配'))
     if (input.redirectUri && input.redirectUri !== record.redirectUri) throw bad(t('redirect_uri 与授权时不一致'))
-    // PKCE（S256）：BASE64URL(SHA256(code_verifier)) 必须与授权时登记的 challenge 一致
+    // PKCE (S256) : BASE64URL(SHA256(code_verifier)) doit correspondre au challenge enregistré à l'autorisation
     if (!record.codeChallenge) throw bad(t('授权未登记 PKCE challenge'))
     if (!input.codeVerifier) throw bad(t('授权使用了 PKCE，token 请求必须携带 code_verifier'))
     const derived = createHash('sha256').update(input.codeVerifier).digest('base64url')
@@ -558,10 +558,10 @@ export class OidcService extends Service {
       this.revokeRefreshChain(record.chainId, t('refresh token 重放检测（原轮转于 {at}）', { at: record.rotatedAt }))
       throw bad(t('检测到 refresh token 重放：该授权链已整体吊销，请重新发起授权'))
     }
-    // 安全必需：换发实时校验用户状态（冻结/离职即时失效，无需等过期）
+    // Nécessaire à la sécurité : validation en temps réel de l'état utilisateur à l'échange (gelé/départ → invalidation immédiate, sans attendre l'expiration)
     const user = this.ctx.iam.users().get(record.userId)
     if (!user || user.status !== 'active') throw bad(t('用户状态异常（冻结/离职联动失效）'))
-    // scope 只允许收窄
+    // Le scope ne peut que se resserrer
     const granted = record.scope.split(/\s+/).filter(Boolean)
     const requested = input.scope !== undefined ? input.scope.split(/\s+/).filter(Boolean) : granted
     const widened = requested.find((scope) => !granted.includes(scope))
@@ -576,7 +576,7 @@ export class OidcService extends Service {
     const nowSec = Math.floor(Date.now() / 1000)
     const user = this.ctx.iam.users().get(granted.userId)
     const payload = {
-      // #15：iss 按请求面派生（env 显式声明优先），与 discovery 对齐
+      // #15 : iss dérivé de la facette requête (déclaration explicite env prioritaire), aligné sur discovery
       iss: this.issuer(origin),
       sub: granted.userId,
       aud: client.clientId,
@@ -588,7 +588,7 @@ export class OidcService extends Service {
       ...(granted.nonce !== undefined ? { nonce: granted.nonce } : {}),
       ...(user !== undefined ? { preferred_username: user.username, name: user.displayName } : {}),
     }
-    // token 类型区分（收敛面：access/id 同构时代 userinfo 无法分辨，外发前必须打标）
+    // Distinction des types de token (surface de convergence : quand access/id sont isomorphes, userinfo ne peut les distinguer, marquage obligatoire avant envoi)
     const access = this.signJwt({ ...payload, token_use: 'access' })
     const idToken = this.signJwt({ ...payload, token_use: 'id' })
     const result: { access_token: string; id_token: string; token_type: 'Bearer'; expires_in: number; scope: string; refresh_token?: string } = {
@@ -599,7 +599,7 @@ export class OidcService extends Service {
       scope: granted.scope,
     }
     if ((client.clientType ?? 'confidential') === 'confidential') {
-      // refresh 仅存哈希；otr_ 明文只出现这一次；同 chain 轮转（重放检测按链吊销）
+      // Le refresh n'est stocké qu'en hash ; le clair otr_ n'apparaît que cette fois ; rotation sur la même chaîne (détection de rejeu → révocation par chaîne)
       const refreshRaw = 'otr_' + randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '')
       this.refreshTokens().insert({
         id: newId('ort'),
@@ -615,7 +615,7 @@ export class OidcService extends Service {
     return result
   }
 
-  // -- 吊销面 ---------------------------------------------------------------
+  // -- Facette de révocation ---------------------------------------------------------------
 
   revokeRefreshChain(chainId: string, reason: string): number {
     let count = 0
@@ -644,7 +644,7 @@ export class OidcService extends Service {
     return count
   }
 
-  /** RFC 7009 /oauth/revoke：access（jti 黑名单）或 refresh（整链）；恒 200。 */
+  /** RFC 7009 /oauth/revoke : access (liste noire jti) ou refresh (chaîne entière) ; toujours 200. */
   revokeToken(input: { clientId?: string; clientSecret?: string; token?: string; tokenTypeHint?: string }, origin?: { headers: import('node:http').IncomingHttpHeaders }): void {
     const client = this.authenticateClient(input.clientId, input.clientSecret)
     if (!input.token) return
@@ -663,7 +663,7 @@ export class OidcService extends Service {
         expiresAt: new Date((typeof claims.exp === 'number' ? claims.exp : Math.floor(Date.now() / 1000)) * 1000).toISOString(),
         reason: t('客户端主动吊销（RFC 7009）'),
       })
-    } catch { /* 无法解析的 token：按 RFC 恒 200 静默 */ }
+    } catch { /* token inexploitable : silencieux et toujours 200 selon RFC */ }
   }
 
   private isJtiDenied(jti: unknown): boolean {
@@ -672,13 +672,13 @@ export class OidcService extends Service {
     return record !== undefined && new Date(record.expiresAt).getTime() > Date.now()
   }
 
-  // -- RP 发起登出 -----------------------------------------------------------
+  // -- Logout initié par le RP -----------------------------------------------------------
 
   /**
-   * GET /oauth/end_session：验签 id_token_hint 定位 client → 吊销该用户在该 client 下的
-   * refresh 链 → 回跳地址命中 postLogoutUris → 302 平台登出页（页面清会话后带 state 跳回）。
-   * 未携带 post_logout_redirect_uri 时（轻量 RP 只传 id_token_hint），若该 client 仅登记了
-   * 一个登出回跳地址，按其登记意图回跳——仍受白名单约束，显式传参非法依旧拒绝（防开放重定向）。
+   * GET /oauth/end_session : vérification de id_token_hint pour localiser le client → révocation des
+   * chaînes de refresh de cet utilisateur chez ce client → retour si l'adresse est dans postLogoutUris → 302 vers la page de logout plateforme (la page purge la session puis revient avec state).
+   * Sans post_logout_redirect_uri (RP léger ne passant que id_token_hint), si ce client n'a enregistré
+   * qu'une seule adresse de retour de logout, retour selon l'intention enregistrée — toujours sous liste blanche, un argument explicite invalide reste refusé (anti-redirection ouverte).
    */
   endSession(input: { idTokenHint?: string; postLogoutRedirectUri?: string; state?: string }, origin?: { headers: import('node:http').IncomingHttpHeaders }): { location: string } {
     if (!input.idTokenHint) throw new OidcEndpointError(302, 'invalid_request', t('缺少 id_token_hint'))
@@ -690,12 +690,12 @@ export class OidcService extends Service {
     }
     const client = this.clientByClientId(String(claims.aud ?? ''))
     if (!client) throw new OidcEndpointError(302, 'invalid_request', t('id_token_hint 受众（aud）未命中已登记客户端'))
-    // 登出即断静默续期：吊销该用户在该 client 下的全部 refresh 链
+    // Le logout coupe le renouvellement silencieux : révocation de toutes les chaînes de refresh de cet utilisateur chez ce client
     const userId = String(claims.sub ?? '')
     for (const record of this.refreshTokens().find((item) => item.clientId === client.clientId && item.userId === userId && !item.revokedAt)) {
       this.refreshTokens().update(record.id, { revokedAt: new Date().toISOString(), revokedReason: t('RP 发起登出联动') })
     }
-    // 平台 SPA 内部跳转：query 收敛在 hash 内（与控制台路由约定一致）
+    // Sauts internes de la SPA plateforme : la query converge dans le hash (même convention que les routes de la console)
     const logoutParams = new URLSearchParams({
       ...(input.postLogoutRedirectUri !== undefined ? { post_logout_redirect_uri: input.postLogoutRedirectUri } : {}),
       ...(input.state !== undefined ? { state: input.state } : {}),
@@ -704,7 +704,7 @@ export class OidcService extends Service {
     const logoutPage = `${this.webBase()}/#/oauth/logout?${logoutParams.toString()}`
     const whitelist = client.postLogoutUris ?? []
     if (input.postLogoutRedirectUri === undefined) {
-      // RP 未传回跳参数：仅登记唯一登出地址时按登记意图回跳；未登记或多个候选则停留平台登出页
+      // Le RP n'a pas passé d'argument de retour : retour selon l'intention enregistrée seulement si une unique adresse de logout est enregistrée ; sinon (ou plusieurs candidates) on reste sur la page de logout plateforme
       if (whitelist.length === 1) {
         logoutParams.set('post_logout_redirect_uri', whitelist[0]!)
         return { location: `${this.webBase()}/#/oauth/logout?${logoutParams.toString()}` }
@@ -712,7 +712,7 @@ export class OidcService extends Service {
       return { location: logoutPage }
     }
     if (!whitelist.includes(input.postLogoutRedirectUri)) {
-      // 非法回跳：只回平台错误页，绝不开放重定向
+      // Retour invalide : seule la page d'erreur plateforme, jamais de redirection ouverte
       throw new OidcEndpointError(302, 'invalid_request', t('post_logout_redirect_uri 未登记在客户端登出白名单'))
     }
     return { location: logoutPage }
@@ -720,7 +720,7 @@ export class OidcService extends Service {
 
   // -- userinfo ---------------------------------------------------------------
 
-  /** userinfo：仅接受 access token（token_use 校验）+ aud 必须命中有效 client + 用户实时状态；origin 提供时 iss 同步接受请求面派生值（#15）。 */
+  /** userinfo : n'accepte que des access token (validation token_use) + aud devant toucher un client valide + état utilisateur en temps réel ; origin fourni → iss accepte aussi la valeur dérivée de la requête (#15). */
   userinfo(accessToken: string, origin?: { headers: import('node:http').IncomingHttpHeaders }): Record<string, unknown> {
     const claims = this.verifyJwt(accessToken, { audience: undefined, ...(origin !== undefined ? { origin } : {}) })
     if (claims.token_use !== 'access') throw new Error(t('该端点仅接受 access token（id_token 不能直接调 userinfo）'))
@@ -736,7 +736,7 @@ export class OidcService extends Service {
       sub: user.id,
       preferred_username: user.username,
       name: user.displayName,
-      // email claim 按 scope 裁剪（未申请 email scope 不外发）
+      // Le claim email est rogné selon le scope (sans demande du scope email, pas d'envoi)
       ...(scopes.includes('email') && user.email ? { email: user.email } : {}),
       org: org !== undefined ? { id: org.id, name: org.name, tenantId: org.tenantId ?? 't_default' } : null,
       roles: user.roleIds.map((roleId) => this.ctx.iam.roles().get(roleId)?.code).filter(Boolean),
@@ -745,7 +745,7 @@ export class OidcService extends Service {
     }
   }
 
-  // -- JWT（RS256，数组化 JWKS） ----------------------------------------------
+  // -- JWT (RS256, JWKS en tableau) ----------------------------------------------
 
   signJwt(payload: Record<string, unknown>): string {
     const key = this.activeKey()
@@ -756,7 +756,7 @@ export class OidcService extends Service {
     return `${head}.${body}.${signature}`
   }
 
-  /** 签名恒用最新 key；验签按 header.kid 在数组（含宽限期内的退役 key）中匹配。 */
+  /** La signature utilise toujours la clé la plus récente ; la vérification cherche header.kid dans le tableau (clés retirées en grâce incluses). */
   private activeKey(): OidcKeyMaterial {
     const alive = this.keys.filter((key) => key.retiredAt === undefined || Date.now() - new Date(key.retiredAt).getTime() < KEY_GRACE_MS)
     const candidates = alive.filter((key) => key.retiredAt === undefined)
@@ -764,9 +764,9 @@ export class OidcService extends Service {
   }
 
   /**
-   * JWT 校验：签名 + header.kid 匹配 JWKS 公布密钥 + iss 归属本 Provider + exp 有效；
-   * options.audience 指定时校验受众（azp/aud 必须命中）；
-   * options.origin 指定时 iss 同时接受请求面派生值（#15：公网域名签发的令牌在同域名校验通过）。
+   * Vérification JWT : signature + header.kid correspondant aux clés publiées en JWKS + iss rattaché à ce Provider + exp valide ;
+   * options.audience → validation d'audience (azp/aud doivent correspondre) ;
+   * options.origin → iss accepte aussi la valeur dérivée de la requête (#15 : un jeton émis sur un domaine public valide sur le même domaine).
    */
   verifyJwt(token: string, options: { audience?: string; origin?: { headers: import('node:http').IncomingHttpHeaders } } = {}): Record<string, unknown> {
     const parts = token.split('.')
@@ -800,7 +800,7 @@ export class OidcService extends Service {
   }
 
   jwks(): { keys: Array<Record<string, unknown>> } {
-    // 宽限期内的退役 key 保留公布（在途验签不掉线），过宽限即从 JWKS 撤下
+    // Les clés retirées encore en grâce restent publiées (les vérifications en vol ne sont pas déconnectées), retirées du JWKS après grâce
     const published = this.keys.filter((key) => key.retiredAt === undefined || Date.now() - new Date(key.retiredAt).getTime() < KEY_GRACE_MS)
     return { keys: published.map((key) => {
       const jwk = createPublicKey(key.publicPem).export({ format: 'jwk' }) as { kty: string; n?: string; e?: string }
@@ -815,7 +815,7 @@ export class OidcService extends Service {
     }) }
   }
 
-  /** 管理端密钥轮换：新 key 立即承担签名，旧 key 进入 24h 验签宽限。 */
+  /** Rotation des clés côté administration : la nouvelle clé signe immédiatement, l'ancienne entre en grâce de vérification de 24 h. */
   rotateKeys(): { graceHours: number; kid: string } {
     const now = new Date().toISOString()
     this.keys = this.keys.map((key) => (key.retiredAt === undefined ? { ...key, retiredAt: now } : key))
@@ -852,7 +852,7 @@ export class OidcService extends Service {
     }
   }
 
-  /** 过期记录清理（对齐 M2 惯例：过期 7 天后物理删除，不无限累积）。 */
+  /** Nettoyage des enregistrements expirés (même convention que M2 : suppression physique après 7 jours d'expiration, pas d'accumulation infinie). */
   private cleanupExpired(): number {
     const cutoff = Date.now() - 7 * 24 * 3600_000
     let removed = 0
@@ -868,7 +868,7 @@ export class OidcService extends Service {
     for (const record of this.deniedJtis().all()) {
       if (new Date(record.expiresAt).getTime() < cutoff && this.deniedJtis().remove(record.id)) removed++
     }
-    // 过宽限期的退役密钥从数组中清出（文件同步收敛）
+    // Les clés retirées au-delà de la grâce sont purgées du tableau (convergence synchronisée du fichier)
     const before = this.keys.length
     this.keys = this.keys.filter((key) => key.retiredAt === undefined || Date.now() - new Date(key.retiredAt).getTime() < KEY_GRACE_MS)
     if (this.keys.length !== before) this.saveKeys()
@@ -889,7 +889,7 @@ export class OidcService extends Service {
     try {
       if (existsSync(file)) {
         const stored = JSON.parse(readFileSync(file, 'utf8')) as unknown
-        // 旧单 key 文件自动包装为数组（零停机迁移）
+        // Ancien fichier à clé unique enveloppé automatiquement en tableau (migration sans arrêt)
         const list = Array.isArray((stored as { keys?: unknown }).keys)
           ? (stored as { keys: OidcKeyMaterial[] }).keys
           : [stored as OidcKeyMaterial]
@@ -901,7 +901,7 @@ export class OidcService extends Service {
       writeFileSync(file, JSON.stringify({ keys: [material] }, null, 2), { encoding: 'utf8', mode: 0o600 })
       return [material]
     } catch {
-      // 目录不可写等异常：进程内密钥（重启后令牌失效，仅限异常场景）
+      // Anomalies comme un répertoire non inscriptible : clé en mémoire (jetons invalidés après redémarrage, scénarios exceptionnels seulement)
       return [fresh()]
     }
   }
@@ -915,11 +915,11 @@ export class OidcService extends Service {
     }
   }
 
-  // -- 协议端点 ---------------------------------------------------------------
+  // -- Points de protocole ---------------------------------------------------------------
 
   /**
-   * CORS 允许来源：已登记客户端 redirect_uri 的 origin ∪ OIDC_CORS_ORIGINS（逗号分隔显式清单）。
-   * 收敛在已登记来源内——未登记站点的页面拿不到放行头；code 本身绑定 redirect_uri，双重兜底。
+   * Origines CORS autorisées : origin des redirect_uri des clients enregistrés ∪ OIDC_CORS_ORIGINS (liste explicite séparée par virgules).
+   * Convergence dans les origines enregistrées — les pages de sites non enregistrés n'obtiennent pas d'en-têtes d'autorisation ; le code est lui-même lié au redirect_uri, double filet.
    */
   private allowedCorsOrigins(): Set<string> {
     const origins = new Set<string>(
@@ -927,13 +927,13 @@ export class OidcService extends Service {
     )
     for (const client of this.clients().all()) {
       for (const uri of client.redirectUris ?? []) {
-        try { origins.add(new URL(uri).origin) } catch { /* 非法 redirect_uri 不参与 CORS 判定 */ }
+        try { origins.add(new URL(uri).origin) } catch { /* un redirect_uri invalide ne participe pas au jugement CORS */ }
       }
     }
     return origins
   }
 
-  /** 按 Origin 头生成放行头；无 Origin（非浏览器调用）不发放，未登记来源仅回 vary。 */
+  /** Génère les en-têtes d'autorisation selon l'en-tête Origin ; sans Origin (appel non navigateur) rien n'est délivré, origine non enregistrée → vary seul. */
   private corsHeaders(exchange: { headers: import('node:http').IncomingHttpHeaders }): Record<string, string> {
     const header = exchange.headers['origin']
     const origin = Array.isArray(header) ? header[0] : header
@@ -942,10 +942,10 @@ export class OidcService extends Service {
     return { vary: 'Origin', 'access-control-allow-origin': origin }
   }
 
-  /** 公开端点（非 /api/*：不受控制台 Bearer 中间件约束，属 OIDC 协议要求）。 */
+  /** Points publics (hors /api/* : non soumis au middleware Bearer console, exigés par le protocole OIDC). */
   private registerRoutes(): void {
     const http = this.ctx.httpServer
-    // OIDC 协议端点返回原始 JSON（标准客户端不识别平台的 {ok,data} 包裹）；成功/错误一律合并 CORS 放行头
+    // Les points de protocole OIDC renvoient du JSON brut (les clients standard ne reconnaissent pas l'enveloppe {ok,data} de la plateforme) ; succès/erreur fusionnent toujours les en-têtes CORS
     const raw = (exchange: { res: import('node:http').ServerResponse; headers: import('node:http').IncomingHttpHeaders }, status: number, payload: unknown, extra: Record<string, string> = {}): void => {
       exchange.res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', ...this.corsHeaders(exchange), ...extra })
       exchange.res.end(JSON.stringify(payload))
@@ -957,7 +957,7 @@ export class OidcService extends Service {
     const clientIp = (exchange: { raw: import('node:http').IncomingMessage }): string =>
       String(exchange.raw.socket?.remoteAddress ?? 'unknown')
 
-    // -- CORS 预检：纯前端（public + PKCE）客户端跨域直调的端点，统一 204 应答 ------
+    // -- Préflight CORS : points appelés en cross-origin par les clients purement frontend (public + PKCE), réponse 204 uniforme ------
     const preflight = (exchange: { res: import('node:http').ServerResponse; headers: import('node:http').IncomingHttpHeaders }): void => {
       exchange.res.writeHead(204, {
         ...this.corsHeaders(exchange),
@@ -979,10 +979,10 @@ export class OidcService extends Service {
       raw(exchange, 200, this.jwks())
     })
 
-    // -- 浏览器授权流第一跳：校验 → 落授权请求 → 302 平台授权页 --------------------
+    // -- Premier saut du flux d'autorisation navigateur : validation → enregistrement de la requête → 302 page d'autorisation plateforme --------------------
     http.register('GET', '/oauth/authorize', (exchange) => {
       const q = exchange.query
-      // 按来源 IP 基础限流（复用登录锁定骨架，收敛客户端探测面）
+      // Limitation de base par IP source (réutilise le squelette de verrouillage de connexion, convergence de la surface de sondage client)
       const throttleKey = `oidc-authorize-ip:${clientIp(exchange)}`
       try {
         this.ctx.authn.assertNotLocked(throttleKey)
@@ -1001,15 +1001,15 @@ export class OidcService extends Service {
         const err = error instanceof OidcEndpointError
           ? error
           : new OidcEndpointError(302, 'access_denied', error instanceof Error ? error.message : String(error))
-        // client_id / redirect_uri 探测形态计入失败（锁定暴力枚举）
+        // Les formes de sondage client_id / redirect_uri comptent comme échec (verrouille l'énumération par force brute)
         if (err.error === 'unauthorized_client' || err.message.includes('redirect_uri')) {
-          try { this.ctx.authn.recordLoginFailure(throttleKey) } catch { /* 锁定信息写入失败不阻断错误回显 */ }
+          try { this.ctx.authn.recordLoginFailure(throttleKey) } catch { /* un échec d'écriture du verrouillage ne bloque pas l'affichage de l'erreur */ }
         }
         redirect(exchange, `${this.webBase()}/#/oauth/error?error=${encodeURIComponent(err.error)}&error_description=${encodeURIComponent(err.message)}`)
       }
     })
 
-    // -- 授权页公开查询（仅客户端名/scope，不泄露 redirect_uri） --------------------
+    // -- Requête publique de la page d'autorisation (nom du client/scope seulement, sans divulguer redirect_uri) --------------------
     http.register('GET', '/api/authn/oidc/auth-requests/:id', (exchange) => {
       try {
         raw(exchange, 200, this.authRequestInfo(exchange.params['id']!))
@@ -1018,7 +1018,7 @@ export class OidcService extends Service {
       }
     }, { access: 'public', selfValidated: true })
 
-    // -- 授权页确认（Bearer；human-only，机器 principal 一律 403） ------------------
+    // -- Confirmation de la page d'autorisation (Bearer ; human-only, tout principal machine → 403) ------------------
     http.register('POST', '/api/authn/oidc/authorize', async (exchange) => {
       const input = (exchange.body ?? {}) as { reqId?: string; consent?: boolean }
       const info = exchange.principal as { kind?: string; userId?: string } | undefined
@@ -1042,10 +1042,10 @@ export class OidcService extends Service {
       }
     }, { access: 'authenticated' })
 
-    // -- 换牌：client_secret_basic + client_secret_post；form-encoded 与 JSON 双编码 --
+    // -- Échange : client_secret_basic + client_secret_post ; double encodage form-encoded et JSON --
     http.register('POST', '/oauth/token', async (exchange) => {
       const bodyInput = (exchange.body ?? {}) as Record<string, string>
-      // Basic 认证：Authorization: Basic base64(urlencode(client_id):urlencode(client_secret))
+      // Authentification Basic : Authorization: Basic base64(urlencode(client_id):urlencode(client_secret))
       const authHeader = String(exchange.headers['authorization'] ?? '')
       let basicId: string | undefined
       let basicSecret: string | undefined
@@ -1055,7 +1055,7 @@ export class OidcService extends Service {
           const idx = decoded.indexOf(':')
           basicId = decodeURIComponent(decoded.slice(0, idx))
           basicSecret = decodeURIComponent(decoded.slice(idx + 1))
-        } catch { /* 畸形 Basic 头按缺失处理 */ }
+        } catch { /* en-tête Basic malformé traité comme absent */ }
       }
       try {
         const result = this.token({
@@ -1077,10 +1077,10 @@ export class OidcService extends Service {
       }
     })
 
-    // -- userinfo（RFC 6750：401 带 WWW-Authenticate: Bearer） ----------------------
+    // -- userinfo (RFC 6750 : 401 avec WWW-Authenticate: Bearer) ----------------------
     http.register('GET', '/oauth/userinfo', (exchange) => {
       const header = String(exchange.headers['authorization'] ?? '')
-      // 头部仅允许 ASCII：描述文案做百分号编码，原文保留在 JSON 响应体
+      // Les en-têtes n'acceptent que de l'ASCII : les libellés descriptifs passent en encodage pourcent, le texte original reste dans le corps JSON de la réponse
       const headerSafe = (text: string): string => encodeURIComponent(text).replace(/"/g, '%22')
       const deny = (description: string): void => {
         raw(exchange, 401, { error: 'invalid_token', error_description: description }, { 'www-authenticate': `Bearer error="invalid_token", error_description="${headerSafe(description)}"` })
@@ -1096,7 +1096,7 @@ export class OidcService extends Service {
       }
     })
 
-    // -- RP 发起登出（OIDC Front-Channel / RP-Initiated Logout 最小实现） ----------
+    // -- Logout initié par le RP (implémentation minimale OIDC Front-Channel / RP-Initiated Logout) ----------
     http.register('GET', '/oauth/end_session', (exchange) => {
       const q = exchange.query
       try {
@@ -1114,7 +1114,7 @@ export class OidcService extends Service {
       }
     })
 
-    // -- 令牌吊销（RFC 7009：恒 200，未知 token 静默成功） --------------------------
+    // -- Révocation de jetons (RFC 7009 : toujours 200, token inconnu → succès silencieux) --------------------------
     http.register('POST', '/oauth/revoke', async (exchange) => {
       const bodyInput = (exchange.body ?? {}) as Record<string, string>
       const authHeader = String(exchange.headers['authorization'] ?? '')
@@ -1126,7 +1126,7 @@ export class OidcService extends Service {
           const idx = decoded.indexOf(':')
           basicId = decodeURIComponent(decoded.slice(0, idx))
           basicSecret = decodeURIComponent(decoded.slice(idx + 1))
-        } catch { /* 畸形 Basic 头按缺失处理 */ }
+        } catch { /* en-tête Basic malformé traité comme absent */ }
       }
       try {
         this.revokeToken({
@@ -1146,7 +1146,7 @@ export class OidcService extends Service {
   }
 }
 
-/** 拼接回跳地址（保留已有 query；RFC 9207 的 iss / error 均走此处；仅用于绝对地址）。 */
+/** Assemble l'adresse de retour (conserve la query existante ; l'iss / error de RFC 9207 passent tous deux ici ; réservé aux adresses absolues). */
 function withQuery(base: string, params: Record<string, string>): string {
   const url = new URL(base)
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value)

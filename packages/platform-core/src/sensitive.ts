@@ -1,12 +1,12 @@
 /**
- * 敏感入参卫生（OPT-P2-02，2026-09-12）：审批存储不得携带敏感值。
- * 连接器 admin 审批与审计中心共用同一份键名清单——双处口径一致由单一定义保证。
+ * Hygiène des entrées sensibles (OPT-P2-02, 2026-09-12) : le stockage des approbations ne doit pas transporter de valeurs sensibles.
+ * L'approbation admin des connecteurs et le centre d'audit partagent la même liste de noms de clés — la cohérence des deux endroits est garantie par la définition unique.
  */
 
-/** 敏感键名清单（审计核验 #11 升级项）：命中即不入审批存储（掩码或拒绝开单）。 */
+/** Liste des noms de clés sensibles (élément d'élévation de la vérification d'audit #11) : toute correspondance n'entre pas dans le stockage d'approbation (masquage ou refus d'ouvrir le dossier). */
 export const SENSITIVE_KEY_RE = /(password|passwd|secret|token|apikey|api[_-]?key|access[_-]?key|private[_-]?key|credential|client[_-]?secret)/i
 
-/** 递归扫描敏感键路径（不改动原值）。 */
+/** Scan récursif des chemins de clés sensibles (ne modifie pas les valeurs originales). */
 export function scanSensitiveKeys(value: unknown, prefix = ''): string[] {
   const paths: string[] = []
   const walk = (node: unknown, path: string): void => {
@@ -26,7 +26,7 @@ export function scanSensitiveKeys(value: unknown, prefix = ''): string[] {
   return paths
 }
 
-/** 深度掩码：敏感键的值替换为 ***（保留键名与结构，供复核对照 inputHash 使用）。 */
+/** Masquage profond : la valeur des clés sensibles est remplacée par *** (noms de clés et structure conservés, pour la contre-vérification avec inputHash). */
 export function maskSensitivePayload<T>(value: T): { masked: T; maskedKeys: string[] } {
   const maskedKeys: string[] = []
   const walk = (node: unknown, path: string): unknown => {

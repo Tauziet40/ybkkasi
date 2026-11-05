@@ -1,14 +1,14 @@
 /**
- * @dsh-ops/platform-core —— behavior 行为事件管道（action-plan-dsh-frontend WP-03 / 决议 D3、D6）。
+ * @dsh-ops/platform-core —— pipeline d'événements comportementaux behavior (action-plan-dsh-frontend WP-03 / décisions D3, D6).
  *
- * 前端行为埋点（卡片曝光/点击/推荐位/登记漏斗）与调用计量（usage）分流：
- *   - D3：行为事件独立 `behavior.recorded`，不混入 usage 计量管道（避免污染计费口径）；
- *   - D6：端点归属 platform-core（本文件），与 usage 同款「先写后发 + 幂等 + 死信 + 重放」语义；
- *   - write-only 采集端点 POST /api/behavior/events（iam 鉴权：未认证一律 401，
- *     认证主体即事件主体，杜绝伪造他人行为流）；只读查询 GET /api/behavior/events（audit.read，
- *     审计/看板订阅面）。audit 与后续看板经 ctx.behavior.consume() 或 platformBus 订阅。
+ * Séparation entre l'instrumentation comportementale frontend (exposition/clic de cartes, emplacements de recommandation, tunnel d'enregistrement) et la mesure d'appels (usage) :
+ *   - D3 : les événements comportementaux ont leur propre `behavior.recorded`, sans mélange dans le pipeline de mesure usage (évite de polluer le périmètre de facturation) ;
+ *   - D6 : le point d'accès appartient à platform-core (ce fichier), avec la même sémantique que usage « écrire d'abord puis émettre + idempotence + lettres mortes + rejeu » ;
+ *   - point de collecte write-only POST /api/behavior/events (authentification iam : 401 systématique si non authentifié,
+ *     le sujet authentifié est le sujet de l'événement, empêche la falsification du flux comportemental d'autrui) ; requête en lecture GET /api/behavior/events (audit.read,
+ *     facette d'abonnement audit/tableau de bord). audit et les futurs tableaux de bord s'abonnent via ctx.behavior.consume() ou platformBus.
  *
- * schema v1（additive-only，同 usage 纪律）：字段只增不改不删，消费端容忍未知新字段。
+ * schema v1 (additive-only, même discipline que usage) : les champs ne font que croître, jamais modifiés ni supprimés, les consommateurs tolèrent les nouveaux champs inconnus.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -19,7 +19,7 @@ import type { Collection, RecordBase } from './storage.ts'
 export const BEHAVIOR_SCHEMA = 'behavior.recorded'
 export const BEHAVIOR_SCHEMA_VERSION = 1
 
-/** behavior.recorded v1 事件（只追加，禁改版；扩展仅允许新增可选字段）。 */
+/** Événement behavior.recorded v1 (append-only, interdiction de changer de version ; extension uniquement par ajout de champs optionnels). */
 export interface BehaviorEvent {
   schema: typeof BEHAVIOR_SCHEMA
   schema_version: number
@@ -27,20 +27,20 @@ export interface BehaviorEvent {
   idempotency_key: string
   occurred_at: string
   tenant_id: string
-  /** 事件归属组织（可空：机器主体可能无组织上下文）。 */
+  /** Organisation propriétaire de l'événement (nullable : un sujet machine peut manquer de contexte organisationnel). */
   org?: string
-  /** 事件主体：user:<id> | agent:<id> | app:<id> | machine:<principalId>。 */
+  /** Sujet de l'événement : user:<id> | agent:<id> | app:<id> | machine:<principalId>. */
   subject: string
-  /** 事件类型（点分小写键）：card.exposed / card.clicked / funnel.step / recommend.impression … */
+  /** Type d'événement (clé pointue en minuscules) : card.exposed / card.clicked / funnel.step / recommend.impression … */
   type: string
-  /** 来源平台/端（五平台差异化 + 三入口）：strategy | marketing | manufacturing | rd | quality | console | portal | dingtalk | dsh */
+  /** Plateforme/borne d'origine (cinq plateformes différenciées + trois points d'entrée) : strategy | marketing | manufacturing | rd | quality | console | portal | dingtalk | dsh */
   platform?: string
-  /** 业务上下文（自由对象，≤4KB）：卡片 ref、漏斗步骤、跳转目标等。 */
+  /** Contexte métier (objet libre, ≤4 Ko) : ref de carte, étape du tunnel, cible de saut, etc. */
   payload?: Record<string, unknown>
   trace_id?: string
 }
 
-/** 行为事件登记入参（HTTP 采集面 subject 由认证主体强制派生，入参不含 subject）。 */
+/** Paramètres d'entrée de l'enregistrement d'événement comportemental (sur la facette de collecte HTTP, subject est dérivé de force du sujet authentifié ; les entrées ne contiennent pas subject). */
 export interface BehaviorRecordInput {
   org?: string
   subject?: string
@@ -52,7 +52,7 @@ export interface BehaviorRecordInput {
   trace_id?: string
 }
 
-/** 死信（消费 3 次失败的事件）。 */
+/** Lettres mortes (événements ayant échoué 3 fois à la consommation). */
 export interface BehaviorDeadLetter extends RecordBase {
   event_id: string
   consumer: string
@@ -65,7 +65,7 @@ export type BehaviorConsumer = (event: BehaviorEvent) => void
 const PAYLOAD_MAX_BYTES = 4096
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TENANT = 't_default'
@@ -139,7 +139,7 @@ export class BehaviorService extends Service {
       payload_json: 'TEXT NOT NULL',
       trace_id: "TEXT NOT NULL DEFAULT ''",
     }, { uniques: [['idempotency_key']], indexes: [['occurred_at'], ['type'], ['subject']] })
-    // 消费水位（引擎级幂等）：同 usage 纪律——replay/重投不产生重复副作用
+    // Niveau de consommation (idempotence au niveau moteur) : même discipline que usage — replay/reprise ne produit pas d'effets de bord dupliqués
     ctx.txnStore.ensureTable('behavior_consumptions', {
       consumer: 'TEXT NOT NULL',
       event_id: 'TEXT NOT NULL',
@@ -151,18 +151,18 @@ export class BehaviorService extends Service {
     })
   }
 
-  /** write-only 采集（公开路由挂 console 鉴权中间件之后；此处再校验主体，双层 fail-closed）。 */
+  /** Collecte write-only (route publique montée après le middleware d'authentification console ; revalidation du sujet ici, double couche fail-closed). */
   private registerHttpEndpoints(ctx: Context): void {
     const http = ctx.httpServer
     http.register('POST', '/api/behavior/events', (exchange) => {
-      // console 鉴权中间件未挂载（异常装配）时 principal 恒空：拒绝服务而非放行
+      // Quand le middleware d'authentification console n'est pas monté (assemblage anormal), principal est toujours vide : on refuse le service plutôt que de laisser passer
       const principal = exchange.principal as { permissions?: string[]; userId?: string; kind?: string; principalId?: string } | undefined
       if (!principal || !Array.isArray(principal.permissions)) {
         exchange.fail(401, 'UNAUTHORIZED', t('缺少 Bearer 令牌，请先登录'))
         return
       }
       const input = (exchange.body ?? {}) as BehaviorRecordInput
-      // 事件主体强制取认证主体：埋点只描述「谁做了什么」，不接受请求体指认他人
+      // Le sujet de l'événement est forcément le sujet authentifié : l'instrumentation décrit seulement « qui a fait quoi », pas d'attribution d'autrui via le corps de requête
       const subject = principal.userId ? `user:${principal.userId}` : `${principal.kind ?? 'machine'}:${principal.principalId ?? 'unknown'}`
       try {
         const result = this.record({ ...input, subject })
@@ -197,7 +197,7 @@ export class BehaviorService extends Service {
     }, { access: 'guarded', permission: 'audit.read' })
   }
 
-  /** 全平台唯一行为事件入口：校验 → 落库（幂等）→ 总线分发。返回 duplicated 标识幂等重放。 */
+  /** Entrée unique d'événements comportementaux de toute la plateforme : validation → écriture (idempotente) → distribution par le bus. Renvoie duplicated pour signaler un rejeu idempotent. */
   record(input: BehaviorRecordInput): { event: BehaviorEvent; duplicated: boolean } {
     this.validate(input)
     const event: BehaviorEvent = {
@@ -229,15 +229,15 @@ export class BehaviorService extends Service {
     return { event, duplicated: false }
   }
 
-  /** 注册消费方（at-least-once；3 次失败入死信）。 */
+  /** Enregistre un consommateur (at-least-once ; 3 échecs → lettre morte). */
   consume(consumerId: string, handler: BehaviorConsumer): () => void {
     this.consumers.set(consumerId, { handler, attempts: new Map() })
     return () => this.consumers.delete(consumerId)
   }
 
   /**
-   * 分发：先总线广播，再逐消费方按水位投递（insertOrIgnore 占位 → 3 次失败入死信并告警）。
-   * 与 usage 同款「效果恰好一次」：重放/重投经水位幂等跳过。
+   * Distribution : diffusion par le bus d'abord, puis livraison consommateur par consommateur selon le niveau (insertOrIgnore comme marque → 3 échecs → lettre morte + alerte).
+   * Même « effet exactement une fois » que usage : rejeu/reprise sautés idempotemment via le niveau.
    */
   private dispatch(event: BehaviorEvent): void {
     this.ctx.platformBus.emit(BEHAVIOR_SCHEMA, event)
@@ -268,7 +268,7 @@ export class BehaviorService extends Service {
     }
   }
 
-  /** 重放窗口内事件（消费水位保证幂等）。 */
+  /** Événements dans la fenêtre de rejeu (l'idempotence est garantie par le niveau de consommation). */
   replay(sinceIso: string): { replayed: number } {
     const rows = this.ctx.txnStore.sql<BehaviorRow>(
       'SELECT * FROM behavior_events WHERE occurred_at >= ? ORDER BY occurred_at',
@@ -278,7 +278,7 @@ export class BehaviorService extends Service {
     return { replayed: rows.length }
   }
 
-  /** 死信重投：成功即移出死信队列。返回 {retried, remaining}。 */
+  /** Reprise des lettres mortes : sortie de la file dès le succès. Renvoie {retried, remaining}. */
   retryDeadLetters(): { retried: number; remaining: number } {
     const letters = this.deadLetters().all()
     let retried = 0
@@ -311,7 +311,7 @@ export class BehaviorService extends Service {
     return { retried, remaining: this.deadLetters().count() }
   }
 
-  /** 只读查询（审计/看板订阅面，GET 端点 audit.read 门禁）。 */
+  /** Requête en lecture seule (facette d'abonnement audit/tableau de bord, contrôle audit.read sur le point GET). */
   query(filter: { type?: string; subject?: string; from?: string; to?: string; limit?: number } = {}): { total: number; items: BehaviorEvent[] } {
     const conditions: string[] = []
     const params: Array<string | number> = []
@@ -329,7 +329,7 @@ export class BehaviorService extends Service {
     return this.ctx.opsStorage.collection<BehaviorDeadLetter>('behavior:deadLetters')
   }
 
-  // -- 内部 -----------------------------------------------------------------
+  // -- Interne -----------------------------------------------------------------
 
   private validate(input: BehaviorRecordInput): void {
     if (!input.type?.trim() || !/^[a-z][a-z0-9_.]*$/.test(input.type)) {

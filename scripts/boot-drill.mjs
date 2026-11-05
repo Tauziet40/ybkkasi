@@ -1,14 +1,14 @@
 /**
- * 启动健壮性演练（EXEC-CHECKLIST W2）：纯进程内验证 boot-probe 三道防线。
- * 不占端口、不写 data 目录。用法：node scripts/boot-drill.mjs（退出码 0 = 演练通过）。
+ * Exercice de robustesse du démarrage (EXEC-CHECKLIST W2) : validation purement en processus des trois lignes de défense de boot-probe.
+ * N'occupe aucun port, n'écrit pas dans le répertoire data. Usage : node scripts/boot-drill.mjs (code de sortie 0 = exercice réussi).
  *
- * 场景：
- *   ① 正常装配一棵最小插件树 → probeTree ok:true
- *   ② 另一个 root Context 注册同名服务（双实例病灶）→ 当前 ctx 报该服务不可达且 fiber PENDING
- *   ③ 污染 globalThis[root 键] → assertSingleRoot 抛「双实例」
- *   ④ FAILED 败者 fiber（声明 provide 已被接管，双注册习语）→ ok:true，仅入诊断清单
- *   ⑤ FAILED 真实故障（声明 provide 无人接管）→ ok:false 拦启动
- * 每个场景结束后清理 globalThis 污染。
+ * Scénarios :
+ *   ① assemblage normal d'un arbre minimal de plugins → probeTree ok:true
+ *   ② un autre root Context enregistre un service homonyme (pathologie de double instance) → le ctx courant signale le service inaccessible et les fiber PENDING
+ *   ③ pollution de globalThis[clé root] → assertSingleRoot lève « double instance »
+ *   ④ fiber FAILED perdant (provide déclaré déjà repris, idiome de double inscription) → ok:true, simple entrée au registre de diagnostic
+ *   ⑤ FAILED panne réelle (provide déclaré repris par personne) → ok:false, bloque le démarrage
+ * Nettoyage de la pollution globalThis après chaque scénario.
  */
 import { Context } from '@deepseek-ai/cordis'
 import * as platformCore from '../packages/platform-core/src/index.ts'
@@ -22,14 +22,14 @@ function record(name, pass, detail = '') {
   console.log(`  ${pass ? '\x1b[32m✔\x1b[0m' : '\x1b[31m✘\x1b[0m'} ${name}${pass ? '' : `  ← ${detail}`}`)
 }
 
-/** 最小提供者/消费者插件对：演练只关心 fiber 状态，不承载任何业务。 */
+/** Paire minimale de plugins fournisseur/consommateur : l'exercice ne s'intéresse qu'aux états des fiber, aucun métier porté. */
 const iamProvider = (source) => ({
   name: 'iam-provider',
   apply(ctx) { ctx.provide('iam', { source }) },
 })
 const iamConsumer = { name: 'iam-consumer', inject: ['iam'], apply() {} }
 
-// 场景①：正常装配 → 体检全绿
+// Scénario ① : assemblage normal → diagnostic tout vert
 async function scenario1() {
   console.log('\n\x1b[36m━━ 场景① 正常装配最小插件树 ━━\x1b[0m')
   const ctx = new Context()
@@ -42,13 +42,13 @@ async function scenario1() {
   clearRoot()
 }
 
-// 场景②：双实例病灶 → 当前 ctx 永远看不见另一个 root 上的同名服务
+// Scénario ② : pathologie de double instance → le ctx courant ne voit jamais le service homonyme de l'autre root
 async function scenario2() {
   console.log('\n\x1b[36m━━ 场景② 另一 root 注册同名服务 ━━\x1b[0m')
   const ctx = new Context()
   const otherRoot = new Context()
   await otherRoot.plugin(iamProvider('other-root'))
-  // 消费者 fiber 的 inject 解析不到实现 → 静默 PENDING（根因复现），不 await（挂起态即结论）
+  // La résolution d'inject du fiber consommateur ne trouve pas l'implémentation → PENDING silencieux (cause racine reproduite), sans await (l'état de suspension est la conclusion)
   ctx.plugin(iamConsumer)
   const health = platformCore.probeTree(ctx, ['iam'])
   record('probeTree 报 iam 不可达且 consumer 卡 PENDING',
@@ -62,7 +62,7 @@ async function scenario2() {
   clearRoot()
 }
 
-// 场景③：globalThis 污染 → 断言抛错；清理后恢复
+// Scénario ③ : pollution globalThis → l'assertion lève ; nettoyée, tout revient
 function scenario3() {
   console.log('\n\x1b[36m━━ 场景③ 污染 globalThis 后断言双实例 ━━\x1b[0m')
   globalThis[ROOT_KEY] = { polluted: true }
@@ -78,14 +78,14 @@ function scenario3() {
   clearRoot()
 }
 
-// 场景④⑤：FAILED fiber 的两种形态——良性败者（provide 已被接管）与真实故障（无人接管）
+// Scénarios ④⑤ : les deux formes de fiber FAILED — perdant bénin (provide déjà repris) et panne réelle (repris par personne)
 async function scenario45() {
   console.log('\n\x1b[36m━━ 场景④ 双注册习语的良性败者 fiber ━━\x1b[0m')
   const ctx = new Context()
   platformCore.assertSingleRoot(ctx)
-  // 复刻 panel-core/flow-core 习语（函数插件形态，provide 静态字段与 PanelService 类一致：
-  // registry.resolve 对函数插件直接取函数体作 callback）——先 ctx.plugin 注册，再同步登记同名
-  // 实现：同步方胜出，后者异步装载时 provide 撞车失败，留下 FAILED husk
+  // Réplique l'idiome de panel-core/flow-core (forme plugin-fonction, champ statique provide identique à la classe PanelService :
+  // registry.resolve prend le corps de la fonction comme callback pour un plugin-fonction) — d'abord ctx.plugin enregistre, puis inscription synchrone du même nom
+  // d'implémentation : le synchrone gagne ; le chargement asynchrone du second échoue sur le provide et laisse un husk FAILED
   const decoy = (ctx) => ctx.provide('iam', { source: 'decoy' })
   decoy.provide = 'iam'
   await ctx.plugin({
@@ -107,7 +107,7 @@ async function scenario45() {
   platformCore.assertSingleRoot(ctx2)
   const broken = () => { throw new Error('boom') }
   broken.provide = 'iam'
-  try { await ctx2.plugin(broken) } catch { /* 启动失败本身即场景前提 */ }
+  try { await ctx2.plugin(broken) } catch { /* l'échec de démarrage est lui-même la précondition du scénario */ }
   const health2 = platformCore.probeTree(ctx2, [])
   const dead = health2.stuck.find((f) => f.plugin === 'broken')
   record('真实故障：ok:false 且 FAILED 标记 blocking',

@@ -1,6 +1,6 @@
 /**
- * HTTP 服务：REST 路由 + 静态资源 + 中间件，独立宿主的数据面入口。
- * 真实 dsh 部署下控制台可独立进程运行（本服务随 platform-core 提供）。
+ * Serveur HTTP : routes REST + ressources statiques + middleware, point d'entrée du plan de données de l'hôte autonome.
+ * Dans un déploiement dsh réel, la console peut tourner dans un processus indépendant (ce service est fourni avec platform-core).
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createReadStream } from 'node:fs'
@@ -20,7 +20,7 @@ export interface HttpExchange {
   body: any
   raw: IncomingMessage
   res: ServerResponse
-  /** 鉴权中间件写入的调用方身份。 */
+  /** Identité de l'appelant écrite par le middleware d'authentification. */
   principal?: unknown
   ok(data?: unknown, init?: { status?: number }): void
   fail(status: number, code: string, message: string, extra?: Record<string, unknown>): void
@@ -31,24 +31,24 @@ export type HttpHandler = (exchange: HttpExchange) => void | Promise<void>
 export type HttpMiddleware = (exchange: HttpExchange) => boolean | void | Promise<boolean | void>
 
 /**
- * 路由鉴权 profile（QA 2026-09-08 T-01 教训的平台加固，交接清单 H5）：
- * /api/* 端点注册时必须显式声明，使 RBAC 断言网可枚举全部端点——
- * 含「公开+自校验」这一显式类别（如 SSE ?token=/?ticket= 端点），
- * 同类缺口（自注册端点逃出断言网）不再依赖人肉发现。
- * - guarded：权限点保护（登记进 routeMatrix，断言网对普通成员探针断言 403）；
- * - authenticated：仅控制台鉴权中间件要求 Bearer，无独立权限点（身份自辖端点）；
- * - public：免鉴权白名单；selfValidated=true 表示处理器自带凭证校验（fail-closed），
- *   断言网对其实施匿名探针必须被拒的覆盖断言。
+ * Profil d'authentification des routes (durcissement plateforme issu de la leçon QA 2026-09-08 T-01, liste de passation H5) :
+ * les points /api/* doivent le déclarer explicitement à l'enregistrement, afin que le filet d'assertions RBAC puisse énumérer tous les points —
+ * y compris la catégorie explicite « public + auto-validé » (p. ex. points SSE ?token=/?ticket=),
+ * les failles similaires (points auto-enregistrés échappant au filet d'assertions) ne dépendent plus d'une découverte manuelle.
+ * - guarded : protégé par point de permission (enregistré dans routeMatrix, le filet affirme 403 pour les sondes de membres ordinaires) ;
+ * - authenticated : seul le middleware d'authentification console exige un Bearer, pas de point de permission propre (points d'identité autonomes) ;
+ * - public : liste blanche sans authentification ; selfValidated=true signifie que le handler embarque sa propre validation d'identifiants (fail-closed),
+ *   le filet d'assertions couvre l'obligation qu'une sonde anonyme soit rejetée.
  */
 export type RouteAuthDecl =
   | { access: 'guarded'; permission: string }
   | { access: 'authenticated' }
   | { access: 'public'; selfValidated?: boolean }
 
-/** 台账条目：/api/* 外的路由（/oauth/*、/mcp、/docs 等）不属控制台鉴权域，自动归类 outside-api。 */
+/** Entrée de registre : les routes hors /api/* (/oauth/*, /mcp, /docs…) n'appartiennent pas au domaine d'authentification console, classées automatiquement outside-api. */
 export type RouteLedgerEntry = { method: string; path: string; auth: RouteAuthDecl | { access: 'outside-api' } }
 
-/** /api/* 路径判定（声明义务的作用域：控制台鉴权中间件与 RBAC 断言网覆盖面）。 */
+/** Détection des chemins /api/* (périmètre de l'obligation de déclaration : couverture du middleware d'authentification console et du filet d'assertions RBAC). */
 const isApiPattern = (pattern: string): boolean => pattern === '/api' || pattern.startsWith('/api/')
 
 interface Route {
@@ -61,29 +61,29 @@ export interface HttpServerConfig {
   port?: number
   host?: string
   /**
-   * 对外挂载前缀（默认 ''，即根路径）。挂载进完整 dsh 宿主（plugin-dsh-bridge）时设为 '/rq'：
-   * 平台侧所有「根绝对路径」构造（OIDC 授权页 302、SSO 回跳 HTML 等）据此拼接，
-   * 保证单入口（dsh web 端口）下 /rq 前缀内的链接自洽。
+   * Préfixe de montage externe ('' par défaut, soit la racine). Monté dans l'hôte dsh complet (plugin-dsh-bridge), vaut '/rq' :
+   * toutes les constructions « chemins absolus racine » côté plateforme (302 de la page d'autorisation OIDC, HTML de retour SSO, etc.) se concatènent en conséquence,
+   * garantissant la cohérence des liens sous le préfixe /rq via l'entrée unique (port web dsh).
    */
   externalBase?: string
   /**
-   * 跨域放行来源（docs/frontend-host-switching.md：控制台「宿主连接切换」——A 机页面直连 B 机数据面）。
-   * 默认 ['*']：数据面是纯 Bearer 通道，跨域请求不携带 Cookie（/dsh-bridge/* 注册在 dsh webServer
-   * 根上、不经本分发），放开不改变同源语义；传 [] 关闭；传具体来源列表则精确回显（配合 Vary: Origin）。
+   * Origines autorisées cross-origin (docs/frontend-host-switching.md : « changement de connexion hôte » de la console — une page de la machine A accède directement au plan de données de la machine B).
+   * Défaut ['*'] : le plan de données est un pur canal Bearer, les requêtes cross-origin ne portent pas de Cookie (/dsh-bridge/* est enregistré
+   * à la racine du webServer dsh, sans passer par ce dispatch) — l'ouverture ne change pas la sémantique same-origin ; [] pour désactiver ; une liste d'origines précise est renvoyée en écho exact (avec Vary: Origin).
    */
   corsAllowOrigins?: string[]
   /**
-   * 安全响应头（默认开）：全部响应追加 `x-content-type-options: nosniff`、`x-frame-options: SAMEORIGIN`
-   * （挂载形态 /rq 与 dsh web 同源，SAMEORIGIN 不影响宿主面同源内嵌；钉钉 H5 微应用为顶层 webview）、
-   * `referrer-policy: strict-origin-when-cross-origin` 与基线 `content-security-policy`（G1-F2）。
-   * `SECURITY_HEADERS=off`（或 config false）一键关闭，对齐 PORTAL_SYNC / IAM_CONNECTOR_AUTO_SYNC 惯例。
+   * En-têtes de sécurité (activés par défaut) : toutes les réponses ajoutent `x-content-type-options: nosniff`, `x-frame-options: SAMEORIGIN`
+   * (forme montée /rq same-origin avec le web dsh, SAMEORIGIN n'empêche pas l'incorporation same-origin de la facette hôte ; l'application H5 DingTalk est une webview de premier niveau),
+   * `referrer-policy: strict-origin-when-cross-origin` et le `content-security-policy` de base (G1-F2).
+   * `SECURITY_HEADERS=off` (ou config false) désactive tout, dans la convention de PORTAL_SYNC / IAM_CONNECTOR_AUTO_SYNC.
    */
   securityHeaders?: boolean
 }
 
 /**
- * CORS 放行决议（纯函数，selftest 直测）：返回应回写的 access-control-allow-origin 值，
- * 未命中返回 undefined（不发放放行头）。
+ * Décision CORS (fonction pure, testée par selftest) : renvoie la valeur access-control-allow-origin à écrire,
+ * undefined si aucune correspondance (pas d'en-tête d'autorisation).
  */
 export function corsAllowOriginFor(allowOrigins: readonly string[], originHeader: string | undefined): string | undefined {
   if (!originHeader || allowOrigins.length === 0) return undefined
@@ -113,22 +113,22 @@ const MIME: Record<string, string> = {
 }
 
 /**
- * 基线 CSP（G1-F2，随 securityHeaders 开关启停）。取值依据页面实际用法：
- * 控制台/面板为零构建 SPA（外链 module 脚本 + 模板字符串生成的少量内联事件处理器），
- * OIDC 授权页/文档索引为服务端内联样式——script/style 需放行 'unsafe-inline'；
- * connect-src 在 'self' 之上放行 http/https：控制台「宿主连接切换」（docs/frontend-host-switching.md）
- * 会把 API 请求直发远程宿主，仅 'self' 会掐断该特性。后续可收紧路径：内联事件处理器改事件委托
- * （去 script 'unsafe-inline'）；connect-src 收敛为部署显式宿主清单。
+ * CSP de base (G1-F2, pilotée par le commutateur securityHeaders). Valeurs fondées sur l'usage réel des pages :
+ * console/panneau : SPA sans build (scripts module externes + quelques gestionnaires d'événements inline générés en template strings),
+ * page d'autorisation OIDC/index de documentation : styles inline côté serveur — script/style exigent 'unsafe-inline' ;
+ * connect-src autorise http/https au-delà de 'self' : le « changement de connexion hôte » de la console (docs/frontend-host-switching.md)
+ * envoie les requêtes API directement à l'hôte distant, 'self' seul couperait cette fonction. Pistes de resserrement ultérieur : gestionnaires inline → délégation d'événements
+ * (suppression du script 'unsafe-inline') ; connect-src restreint à la liste explicite des hôtes de déploiement.
  */
 const CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http: https:"
 
 /**
- * 协议/集成保留前缀（C-10）：/oauth、/.well-known、/mcp 是注册在本服务的协议面；
- * /rq、/dsh-bridge、/auth/entry 仅注册在 dsh webServer（独立宿主下本服务无对应处理器）；
- * /api 是数据面、/docs 是随包文档挂载。命中且无任何路由/静态目录匹配时返回 404 JSON，
- * 不再被 SPA 兜底吞成 200 HTML——集成方拿到可诊断的失败信号。
- * 仅作用于「无处理器命中」的兜底分支：已注册路由（/oauth/authorize、/mcp、/docs/* 等）不受影响，
- * 控制台/面板自有页面路由（hash 路由 + /panel、/ 静态挂载）不在此列。
+ * Préfixes réservés protocole/intégrations (C-10) : /oauth, /.well-known, /mcp sont la facette protocole enregistrée dans ce service ;
+ * /rq, /dsh-bridge, /auth/entry ne sont enregistrés que sur le webServer dsh (ce service n'a pas les handlers correspondants en hôte autonome) ;
+ * /api est le plan de données, /docs le montage de la documentation embarquée. Si un préfixe est touché sans aucune correspondance de route/répertoire statique → 404 JSON,
+ * au lieu d'être avalé par le repli SPA en 200 HTML — les intégrateurs obtiennent un signal d'échec diagnostiquable.
+ * Ne s'applique qu'à la branche de repli « aucun handler trouvé » : les routes enregistrées (/oauth/authorize, /mcp, /docs/*…) ne sont pas affectées,
+ * les routes de pages propres à la console/au panneau (routing par hash + /panel, / montage statique) ne sont pas concernées.
  */
 const RESERVED_PATH_PREFIXES = ['/api', '/rq', '/dsh-bridge', '/auth/entry', '/oauth', '/.well-known', '/mcp', '/docs']
 
@@ -144,19 +144,19 @@ export class HttpServerService extends Service {
   private server: Server | undefined
   readonly port: number
   readonly host: string
-  /** 对外挂载前缀：'' 或形如 '/rq'（无尾斜杠）。见 HttpServerConfig.externalBase。 */
+  /** Préfixe de montage externe : '' ou de la forme '/rq' (sans slash final). Voir HttpServerConfig.externalBase. */
   readonly externalBase: string
   private readonly corsAllowOrigins: string[]
-  /** 安全响应头默认开启（nosniff / SAMEORIGIN / Referrer-Policy）；SECURITY_HEADERS=off 或 config 显式 false 关闭。 */
+  /** En-têtes de sécurité activés par défaut (nosniff / SAMEORIGIN / Referrer-Policy) ; SECURITY_HEADERS=off ou config false pour désactiver. */
   private readonly securityHeaders: boolean
   /**
-   * 路由×权限矩阵（跨插件共享登记处）。register() 对 guarded 声明自动汇入（幂等去重），
-   * selftest「RBAC 端点矩阵 100% 越权断言网」据此驱动（review-dsh-agent-panel-v2 Phase 0）。
+   * Matrice routes×permissions (registre partagé inter-plugins). register() y fusionne automatiquement les déclarations guarded (déduplication idempotente),
+   * le « filet d'assertions 100% de dépassement de droits sur la matrice de points RBAC » du selftest s'en sert (review-dsh-agent-panel-v2 Phase 0).
    */
   readonly routeMatrix: Array<{ method: string; path: string; permission: string }> = []
   /**
-   * 全量路由台账（H5）：每个 register 都落一条，/api/* 缺声明在注册期直接抛错（fail-loud），
-   * route-matrix 端点据此暴露计数，断言网核对「guarded+public+authenticated 全覆盖」。
+   * Registre complet des routes (H5) : chaque register y écrit une entrée ; un /api/* sans déclaration lève dès l'enregistrement (fail-loud),
+   * le point route-matrix y expose le compteur, le filet d'assertions vérifie la « couverture complète guarded+public+authenticated ».
    */
   readonly declaredRoutes: RouteLedgerEntry[] = []
 
@@ -203,8 +203,8 @@ export class HttpServerService extends Service {
   }
 
   register(method: string, pattern: string, handler: HttpHandler, auth?: RouteAuthDecl): () => void {
-    // H5（T-01 教训）：/api/* 端点必须声明鉴权 profile，缺声明在注册期即抛错——
-    // 插件 apply 期抛错会让装配响亮失败，绝不让未声明端点静默上线逃出断言网。
+    // H5 (leçon T-01) : les points /api/* doivent déclarer leur profil d'authentification, sans déclaration → levée dès l'enregistrement —
+    // une levée pendant apply du plugin fait échouer l'assemblage bruyamment ; jamais de point non déclaré mis en ligne en silence, échappant au filet d'assertions.
     if (isApiPattern(pattern) && auth === undefined) {
       throw new Error(
         `httpServer: 注册 ${method.toUpperCase()} ${pattern} 缺少鉴权声明（auth: guarded{permission} | authenticated | public{selfValidated?}）`
@@ -228,7 +228,7 @@ export class HttpServerService extends Service {
     }
   }
 
-  /** 便捷注册全部常用动词。 */
+  /** Enregistrement pratique de tous les verbes courants. */
   route(pattern: string, handler: HttpHandler, methods = ['GET']): void {
     for (const method of methods) this.register(method, pattern, handler)
   }
@@ -264,18 +264,18 @@ export class HttpServerService extends Service {
   }
 
   /**
-   * 请求入口（公开）。独立形态由 start() 的 listener 调用；挂载形态（plugin-dsh-bridge，
-   * 完整 dsh 宿主下的单进程单入口）由 dsh webServer 的前缀路由剥离对外前缀后直接调用。
-   * 调用方保证 req.url 已是平台内部路径（/api/*、/、/docs/* 等）。
+   * Entrée des requêtes (public). En forme autonome, appelé par le listener de start() ; en forme montée (plugin-dsh-bridge,
+   * processus unique à entrée unique sous hôte dsh complet), appelé directement par les routes préfixées du webServer dsh après retrait du préfixe externe.
+   * L'appelant garantit que req.url est déjà un chemin interne de la plateforme (/api/*, /, /docs/*…).
    */
   async dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
     const pathSegments = url.pathname.split('/').filter(Boolean).map((s) => s)
     const method = (req.method ?? 'GET').toUpperCase()
 
-    // UI 全球化（2026-10-16）：请求级语言决议（?lang= > Cookie rq_lang > Accept-Language >
-    // PLATFORM_LOCALE > zh-CN），以 AsyncLocalStorage 包裹中间件+处理器+静态兜底全链——
-    // 任意深度的路由/服务代码调 t() 即得当前请求语言；默认 zh-CN 输出逐字节不变（selftest 零影响）。
+    // Globalisation UI (2026-10-16) : résolution de langue par requête (?lang= > Cookie rq_lang > Accept-Language >
+    // PLATFORM_LOCALE > zh-CN), en enveloppant middleware+handlers+repli statique dans AsyncLocalStorage sur toute la chaîne —
+    // tout code de route/service appelle t() et obtient la langue de la requête ; la sortie zh-CN par défaut reste identique octet par octet (selftest sans impact).
     const requestLocale = resolveRequestLocale({
       query: url.searchParams.get('lang'),
       cookie: parseCookieHeader(req.headers.cookie)['rq_lang'],
@@ -283,10 +283,10 @@ export class HttpServerService extends Service {
       env: process.env.PLATFORM_LOCALE,
     })
 
-    // 边缘明文口兜底下跳（外部 QA-20261014 QA-01 / 内部 G1-F1）：平台自身仅 HTTP（TLS 由
-    // Cloudflare Tunnel/反代承接），x-forwarded-proto: http 即代表用户走了明文入口，308 保方法
-    // 跳转 HTTPS；未带该头的本机/内网直连与 dsh 挂载形态不受影响。根治仍需边缘层
-    // 「Always Use HTTPS」，此处为源站兜底。HSTS 仅在确认安全传输时下发（明文链路无意义）。
+    // Repli de saut pour port en clair en bordure (QA externe 20261014 QA-01 / interne G1-F1) : la plateforme n'écoute qu'en HTTP (TLS pris en
+    // charge par Cloudflare Tunnel/le reverse proxy) ; x-forwarded-proto: http signifie que l'utilisateur est passé par l'entrée en clair → 308 en préservant la méthode
+    // vers HTTPS ; les connexions directes locales/intranet sans cet en-tête et la forme montée dsh ne sont pas affectées. La vraie correction reste la couche de bord
+    // (« Always Use HTTPS ») ; ceci est le repli côté origine. HSTS n'est émis qu'après confirmation d'un transport sécurisé (inutile sur lien en clair).
     const forwardedProto = (req.headers['x-forwarded-proto'] ?? '').split(',')[0]?.trim() ?? ''
     if (forwardedProto === 'http') {
       res.statusCode = 308
@@ -295,8 +295,8 @@ export class HttpServerService extends Service {
       return
     }
 
-    // 安全响应头（默认开，SECURITY_HEADERS=off 关闭）：经 setHeader 预挂，与后续
-    // ok/fail/file 的 writeHead 自然合并（与下方 CORS 放行头同一合并机制）。
+    // En-têtes de sécurité (activés par défaut, SECURITY_HEADERS=off pour désactiver) : pré-posés via setHeader, fusionnés naturellement
+    // avec les writeHead ultérieurs de ok/fail/file (même mécanisme de fusion que les en-têtes CORS ci-dessous).
     if (this.securityHeaders) {
       res.setHeader('x-content-type-options', 'nosniff')
       res.setHeader('x-frame-options', 'SAMEORIGIN')
@@ -307,21 +307,21 @@ export class HttpServerService extends Service {
       }
     }
 
-    // /api/* 数据面一律 no-store（G1-F2）：鉴权/业务响应不得进任何缓存层；
-    // 处理器经 writeHead 显式下发的缓存头（portal 契约 no-cache、SSE no-cache、静态 no-cache）优先生效
+    // Le plan de données /api/* est toujours no-store (G1-F2) : les réponses d'authentification/métier ne doivent entrer dans aucun cache ;
+    // les en-têtes de cache explicitement émis par les handlers via writeHead (contrat portal no-cache, SSE no-cache, statique no-cache) priment
     if (isApiPattern(url.pathname)) {
       res.setHeader('cache-control', 'no-store')
     }
 
-    // 跨域放行（宿主连接切换，docs/frontend-host-switching.md）：只覆盖平台 REST 数据面 /api/*，
-    // 且豁免自管 CORS 的子面——门户通道 /api/portal/* 与 OIDC 协议的 /api/authn/oidc/* 自行按
-    // 来源精确放行，不得被放宽（/oauth/*、/.well-known/* 不在 /api 内，天然不受影响）；
-    // 令牌铸造/交换面 /api/auth/*（login/refresh/票据兑换等公开端点）对 blanket '*' 永不发放
-    // （RQ 澄清第 1 条：防任意网页跨站读取登录响应做 drive-by 凭证探测）——配置具体来源
-    // 列表时仍按精确来源放行（corsAllowOriginFor 返回具体 origin 不受此豁免），远程宿主
-    // 在线登录由 B 侧显式配置来源，符合零信任默认基调。
-    // 先于鉴权中间件——浏览器预检 OPTIONS 不带 Bearer，不得被 401 拦截；放行头经 setHeader
-    // 预挂，与后续 ok/fail/file 的 writeHead 自然合并（错误体跨域同样可读）。
+    // Autorisation cross-origin (changement de connexion hôte, docs/frontend-host-switching.md) : couvre uniquement le plan REST /api/*,
+    // et exempte les sous-facettes gérant leur propre CORS — le canal portail /api/portal/* et le protocole OIDC /api/authn/oidc/* autorisent
+    // par origine exacte, sans être relâchés (/oauth/*, /.well-known/* sont hors /api, naturellement non affectés) ;
+    // la facette de frappe/échange de jetons /api/auth/* (login/refresh/échange de tickets… points publics) ne reçoit jamais de '*' générique
+    // (clarification RQ point 1 : empêcher toute page web de lire en cross-site la réponse de login pour sonder des identifiants drive-by) — avec une liste
+    // d'origines configurée, l'autorisation reste par origine exacte (corsAllowOriginFor renvoyant une origine précise n'est pas concerné) ; la connexion
+    // en ligne vers un hôte distant est configurée explicitement côté B, conforme au principe zéro confiance par défaut.
+    // Avant le middleware d'authentification — le préflight OPTIONS du navigateur ne porte pas de Bearer et ne doit pas être bloqué en 401 ; les en-têtes d'autorisation sont pré-posés
+    // via setHeader et fusionnés naturellement avec les writeHead ultérieurs de ok/fail/file (les corps d'erreur restent lisibles en cross-origin).
     const blanketCorsExempt = url.pathname.startsWith('/api/portal/')
       || url.pathname.startsWith('/api/authn/oidc/')
       || (this.corsAllowOrigins.includes('*') && url.pathname.startsWith('/api/auth/'))
@@ -372,8 +372,8 @@ export class HttpServerService extends Service {
       raw: req,
       res,
       ok(data, init) {
-        // 幂等守卫：错误处理器已写过响应时忽略（连接器路由的错误透传与外层 guarded 的兜底
-        // 存在同请求双写路径，二次 writeHead 会抛 ERR_HTTP_HEADERS_SENT）
+        // Garde d'idempotence : ignore si le gestionnaire d'erreurs a déjà écrit la réponse (la transmission d'erreur des routes connecteur et le repli
+        // du guarded externe partagent un chemin de double écriture sur la même requête ; un second writeHead lèverait ERR_HTTP_HEADERS_SENT)
         if (res.headersSent) return
         const payload = data === undefined ? { ok: true } : { ok: true, data }
         const text = JSON.stringify(payload)
@@ -389,9 +389,9 @@ export class HttpServerService extends Service {
       file(absolutePath, contentType) {
         void (async () => {
           try {
-            // 幂等守卫（与 ok/fail 同款）：错误处理器已写过响应时忽略——本方法体运行在
-            // 异步 IIFE 中，二次 writeHead 抛 ERR_HTTP_HEADERS_SENT 且无人接，会以
-            // uncaughtException 打死整个宿主进程（gate01-smoke 真机实证，2026-09-10）
+            // Garde d'idempotence (même modèle que ok/fail) : ignore si le gestionnaire d'erreurs a déjà écrit la réponse — ce corps de méthode tourne
+            // dans une IIFE asynchrone ; un second writeHead lève ERR_HTTP_HEADERS_SENT sans personne pour l'attraper, et tue tout le processus hôte
+            // en uncaughtException (prouvé sur machine réelle par gate01-smoke, 2026-09-10)
             if (res.headersSent) return
             const info = await stat(absolutePath)
             if (!info.isFile()) {
@@ -409,18 +409,18 @@ export class HttpServerService extends Service {
     }
 
     try {
-      // 请求级 locale 上下文包裹全链（中间件 → 路由处理器 → 静态/SPA 兜底）
+      // Enveloppe du contexte de locale par requête sur toute la chaîne (middleware → handlers de routes → repli statique/SPA)
       await runWithLocale(requestLocale, () => this.dispatchInner(exchange, method, pathSegments, url))
     } catch (error) {
       if (!res.writableEnded) {
-        // 生产安全：500 兜底不回传内部异常文本，详情仅入服务日志
+        // Sécurité en production : le repli 500 ne renvoie pas le texte interne de l'exception, les détails ne vont qu'au log du service
         exchange.fail(500, 'INTERNAL', t('服务器内部错误，请稍后重试或联系管理员'))
       }
       console.error(`[http] ${method} ${url.pathname} 处理异常`, error)
     }
   }
 
-  /** dispatch 的内层（请求级 locale 上下文内执行）：中间件链 → 路由匹配 → 静态目录/SPA 兜底。 */
+  /** Couche interne de dispatch (exécutée dans le contexte de locale par requête) : chaîne de middleware → correspondance de route → repli répertoire statique/SPA. */
   private async dispatchInner(
     exchange: HttpExchange,
     method: string,
@@ -441,15 +441,15 @@ export class HttpServerService extends Service {
       return
     }
 
-    // 静态目录最长前缀优先（/docs 等子路径挂载先于 / 兜底；同长保持注册顺序）
+    // Répertoires statiques : préfixe le plus long d'abord (/docs et autres sous-chemins montés avant le repli / ; à longueur égale, ordre d'enregistrement conservé)
     const staticCandidates = this.staticDirs
       .map((entry) => ({ entry, prefix: entry.prefix.replace(/\/$/, '') }))
       .filter(({ prefix }) => url.pathname === prefix || url.pathname.startsWith(`${prefix}/`))
       .sort((a, b) => b.prefix.length - a.prefix.length)
     if (staticCandidates.length > 0) {
-      // DEF-01 + C-10：/api 与协议/集成保留前缀（/rq、/dsh-bridge、/auth/entry、/oauth…）永不回落到
-      // 静态资源/SPA 页面——无对应路由且无同名静态挂载时一律 404 JSON，集成方拿到可诊断的失败信号；
-      // 有真实挂载（如 /docs、/panel 静态目录命中）则照常伺服，控制台自有页面路由不受影响
+      // DEF-01 + C-10 : /api et les préfixes réservés protocole/intégrations (/rq, /dsh-bridge, /auth/entry, /oauth…) ne retombent jamais sur les
+      // ressources statiques/pages SPA — sans route correspondante ni montage statique homonyme → toujours 404 JSON, signal d'échec diagnostiquable pour les intégrateurs ;
+      // un vrai montage (/docs, /panel touchés comme répertoires statiques) est servi normalement, les routes de pages de la console ne sont pas affectées
       const handledByStatic = staticCandidates.some(({ prefix }) => prefix !== '' && (url.pathname === prefix || url.pathname.startsWith(`${prefix}/`)))
       if (isReservedPath(url.pathname) && !handledByStatic) {
         exchange.fail(404, 'NOT_FOUND', t('路由不存在：{method} {path}', { method, path: url.pathname }))
@@ -460,7 +460,7 @@ export class HttpServerService extends Service {
       return
     }
     if (this.staticDirs.length > 0) {
-      // SPA 兜底：非协议/集成路径回落到第一个静态目录的 fallback 页（同上 C-10 口径）
+      // Repli SPA : les chemins non protocole/intégrations retombent sur la page fallback du premier répertoire statique (même règle C-10 que ci-dessus)
       if (!isReservedPath(url.pathname)) {
         const entry = this.staticDirs[0]!
         await this.serveFromDir(exchange, entry, entry.fallback ?? '/index.html')
@@ -471,9 +471,9 @@ export class HttpServerService extends Service {
   }
 
   private async serveFromDir(exchange: HttpExchange, entry: { dir: string; fallback?: string }, relative: string): Promise<void> {
-    // 百分号解码按段进行（中文等非 ASCII 文件名：浏览器发出的 /docs/<中文>.md 是
-    // percent-encoded 形态，不解码 stat 恒 miss → 中文文档 404，QA-20261014 G3-08-D1）。
-    // 解码后段内不得出现路径分隔符或 .. ——防 %2F 借解码越过目录（保持与原样路径同级的防穿越强度）。
+    // Décodage percent-encoding par segment (noms de fichiers non ASCII comme le chinois : /docs/<chinois>.md émis par le navigateur est
+    // percent-encoded ; sans décodage, stat échoue toujours → 404 sur les documents chinois, QA-20261014 G3-08-D1).
+    // Après décodage, aucun séparateur de chemin ni '..' ne doit apparaître dans le segment — empêche %2F de franchir le répertoire via le décodage (niveau anti-traversée identique au chemin brut).
     let rel = relative
     try {
       rel = relative
@@ -485,7 +485,7 @@ export class HttpServerService extends Service {
         })
         .join('/')
     } catch {
-      // 畸形编码（含非法 % 序列或越界段）：按原样路径尝试，由下方 stat 兜底
+      // Encodage malformé (séquence % illégale ou segment hors bornes) : tentative sur le chemin brut, le stat ci-dessous tranche
     }
     let target = join(entry.dir, normalize(rel).replace(/^([/\\])+/, ''))
     if (relative === '' || relative === '/') target = join(entry.dir, 'index.html')
@@ -493,9 +493,9 @@ export class HttpServerService extends Service {
       const info = await stat(target)
       if (info.isDirectory()) target = join(target, 'index.html')
     } catch {
-      // 带扩展名的资源路径未命中（/openapi.json、/js/missing.js、/docs/x.md…）不回落 index.html（issue #6）：
-      // 「看起来是 JSON/脚本」的路径回 200 HTML 会让 Agent 的接口探测与健康检查假阳性；SPA 兜底只服务
-      // 无扩展名的前端路由（控制台/面板为 hash 路由，深链接路径本就不带扩展名）。
+      // Les chemins de ressources avec extension non trouvés (/openapi.json, /js/missing.js, /docs/x.md…) ne retombent pas sur index.html (issue #6) :
+      // un chemin « qui ressemble à du JSON/script » répondant 200 HTML crée des faux positifs dans les sondes d'API et health checks des Agents ; le repli SPA ne sert
+      // que les routes frontend sans extension (console/panneau en routing par hash, les deep links n'ont de toute façon pas d'extension).
       if (hasFileExtension(rel)) {
         exchange.fail(404, 'NOT_FOUND', t('路由不存在：{method} {path}', { method: exchange.method, path: exchange.path }))
         return
@@ -507,13 +507,13 @@ export class HttpServerService extends Service {
   }
 }
 
-/** 末段含 `.ext`（ext 为 1–8 位字母数字）即视为资源文件路径；`/v1/x`、`/locales/zh-CN` 这类无扩展名路径不算。 */
+/** Le dernier segment contient `.ext` (ext de 1 à 8 caractères alphanumériques) → chemin de fichier de ressource ; `/v1/x`, `/locales/zh-CN` (sans extension) ne comptent pas. */
 export function hasFileExtension(pathname: string): boolean {
   const last = pathname.split('/').filter(Boolean).at(-1) ?? ''
   return /\.[a-zA-Z0-9]{1,8}$/.test(last)
 }
 
-/** 以当前模块为基准解析资源目录（ESM 下替代 __dirname）。 */
+/** Résout le répertoire de ressources relativement au module courant (remplace __dirname en ESM). */
 export function assetDir(importMeta: ImportMeta, ...relative: string[]): string {
   return join(fileURLToPath(importMeta.url), '..', '..', ...relative)
 }

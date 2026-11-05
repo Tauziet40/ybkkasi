@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 /**
- * Officer 三官「每日运营指标提报」一键挂载 + WeKnora 凭据重配（幂等，可重复执行）。
+ * Montage en un clic de la « remontée quotidienne de métriques opérationnelles » des trois officiers Officer + reconfiguration des identifiants WeKnora (idempotent, réexécutable).
  *
- * 背景（2026-11-02）：执行官/评价官/验收官的主动指标提报停在 10-28/29，之后只剩网关回灌的
- * 观测记录（无 dau/uniqueUsers）。本脚本用执行中枢的每日例行唤醒 + 每日循环任务把
- * 「自报 dau/sessions/uniqueUsers」变成三个 Officer 的固定日程。
+ * Contexte (2026-11-02) : les remontées proactives de métriques des officiers d'exécution/évaluation/réception se sont arrêtées au 28-29/10, ne laissant ensuite
+ * que les enregistrements d'observation réinjectés par la passerelle (sans dau/uniqueUsers). Ce script fait des « auto-déclarations dau/sessions/uniqueUsers »
+ * l'agenda fixe des trois officiers via les réveils quotidiens de routine du centre d'exécution + les tâches cycliques quotidiennes.
  *
- * 用法（管理员令牌在控制台「我的接入」页生成，或 dshctl credential 途径取得）：
- *   DSHCTL_URL=http://127.0.0.1:7300 DSHCTL_TOKEN=dst1.xxx node scripts/onboard-officer-reporting.mjs [--dry-run] [--weknora-key=<新key>]
+ * Usage (jeton administrateur généré depuis la page « Mes accès » de la console, ou via dshctl credential) :
+ *   DSHCTL_URL=http://127.0.0.1:7300 DSHCTL_TOKEN=dst1.xxx node scripts/onboard-officer-reporting.mjs [--dry-run] [--weknora-key=<nouvelle clé>]
  *
- * 动作（按名字幂等）：
- *   1. 三官各建/复用 cron 例行「每日运营指标提报」（0 1 * * * UTC = 北京 09:00；exec-hub 按 UTC 匹配）
- *   2. 三官各建/复用每日循环任务（指令文本进上下文包：调用 metrics-report 自报 dau/sessions/uniqueUsers）
- *   3. 核对三官机器主体 scopes 补 exec.read / exec.write（例行唤醒存活/认领的前提）
- *   4. 三官 attrs 配 heartbeatIntervalMinutes=30（保活 + 提高唤醒认领概率；全量 attrs 合并写回）
- *   5. --weknora-key=<新key>：重配 weknora-knowledge 服务的 endpoint 路径密钥并触发探活复核
- *      （WeKnora MCP 的 API key 在 URL 路径段；上游 403 即 key 失效，从 WeKnora 控制台重新签发）
+ * Actions (idempotent par nom) :
+ *   1. pour chaque officier, créer/réutiliser la routine cron « remontée quotidienne de métriques opérationnelles » (0 1 * * * UTC = 09:00 Pékin ; exec-hub compare en UTC)
+ *   2. pour chaque officier, créer/réutiliser la tâche cyclique quotidienne (texte d'instruction dans le paquet de contexte : appeler metrics-report en auto-déclaration dau/sessions/uniqueUsers)
+ *   3. vérifier puis compléter exec.read / exec.write dans les scopes du sujet machine des trois officiers (précondition de survie/claim des réveils de routine)
+ *   4. mettre attrs heartbeatIntervalMinutes=30 pour les trois officiers (maintien en vie + probabilité de claim accrue ; attrs fusionnés réécrits en intégralité)
+ *   5. --weknora-key=<nouvelle clé> : reconfigurer la clé de chemin d'endpoint du service weknora-knowledge et déclencher une contre-vérification de sonde de vie
+ *      (la clé API du MCP WeKnora est dans le segment de chemin de l'URL ; un 403 amont = clé invalidée, à ré-émettre depuis la console WeKnora)
  */
 import process from 'node:process'
 
@@ -61,7 +61,7 @@ const REPORT_HINT = [
 const summary = []
 const note = (message) => { summary.push(message); console.log(`  · ${message}`) }
 
-// —— 定位三官（名字含 Officer 的在线 Agent）——
+// —— Localisation des trois officiers (Agents en ligne dont le nom contient Officer) ——
 const agentsData = await call('GET', '/api/agents')
 const officers = agentsData.agents.filter((agent) => agent.name.includes('Officer') && agent.status === 'online')
 if (officers.length === 0) {
@@ -77,7 +77,7 @@ const principalsData = await call('GET', '/api/authn/principals')
 for (const officer of officers) {
   console.log(`\n■ ${officer.name}（${officer.id}）`)
 
-  // 1) 每日例行（按 agentId+名字幂等）
+  // 1) Routine quotidienne (idempotent par agentId+nom)
   const existingRoutine = routinesData.routines?.find((row) => row.agentId === officer.id && row.name === ROUTINE_NAME)
   if (existingRoutine) {
     note(`例行已存在（#${existingRoutine.id}，cron=${existingRoutine.cron}，enabled=${existingRoutine.enabled !== false}）——跳过`)
@@ -88,7 +88,7 @@ for (const officer of officers) {
     note(`例行已创建「${ROUTINE_NAME}」（每日北京 09:00 唤醒）`)
   }
 
-  // 2) 每日循环任务（指令文本进上下文包；按标题+指派幂等，忽略已完成历史）
+  // 2) Tâche cyclique quotidienne (texte d'instruction dans le paquet de contexte ; idempotent par titre+affectation, historique accompli ignoré)
   const existingIssue = issuesData.issues?.find((row) => row.assigneeAgentId === officer.id && row.title === ISSUE_TITLE && row.status !== 'done' && row.status !== 'archived')
   if (existingIssue) {
     note(`循环任务已存在（#${existingIssue.id}，status=${existingIssue.status}）——跳过`)
@@ -99,7 +99,7 @@ for (const officer of officers) {
     note('循环任务已创建（含 metrics-report 调用指令，认领后进入上下文包）')
   }
 
-  // 3) 机器主体 scopes 补 exec.read / exec.write（例行唤醒存活/认领前提）
+  // 3) Complément exec.read / exec.write des scopes du sujet machine (précondition de survie/claim des réveils de routine)
   const principal = principalsData.principals?.find((row) => row.refType === 'agent' && row.refId === officer.id)
   if (!principal) {
     note('⚠ 未找到机器主体（principal）——跳过 scopes 核对（该 Agent 无法认领唤醒）')
@@ -117,7 +117,7 @@ for (const officer of officers) {
     }
   }
 
-  // 4) 心跳保活（全量 attrs 合并写回——PATCH attrs 为整包替换语义）
+  // 4) Maintien en vie par heartbeat (attrs fusionnés réécrits en intégralité — PATCH attrs est une sémantique de remplacement complet)
   const attrs = { ...(officer.attrs ?? {}) }
   if (attrs.heartbeatIntervalMinutes === 30) {
     note('心跳已配 30 分钟——跳过')
@@ -130,7 +130,7 @@ for (const officer of officers) {
   }
 }
 
-// —— 5) WeKnora 凭据重配（可选）——
+// —— 5) Reconfiguration des identifiants WeKnora (optionnel) ——
 if (weknoraKey) {
   console.log('\n■ WeKnora 凭据重配')
   const servicesData = await call('GET', '/api/mcp/services')
@@ -140,7 +140,7 @@ if (weknoraKey) {
     process.exit(1)
   }
   const oldEndpoint = String(weknora.endpoint ?? '')
-  // WeKnora MCP 的 API key 在 URL 路径段（/mcp/<key>）：保留协议与主机，替换最后一段
+  // La clé API du MCP WeKnora est dans le segment de chemin de l'URL (/mcp/<key>) : conserver protocole et hôte, remplacer le dernier segment
   const replaced = oldEndpoint.replace(/\/mcp\/[^/?#]+/, `/mcp/${weknoraKey}`)
   if (replaced === oldEndpoint) {
     note(`⚠ endpoint 形态不符合 /mcp/<key>（${oldEndpoint}）——未改动，请人工核对`)

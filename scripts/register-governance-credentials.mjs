@@ -1,25 +1,25 @@
 #!/usr/bin/env node
 /**
- * register-governance-credentials.mjs —— AI 自治治理双身份凭证一键签发（对齐 register-dsh-app.mjs 惯例）。
+ * register-governance-credentials.mjs — émission en un clic des identifiants des deux identités de gouvernance de l'autonomie IA (aligné sur la convention register-dsh-app.mjs).
  *
- * 平台自身即 MCP 服务（POST /mcp，与 REST 同一套权限体系）。AI 接管平台的推荐形态是
- * 「双身份」而非单把万能钥匙：登记/提交与评审/决策分离成两个机器主体，让 agent.online
- * 类审批的 R12 职责分离（提交人≠审批人）在自治链路里依然成立：
- *   ① ybkk-gov-operator  治理执行官：scopes=['*']（全链路登记/提交/部署/管理）
- *   ② ybkk-gov-reviewer  治理评审官：approval.read/decide + agent.read + mcp.service.read + audit.read
- *     （只读 + 审批决策；除 agent.online 的 R12 外，其余类型审批同人放行，由双身份提供纵深）
+ * La plateforme est elle-même un service MCP (POST /mcp, même système de permissions que le REST). La forme recommandée de prise de contrôle de la plateforme par l'IA est
+ * la « double identité » plutôt qu'une clef universelle unique : enregistrement/soumission et revue/décision séparés en deux sujets machine, pour que la
+ * séparation des responsabilités R12 des approbations agent.online (soumetteur ≠ approbateur) reste valable dans la chaîne d'autonomie :
+ *   ① ybkk-gov-operator  officier d'exécution de gouvernance : scopes=['*'] (enregistrement/soumission/déploiement/gestion de bout en bout)
+ *   ② ybkk-gov-reviewer  officier de revue de gouvernance : approval.read/decide + agent.read + mcp.service.read + audit.read
+ *     (lecture seule + décisions d'approbation ; hors le R12 d'agent.online, l'auto-approbation passe pour les autres types, la double identité apportant la profondeur)
  *
- * 幂等可重跑：
- *   ① 按名称幂等查重（GET /api/authn/principals），已存在则复用不重建
- *   ② 不存在 → 经 POST /mcp authn_credential_create 签发（发凭证本身走 MCP 面，验证自举通道）
- *   ③ --rotate 时对已存在主体走 rotate-secret 轮换（旧 secret 立即失效）
- *   ④ client-credentials 换牌自验（/mcp tools/list + reviewer 调 approval_list）
- *   ⑤ 凭证落盘 <data-dir>/governance-credentials.json（0600；secret 仅签发/轮换时出现一次）
+ * Idempotent et réexécutable :
+ *   ① dédoublonnage idempotent par nom (GET /api/authn/principals), réutilise sans reconstruire s'il existe
+ *   ② absent → émission via POST /mcp authn_credential_create (l'émission des identifiants passe elle-même par la facette MCP, validant le canal d'amorçage)
+ *   ③ --rotate : rotation rotate-secret pour un sujet existant (ancien secret invalidé immédiatement)
+ *   ④ auto-vérification par échange client-credentials (/mcp tools/list + reviewer appelle approval_list)
+ *   ⑤ écriture des identifiants dans <data-dir>/governance-credentials.json (0600 ; le secret n'apparaît qu'une fois à l'émission/rotation)
  *
- * 用法：
+ * Usage :
  *   node scripts/register-governance-credentials.mjs --url http://127.0.0.1:7300 \
  *     --data-dir /Users/ybkk/ybkkasi/data
- *   （管理员凭证：DSHCTL_USER/DSHCTL_PASS 或 --user/--pass；已有令牌直接给 DSHCTL_TOKEN）
+ *   (identifiants administrateur : DSHCTL_USER/DSHCTL_PASS ou --user/--pass ; un jeton existant peut être passé directement via DSHCTL_TOKEN)
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -53,7 +53,7 @@ async function api(method, path, { token, body } = {}) {
   return { status: response.status, ok: payload?.ok !== false && response.status < 400, data: payload?.data, error: payload?.error, raw: payload }
 }
 
-/** 平台 /mcp JSON-RPC（Streamable HTTP）。 */
+/** JSON-RPC /mcp de la plateforme (Streamable HTTP). */
 async function mcp(token, method, params) {
   const response = await fetch(`${BASE_URL}/mcp`, {
     method: 'POST',
@@ -69,7 +69,7 @@ const toolCall = async (token, name, args) => {
   return JSON.parse(r.result.content[0].text)
 }
 
-// ---- ① 管理员身份 ----------------------------------------------------------
+// ---- ① Identité administrateur ----------------------------------------------------------
 let adminToken = process.env.DSHCTL_TOKEN ?? ''
 if (adminToken) log('使用 DSHCTL_TOKEN 环境变量令牌')
 if (!adminToken) {
@@ -82,15 +82,15 @@ if (!adminToken) {
   log(`管理员 ${user} 登录成功`)
 }
 
-// ---- ② 幂等查重 ------------------------------------------------------------
+// ---- ② Dédoublonnage idempotent ------------------------------------------------------------
 const principals = await api('GET', '/api/authn/principals', { token: adminToken })
 if (!principals.ok) fail(`读取机器主体台账失败：${principals.error?.message ?? principals.status}`)
 const findByName = (name) => (principals.data?.principals ?? []).find((item) => item.name === name)
 
-// 已落盘凭证：仅在未轮换时仍然可用（rotate 后旧 secret 失效）
+// Identifiants déjà écrits : utilisables seulement tant qu'ils n'ont pas été tournés (après rotate, l'ancien secret est invalidé)
 let saved = {}
 if (existsSync(CRED_FILE)) {
-  try { saved = JSON.parse(readFileSync(CRED_FILE, 'utf8')) } catch { /* 损坏即重签 */ }
+  try { saved = JSON.parse(readFileSync(CRED_FILE, 'utf8')) } catch { /* corrompu = ré-émission */ }
 }
 
 const issueOrReuse = async (name, scopes, savedEntry) => {
@@ -116,7 +116,7 @@ const issueOrReuse = async (name, scopes, savedEntry) => {
 const operator = await issueOrReuse(OPERATOR_NAME, ['*'], saved.operator)
 const reviewer = await issueOrReuse(REVIEWER_NAME, REVIEWER_SCOPES, saved.reviewer)
 
-// ---- ③ 换牌自验 ------------------------------------------------------------
+// ---- ③ Auto-vérification par échange ------------------------------------------------------------
 const tokenOf = async (cred, label) => {
   const cc = await api('POST', '/api/auth/client-credentials', { body: { clientId: cred.clientId, clientSecret: cred.clientSecret } })
   if (!cc.ok || !cc.data?.token) fail(`${label} 换牌失败：${cc.error?.message ?? JSON.stringify(cc.raw).slice(0, 120)}`)
@@ -132,7 +132,7 @@ log(`operator 换牌自验：/mcp tools/list → ${toolCount} 个工具（全权
 const pending = await toolCall(reviewerToken, 'approval_list', { status: 'pending' })
 log(`reviewer 换牌自验：approval_list → ${pending.total} 条待办（${pending.pending} pending）`)
 
-// ---- ④ 落盘（0600）--------------------------------------------------------
+// ---- ④ Écriture (0600)--------------------------------------------------------
 const record = {
   issuedAt: new Date().toISOString(),
   platform: BASE_URL,
@@ -144,7 +144,7 @@ writeFileSync(CRED_FILE, JSON.stringify(record, null, 2) + '\n')
 chmodSync(CRED_FILE, 0o600)
 log(`凭证落盘：${CRED_FILE}（0600）`)
 
-// ---- ⑤ 接入配置 -----------------------------------------------------------
+// ---- ⑤ Configuration d'intégration -----------------------------------------------------------
 const mcpEntry = (label, serverName, envVar, cred) => `    // ${label}${cred.clientSecret ? '' : '（复用已存 secret）'}
     "${serverName}": {
       "url": "${BASE_URL}/mcp",

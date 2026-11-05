@@ -1,19 +1,19 @@
 /**
- * 存储后端基准：JSON 集合 vs SQLite 集合（ADR-0001 验收配套）。
+ * Benchmark des backends de stockage : collections JSON vs collections SQLite (accompagnement de la recette ADR-0001).
  *
- * 用法：
- *   node scripts/storage-bench.mjs                     # 两后端各 10k 写入
- *   node scripts/storage-bench.mjs --writes 50000      # 加大写入量
- *   node scripts/storage-bench.mjs --backend sqlite    # 只跑单后端
+ * Usage :
+ *   node scripts/storage-bench.mjs                     # 10k écritures par backend
+ *   node scripts/storage-bench.mjs --writes 50000      # volume d'écritures augmenté
+ *   node scripts/storage-bench.mjs --backend sqlite    # un seul backend
  *
- * 口径说明（诚实基准）：
- *   - JSON 后端单写延迟 = 内存 Map 写入 + 防抖标记（落盘异步在后台发生，不计入单写延迟）；
- *   - SQLite 后端单写延迟 = 完整事务提交（WAL + synchronous=FULL，含 fsync）——
- *     这是「写入即持久」的代价，也是「返回 200 即落盘」的收益。
- *   - 验收线（ADR-0001 §八）：SQLite 串行 10k 写 P99 < 50ms；常驻内存不随写入量线性增长。
- *     口径为「串行」而非并发：node:sqlite 是同步 API、单进程单写者，本基准的写入循环
- *     即串行发射；「10k 并发写入」在本后端形态下不构成可真并发的口径（正式改口径
- *     见 ADR-0001 §五/§八，2026-10-16 批次；不做多进程压测——单进程单写者是其部署形态上限）。
+ * Notes de périmètre (benchmark honnête) :
+ *   - latence d'écriture unitaire du backend JSON = écriture Map en mémoire + marque anti-rebond (l'écriture disque est asynchrone en arrière-plan, non comptée dans la latence unitaire) ;
+ *   - latence d'écriture unitaire du backend SQLite = validation complète de transaction (WAL + synchronous=FULL, fsync inclus) —
+ *     c'est le prix de « l'écriture = persistance », et le bénéfice du « 200 renvoyé = écrit sur disque ».
+ *   - Ligne de recette (ADR-0001 §8) : P99 des 10k écritures série SQLite < 50 ms ; l'empreinte mémoire ne croît pas linéairement avec le volume d'écritures.
+ *     Le périmètre est « série » et non concurrent : node:sqlite est une API synchrone, un seul écrivain par processus ; la boucle d'écriture de ce benchmark
+ *     émet en série ; « 10k écritures concurrentes » ne constitue pas un périmètre réellement concurrent dans cette forme de backend (changement formel de périmètre
+ *     voir ADR-0001 §5/§8, lot 2026-10-16 ; pas de test de charge multi-processus — un seul processus, un seul écrivain, est le plafond de sa forme de déploiement).
  */
 import { Context } from '@deepseek-ai/cordis'
 import { StorageService } from '../packages/platform-core/src/storage.ts'
@@ -77,10 +77,10 @@ async function benchBackend(kind) {
   console.log(`  全表 all()    ：${allMs.toFixed(1)} ms（${all.length} 条）`)
   console.log(`  RSS           ：${rssBefore} MB（写入前 ${Math.round(process.memoryUsage().rss / 1024 / 1024)} MB 基线见进程启动）`)
 
-  // 触发 StorageService 的 dispose 钩子（关 DB 连接/停防抖定时器）；旧版 cordis 无 dispose 则跳过
+  // Déclenche le crochet dispose de StorageService (ferme la connexion DB/arrête les minuteurs anti-rebond) ; les anciennes versions de cordis sans dispose sautent
   try {
     await ctx.dispose?.()
-  } catch { /* 生命周期 API 差异不影响基准结果 */ }
+  } catch { /* les différences d'API de cycle de vie n'affectent pas les résultats du benchmark */ }
   rmSync(dataDir, { recursive: true, force: true })
   return { kind, p99: writeLatencies[Math.floor(writeLatencies.length * 0.99)] }
 }

@@ -1,5 +1,5 @@
 /**
- * agent 插件对模型暴露的工具。
+ * Outils exposés au modèle par le plugin agent.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ToolPrincipal } from '../../platform-core/src/index.ts'
@@ -11,7 +11,7 @@ export const inject = ['tools', 'agentRegistry', 'resourceCore', 'iam', 'audit']
 export function apply(ctx: Context) {
   const t = ctx.tools
 
-  /** 登记/评审类工具的调用方投影（fail-closed）：owner 取令牌身份，禁止从 args 组装。 */
+  /** Projection de l'appelant pour les outils d'enregistrement/revue (fail-closed) : owner pris de l'identité du jeton, interdiction de l'assembler depuis args. */
   const registrarOf = (principal?: ToolPrincipal): { id: string; name: string } => {
     if (!principal) throw new Error(translate('工具执行缺少身份上下文（fail-closed）'))
     return { id: principal.userId ?? principal.principalId, name: principal.name }
