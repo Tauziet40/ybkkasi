@@ -66,7 +66,7 @@ const STATUS_MAP = {
 }
 export function statusBadge(status, label) {
   const [cls, text] = STATUS_MAP[status] ?? ['badge-muted', status]
-  return `<span class="badge ${cls}">${esc(label ?? text)}</span>`
+  return `<span class="badge ${cls}">${esc(rqI18n.t(label ?? text))}</span>`
 }
 export function resultBadge(result) {
   const map = { ok: ['badge-ok', '成功'], denied: ['badge-danger', '拒绝'], error: ['badge-danger', '异常'] }
@@ -281,7 +281,7 @@ const PATH_CACHE = PATHS
 
 // ---------- SVG 图表 ----------
 export function sparkline(values, { width = 220, height = 48, color = '#0a5f87', fill = true } = {}) {
-  if (!values?.length) return '<span class="text-4 fs-12">暂无数据</span>'
+  if (!values?.length) return `<span class="text-4 fs-12">${esc(rqI18n.t('暂无数据'))}</span>`
   const max = Math.max(...values, 1)
   const min = Math.min(...values, 0)
   const span = max - min || 1
@@ -302,7 +302,7 @@ export function sparkline(values, { width = 220, height = 48, color = '#0a5f87',
 }
 
 export function barChart(items, { width = 560, height = 170, color = '#0a5f87', format = (v) => v } = {}) {
-  if (!items?.length) return '<div class="text-4 fs-12" style="padding:20px">暂无数据</div>'
+  if (!items?.length) return `<div class="text-4 fs-12" style="padding:20px">${esc(rqI18n.t('暂无数据'))}</div>`
   const max = Math.max(...items.map((i) => i.value), 1)
   const gap = 6
   const barW = Math.max(4, (width - gap * (items.length - 1)) / items.length)
@@ -457,7 +457,7 @@ export function areaChart({ series, labels = [], unit = '', color = BRAND, heigh
   ).join('')
   const last = series.length - 1
   return `
-    <svg viewBox="0 0 ${w} ${h}" style="width:100%;display:block" role="img" aria-label="趋势图">
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%;display:block" role="img" aria-label="${esc(rqI18n.t('趋势图'))}">
       <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="${color}" stop-opacity="0.16"/>
         <stop offset="100%" stop-color="${color}" stop-opacity="0.01"/>
@@ -490,7 +490,7 @@ export function dualTrendChart({ actual = [], target = [], labels = [], unit = '
   ).join('')
   const last = actual.length - 1
   return `
-    <svg viewBox="0 0 ${w} ${h}" style="width:100%;display:block" role="img" aria-label="双序列趋势图">
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%;display:block" role="img" aria-label="${esc(rqI18n.t('双序列趋势图'))}">
       <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="${color}" stop-opacity="0.14"/>
         <stop offset="100%" stop-color="${color}" stop-opacity="0.01"/>
@@ -736,7 +736,7 @@ export function mountSearchableSelects(rootEl) {
       const kw = (keyword ?? '').trim().toLowerCase()
       const matched = conf.options.filter((opt) => !kw || String(opt.label).toLowerCase().includes(kw) || String(opt.group ?? '').toLowerCase().includes(kw))
       if (!matched.length && !conf.emptyLabel) {
-        list.innerHTML = '<div class="searchable-select-empty">没有匹配的选项</div>'
+        list.innerHTML = `<div class="searchable-select-empty">${esc(rqI18n.t('没有匹配的选项'))}</div>`
         return
       }
       // 按 group 分组（保持传入顺序），无 group 的归入同一组
@@ -763,7 +763,7 @@ export function mountSearchableSelects(rootEl) {
           html += `<div class="searchable-select-item${active}" data-value="${esc(opt.value)}" title="${esc(label)}">${visual}</div>`
         }
       }
-      if (!matched.length) html += '<div class="searchable-select-empty">没有匹配的选项，换个关键词试试</div>'
+      if (!matched.length) html += `<div class="searchable-select-empty">${esc(rqI18n.t('没有匹配的选项，换个关键词试试'))}</div>`
       list.innerHTML = html
       list.querySelectorAll('.searchable-select-item').forEach((item) => {
         item.onclick = () => {
@@ -846,13 +846,13 @@ function mountMultiPicker(picker, conf) {
 
   const renderList = (keyword) => {
     if (!conf.options.length) {
-      list.innerHTML = '<div class="searchable-select-empty">没有可选项</div>'
+      list.innerHTML = `<div class="searchable-select-empty">${esc(rqI18n.t('没有可选项'))}</div>`
       return
     }
     const kw = (keyword ?? '').trim().toLowerCase()
     const matched = conf.options.filter((opt) => !kw || String(opt.label).toLowerCase().includes(kw) || String(opt.group ?? '').toLowerCase().includes(kw))
     if (!matched.length) {
-      list.innerHTML = '<div class="searchable-select-empty">没有匹配的选项，换个关键词试试</div>'
+      list.innerHTML = `<div class="searchable-select-empty">${esc(rqI18n.t('没有匹配的选项，换个关键词试试'))}</div>`
       return
     }
     const groups = new Map()
@@ -934,9 +934,9 @@ export function pagination(total, page, pageSize, onPage) {
   const el = h(`
     <div class="flex" style="justify-content:flex-end;margin-top:14px;gap:6px">
       <span class="fs-12 text-3">${esc(rqI18n.t('共 {n} 条', { n: total }))}</span>
-      <button class="btn btn-ghost btn-sm" data-p="${page - 1}" ${page <= 1 ? 'disabled' : ''}>‹ 上一页</button>
+      <button class="btn btn-ghost btn-sm" data-p="${page - 1}" ${page <= 1 ? 'disabled' : ''}>${esc(rqI18n.t('‹ 上一页'))}</button>
       <span class="fs-13" style="padding:0 6px">${page} / ${pages}</span>
-      <button class="btn btn-ghost btn-sm" data-p="${page + 1}" ${page >= pages ? 'disabled' : ''}>下一页 ›</button>
+      <button class="btn btn-ghost btn-sm" data-p="${page + 1}" ${page >= pages ? 'disabled' : ''}>${esc(rqI18n.t('下一页 ›'))}</button>
     </div>`)
   el.querySelectorAll('button[data-p]').forEach((btn) => {
     btn.onclick = () => onPage(Number(btn.dataset.p))

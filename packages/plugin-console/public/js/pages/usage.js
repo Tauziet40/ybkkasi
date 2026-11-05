@@ -13,7 +13,7 @@ import rqI18n from '../i18n.js'
 
 export async function renderUsage(content, params, ctx) {
   const dim = params.get('dim') === 'cost' ? 'cost' : 'tokens'
-  content.innerHTML = '<div style="padding:48px;text-align:center;color:var(--text-3)">用量报表加载中…</div>'
+  content.innerHTML = `<div style="padding:48px;text-align:center;color:var(--text-3)">${esc(rqI18n.t('用量报表加载中…'))}</div>`
 
   let report = null
   let loadError = null
@@ -70,7 +70,7 @@ export async function renderUsage(content, params, ctx) {
   const chartHtml = areaChart({
     series: values,
     labels: series.map((point) => String(point.date ?? '').slice(5)),
-    unit: dim === 'cost' ? '元 / 日' : 'tokens / 日',
+    unit: dim === 'cost' ? rqI18n.t('元 / 日') : rqI18n.t('tokens / 日'),
     color: dim === 'cost' ? '#c2410c' : undefined,
     height: 200,
   })
@@ -106,7 +106,7 @@ export async function renderUsage(content, params, ctx) {
         <div class="table-wrap">
           <table class="tbl">
             <thead><tr>
-              <th>部门</th><th style="text-align:right">消耗（tokens）</th><th style="width:150px">占比</th><th style="text-align:right">环比</th>
+              <th>${esc(rqI18n.t('部门'))}</th><th style="text-align:right">${esc(rqI18n.t('消耗（tokens）'))}</th><th style="width:150px">${esc(rqI18n.t('占比'))}</th><th style="text-align:right">${esc(rqI18n.t('环比'))}</th>
             </tr></thead>
             <tbody>
               ${byOrg.map((row) => `

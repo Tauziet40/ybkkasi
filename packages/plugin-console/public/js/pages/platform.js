@@ -38,7 +38,7 @@ export async function renderPlatform(content) {
 
     <div class="grid-2 mb-20" style="grid-template-columns:1.2fr 1fr;align-items:start">
       <div class="card">
-        <div class="card-head"><span class="card-title">${icon('puzzle', 15)} 插件树</span><span class="card-sub">dsh-plugin-* 体系</span></div>
+        <div class="card-head"><span class="card-title">${icon('puzzle', 15)} 插件树</span><span class="card-sub">${esc(rqI18n.t('dsh-plugin-* 体系'))}</span></div>
         <div class="card-body" style="padding-top:8px">
           ${info.plugins.map((plugin) => {
             const meta = pluginDesc[plugin] ?? ['业务域', '', 'box']
@@ -60,7 +60,7 @@ export async function renderPlatform(content) {
             <div class="flex" style="padding:6px 0;border-bottom:1px solid var(--border)">
               <span class="mono fs-11" style="color:var(--brand-600);min-width:150px">${esc(event.name)}</span>
               <span class="fs-11 text-4">${timeAgo(event.at)}</span>
-            </div>`).join('') || '<span class="text-4 fs-12">暂无</span>'}
+            </div>`).join('') || `<span class="text-4 fs-12">${esc(rqI18n.t('暂无'))}</span>`}
         </div>
       </div>
     </div>

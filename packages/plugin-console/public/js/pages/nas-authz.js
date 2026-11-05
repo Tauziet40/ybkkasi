@@ -89,7 +89,7 @@ function orgOptions() {
 const userOptions = () => userList.map((u) => ({
   value: u.id,
   label: rqI18n.t('{name}{org}', { name: u.displayName, org: u.orgName ? `（${u.orgName}）` : '' }),
-  group: u.status === 'active' ? '在职' : '非在职',
+  group: u.status === 'active' ? rqI18n.t('在职') : rqI18n.t('非在职'),
 }))
 
 function renderBody() {
@@ -137,7 +137,7 @@ function renderGates() {
         <div class="az-card-title">灰度开关</div>
         <div class="az-card-sub">version ${rules.version} · ${esc(rqI18n.t('最近更新：{by}{at}', { by: rules.updatedBy ? esc(rules.updatedBy) : '—', at: rules.updatedAt ? ` · ${timeAgo(rules.updatedAt)}` : '' }))}</div>
       </div>
-      <span class="badge no-dot ${rules.observeOnly ? 'badge-warn' : 'badge-ok'}">${rules.observeOnly ? '观察模式' : '强制执行'}</span>
+      <span class="badge no-dot ${rules.observeOnly ? 'badge-warn' : 'badge-ok'}">${rules.observeOnly ? esc(rqI18n.t('观察模式')) : esc(rqI18n.t('强制执行'))}</span>
     </div>
     ${gate('observeOnly', '观察模式 observeOnly', 'deny 只告警不拦截（G0）；关闭后网关/hermes 按判定强制执行')}
     ${gate('degradeAllToReadonly', '全量降级只读 degradeAllToReadonly', '所有 allow 视作 readonly（G3 应急降级）')}
@@ -306,7 +306,7 @@ function renderMatrix() {
       <table class="tbl az-matrix">
         <thead><tr><th>角色</th>${OPS.map((op) => `<th>${OP_LABEL[op]}</th>`).join('')}</tr></thead>
         <tbody>
-          ${ROLES.map((role) => `<tr><td class="az-role-cell"><span class="az-role-tag">${role}</span>${ROLE_LABEL[role].slice(2)}</td>${OPS.map((op) => cell(role, op)).join('')}</tr>`).join('')}
+          ${ROLES.map((role) => `<tr><td class="az-role-cell"><span class="az-role-tag">${role}</span>${esc(rqI18n.t(ROLE_LABEL[role].slice(2)))}</td>${OPS.map((op) => cell(role, op)).join('')}</tr>`).join('')}
           <tr class="az-matrix-crow"><td class="az-role-cell"><span class="az-role-tag az-role-tag-c">C</span>跨域只读(叠加)</td><td colspan="7" class="az-matrix-cnote">read/download 放行（跨域），写类一律拒绝；白名单目录写需显式例外</td></tr>
         </tbody>
       </table>

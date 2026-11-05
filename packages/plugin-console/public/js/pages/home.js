@@ -8,8 +8,9 @@
  * 粒子星尘、数字滚动与滚动显现（IntersectionObserver）；rAF 循环以 canvas 脱离文档为退出条件。
  */
 import { icon } from '../icons.js'
+import rqI18n from '../i18n.js'
 import { session } from '../api.js'
-import { $, $$ } from '../ui.js'
+import { $, $$, esc } from '../ui.js'
 
 /** 生态树数据：平台 → 三域 → 资源叶（与控制台导航同源的 12 个能力面） */
 const TREE = {
@@ -44,13 +45,21 @@ const STATS = [
 ]
 
 export function renderHome(app) {
-  const loginLabel = session.token ? '进入控制台' : '登录控制台'
+  const loginLabel = session.token ? rqI18n.t('进入控制台') : rqI18n.t('登录控制台')
+  // 画布/SVG 内文本不受 DOM 翻译引擎覆盖（canvas fillText、<svg> 子树被跳过）——渲染时显式翻译
+  const treeData = {
+    label: rqI18n.t(TREE.label),
+    children: TREE.children.map((domain) => ({
+      label: rqI18n.t(domain.label),
+      children: domain.children.map((leaf) => rqI18n.t(leaf)),
+    })),
+  }
   app.innerHTML = `
   <div class="home">
     <nav class="home-nav" id="home-nav">
       <a class="home-nav-brand" href="#/home">
-        <img src="ybk-mark.png" alt="元冰可">
-        <div><div class="cn">元冰可</div><div class="en">YUANBINGKE</div></div>
+        <img src="ybk-mark.png" alt="${esc(rqI18n.t('元冰可'))}">
+        <div><div class="cn">${esc(rqI18n.t('元冰可'))}</div><div class="en">${esc(rqI18n.t('YUANBINGKE'))}</div></div>
       </a>
       <div class="home-nav-links">
         <a href="#sec-features">产品能力</a>
@@ -69,12 +78,12 @@ export function renderHome(app) {
       <div class="home-hero-copy">
         <div class="home-hero-eyebrow"><span class="dot"></span>企业级 AI 资源管理平台</div>
         <h1>让团队一起用 AI，<br>把<span class="grad">每一份资源</span>都管起来</h1>
-        <p class="home-hero-sub">Skill 市场、Agent 本体、AI 应用、MCP 服务、模型网关、NAS 存储——六类资源一套身份、一套权限、一套审计。基于 DeepSeek Harness「一切皆插件」架构，九大业务域即插即用，按团队需要随用随上。</p>
+        <p class="home-hero-sub">${esc(rqI18n.t('Skill 市场、Agent 本体、AI 应用、MCP 服务、模型网关、NAS 存储——六类资源一套身份、一套权限、一套审计。基于 DeepSeek Harness「一切皆插件」架构，九大业务域即插即用，按团队需要随用随上。'))}</p>
         <div class="home-hero-actions">
           <a class="home-btn home-btn-primary" href="#/login">${icon('arrowUp')}${loginLabel}</a>
           <a class="home-btn home-btn-ghost" href="#sec-start">了解架构</a>
         </div>
-        <div class="home-hero-hint">${icon('shieldCheck')}支持钉钉扫码 · 账号密码 · 一次性票据免登</div>
+        <div class="home-hero-hint">${icon('shieldCheck')}${esc(rqI18n.t('支持钉钉扫码 · 账号密码 · 一次性票据免登'))}</div>
       </div>
       <div class="home-hero-visual">
         <div class="home-tree-wrap">
@@ -87,8 +96,8 @@ export function renderHome(app) {
     <div class="home-stats">
       ${STATS.map((s, i) => `
       <div class="home-stat home-reveal" style="--d:${i * 0.08}s">
-        <div class="home-stat-num" data-n="${s.n}">0<span class="unit">${s.unit}</span></div>
-        <div class="home-stat-lab">${s.lab}</div>
+        <div class="home-stat-num" data-n="${s.n}">0<span class="unit">${esc(rqI18n.t(s.unit))}</span></div>
+        <div class="home-stat-lab">${esc(rqI18n.t(s.lab))}</div>
         <div class="bar"></div>
       </div>`).join('')}
     </div>
@@ -103,8 +112,8 @@ export function renderHome(app) {
         ${FEATURES.map((f, i) => `
         <div class="home-card${f.green ? ' green' : ''} home-reveal" style="--d:${(i % 4) * 0.07}s">
           <div class="home-card-ic">${icon(f.icon)}</div>
-          <div class="home-card-title">${f.title}</div>
-          <div class="home-card-desc">${f.desc}</div>
+          <div class="home-card-title">${esc(rqI18n.t(f.title))}</div>
+          <div class="home-card-desc">${esc(rqI18n.t(f.desc))}</div>
         </div>`).join('')}
       </div>
     </section>
@@ -132,7 +141,7 @@ export function renderHome(app) {
         </div>
         <div>
           <div class="home-topo">
-            <svg viewBox="0 0 480 268" width="100%" role="img" aria-label="依赖拓扑示意">
+            <svg viewBox="0 0 480 268" width="100%" role="img" aria-label="${esc(rqI18n.t('依赖拓扑示意'))}">
               <defs>
                 <marker id="tp-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
                   <path d="M0,0 L8,4 L0,8 z" fill="rgba(159,196,255,0.55)"/>
@@ -170,19 +179,19 @@ export function renderHome(app) {
                 <rect x="366" y="136" width="88" height="32" rx="8"/>
               </g>
               <g font-size="12" fill="#C4DBFF" text-anchor="middle" font-family="inherit">
-                <text x="61" y="88">智能客服</text>
-                <text x="61" y="180">营销助手</text>
-                <text x="225" y="70">客服 Agent</text>
-                <text x="225" y="120" fill="#4EE59B">数据 Agent</text>
-                <text x="410" y="66">MCP · 知识库</text>
-                <text x="410" y="111">Skill · 工单</text>
-                <text x="410" y="156" fill="#4EE59B">MCP · 报表</text>
-                <text x="410" y="201">Skill · 分析</text>
+                <text x="61" y="88">${esc(rqI18n.t('智能客服'))}</text>
+                <text x="61" y="180">${esc(rqI18n.t('营销助手'))}</text>
+                <text x="225" y="70">${esc(rqI18n.t('客服 Agent'))}</text>
+                <text x="225" y="120" fill="#4EE59B">${esc(rqI18n.t('数据 Agent'))}</text>
+                <text x="410" y="66">${esc(rqI18n.t('MCP · 知识库'))}</text>
+                <text x="410" y="111">${esc(rqI18n.t('Skill · 工单'))}</text>
+                <text x="410" y="156" fill="#4EE59B">${esc(rqI18n.t('MCP · 报表'))}</text>
+                <text x="410" y="201">${esc(rqI18n.t('Skill · 分析'))}</text>
               </g>
               <g font-size="10.5" fill="#7E9AD2" text-anchor="middle">
-                <text x="61" y="46">AI 应用</text>
-                <text x="225" y="38">Agent 本体</text>
-                <text x="410" y="30">能力底座（MCP / Skill）</text>
+                <text x="61" y="46">${esc(rqI18n.t('AI 应用'))}</text>
+                <text x="225" y="38">${esc(rqI18n.t('Agent 本体'))}</text>
+                <text x="410" y="30">${esc(rqI18n.t('能力底座（MCP / Skill）'))}</text>
               </g>
             </svg>
             <div class="home-topo-cap">依赖穿透示例：营销助手 → 数据 Agent → MCP · 报表（绿色链路）</div>
@@ -228,7 +237,7 @@ export function renderHome(app) {
         <div class="home-footer-brand">
           <img src="ybk-mark.png" alt="元冰可">
           <div>
-            <div class="cn">元冰可 <span style="font-size:11px;letter-spacing:2px;color:#7E9AD2;font-weight:500">YUANBINGKE</span></div>
+            <div class="cn">${esc(rqI18n.t('元冰可'))} <span style="font-size:11px;letter-spacing:2px;color:#7E9AD2;font-weight:500">${esc(rqI18n.t('YUANBINGKE'))}</span></div>
             <div class="en">让企业的每一份 AI 资产，安全、可见、可协作</div>
             <div class="tag">企业AI资源管理平台 · 一切皆插件</div>
           </div>
@@ -238,8 +247,8 @@ export function renderHome(app) {
           <a href="#sec-arch">架构理念</a>
           <a href="#sec-start">快速开始</a>
           <a href="#/panels">部门面板</a>
-          <a href="/blog/">技术笔记</a>
-          <a href="https://github.com/01men/ybkkasi" target="_blank" rel="noopener" id="home-footer-github">GitHub 源码 · MIT</a>
+          <a href="/blog/">${esc(rqI18n.t('技术笔记'))}</a>
+          <a href="https://github.com/01men/ybkkasi" target="_blank" rel="noopener" id="home-footer-github">${esc(rqI18n.t('GitHub 源码 · MIT'))}</a>
         </div>
       </div>
       <div class="home-footer-meta">
@@ -251,7 +260,7 @@ export function renderHome(app) {
 
   mountNav(app)
   mountStars($('#home-stars'))
-  mountTree($('#home-tree'))
+  mountTree($('#home-tree'), treeData)
   mountCounters(app)
   mountReveal(app)
   // 01门入口（2026-11-01）：dsh 侧装态（/gate01/panel/），底座不感知——探测存在才渲染
@@ -261,9 +270,9 @@ export function renderHome(app) {
     .then((url) => {
       if (!url) return
       $('#home-cta-actions')?.insertAdjacentHTML('beforeend',
-        `<a class="home-btn home-btn-light" href="${url}" target="_blank" rel="noopener">01门 · 部门工作台</a>`)
+        `<a class="home-btn home-btn-light" href="${url}" target="_blank" rel="noopener">${esc(rqI18n.t('01门 · 部门工作台'))}</a>`)
       $('.home-footer-links')?.insertAdjacentHTML('beforeend',
-        `<a href="${url}" target="_blank" rel="noopener">01门工作台</a>`)
+        `<a href="${url}" target="_blank" rel="noopener">${esc(rqI18n.t('01门工作台'))}</a>`)
     })
     .catch(() => { /* 探测失败按未挂载处理 */ })
 }
@@ -335,7 +344,7 @@ function mountStars(canvas) {
 }
 
 /* ---------- 资源生态树：生长动画 + 绿色流转脉冲 + 悬停依赖链高亮 ---------- */
-function mountTree(canvas) {
+function mountTree(canvas, tree = TREE) {
   if (!canvas) return
   // canvas 缺席守卫（headless/jsdom 或 canvas 被禁用的环境）：跳过生态树动画，页面结构照常渲染
   const ctx = canvas.getContext ? canvas.getContext('2d') : null
@@ -363,9 +372,9 @@ function mountTree(canvas) {
 
     nodes = []
     edges = []
-    const root = { id: '根', label: TREE.label, x: w / 2, y: 46, r: 15, depth: 0, parent: null, appearAt: 0 }
+    const root = { id: '根', label: tree.label, x: w / 2, y: 46, r: 15, depth: 0, parent: null, appearAt: 0 }
     nodes.push(root)
-    TREE.children.forEach((domain, di) => {
+    tree.children.forEach((domain, di) => {
       const dx = w * (0.5 + (di - 1) * 0.32)
       const dn = { id: `域${di}`, label: domain.label, x: dx, y: 128, r: 10.5, depth: 1, parent: root, appearAt: 0.16 + di * 0.1 }
       nodes.push(dn)

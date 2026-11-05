@@ -76,7 +76,7 @@ export function renderConnections(content, params, { standalone = false } = {}) 
           <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px" id="conn-panels"></div>`}
         </div>
       </div>
-      ${standalone ? '<div style="margin-top:16px"><a class="fs-13" style="color:var(--brand-500);cursor:pointer" id="conn-back">← 返回登录</a></div></div>' : ''}
+      ${standalone ? '<div style="margin-top:16px"><a class="fs-13" style="color:var(--brand-500);cursor:pointer" id="conn-back">${esc(rqI18n.t('← 返回登录'))}</a></div></div>' : ''}
     `
 
     $('#conn-back')?.addEventListener('click', () => { location.hash = '#/login' })
@@ -93,7 +93,7 @@ export function renderConnections(content, params, { standalone = false } = {}) 
     // 独立登录形态（无会话）不渲染——登记是登录后的管理动作。
     const panelsHost = $('#conn-panels')
     if (panelsHost) {
-      panelsHost.innerHTML = '<div class="fs-12 text-4">正在读取面板部门目录…</div>'
+      panelsHost.innerHTML = '<div class="fs-12 text-4">${esc(rqI18n.t('正在读取面板部门目录…'))}</div>'
       renderPanelRegistry(panelsHost, { depts: panelDepts, onChange: render })
     }
 
@@ -105,8 +105,8 @@ export function renderConnections(content, params, { standalone = false } = {}) 
       <div style="flex:1;min-width:220px">
         <div class="fs-13" style="font-weight:600;display:flex;gap:8px;align-items:center">
           ${esc(item.name)}
-          ${current.id === item.id ? '<span class="badge badge-ok no-dot">当前</span>' : ''}
-          ${isLocal ? '<span class="badge badge-muted no-dot">内置</span>' : ''}
+          ${current.id === item.id ? `<span class="badge badge-ok no-dot">${esc(rqI18n.t('当前'))}</span>` : ''}
+          ${isLocal ? `<span class="badge badge-muted no-dot">${esc(rqI18n.t('内置'))}</span>` : ''}
         </div>
         <div class="fs-12" style="color:var(--text-3);font-family:ui-monospace,Consolas,monospace;word-break:break-all">${esc(item.base)}</div>
         <div class="fs-12 conn-probe" style="color:var(--text-3)"></div>

@@ -15,7 +15,7 @@ import {
 } from '../ui.js'
 
 export async function renderGateway(content, params, ctx) {
-  content.innerHTML = '<div style="padding:48px;text-align:center;color:var(--text-3)">模型网关加载中…</div>'
+  content.innerHTML = `<div style="padding:48px;text-align:center;color:var(--text-3)">${esc(rqI18n.t('模型网关加载中…'))}</div>`
   await mount(content, ctx)
 }
 
@@ -57,7 +57,7 @@ async function mount(content, ctx) {
     ${sectionHead({
       label: 'MODEL GATEWAY',
       title: '模型接入网关',
-      extra: 'OpenAI 兼容真实转发 · 分级路由沿「主力 → 备用 → 兜底」降级链切换 · 预算熔断按内部成本参考口径',
+      extra: rqI18n.t('OpenAI 兼容真实转发 · 分级路由沿「主力 → 备用 → 兜底」降级链切换 · 预算熔断按内部成本参考口径'),
       actions: `
         <button class="btn btn-default" id="gw-probe">${icon('zap', 14)} 渠道探测</button>
         ${canAdmin ? `<button class="btn btn-primary" id="gw-model-add">${icon('plus', 14)} 登记 / 更新模型</button>` : ''}`,
@@ -240,9 +240,9 @@ function renderRouteCard(host, model, { models, groups, budgets, usageMap, telem
         </div>
         <div class="fs-11-5 text-3" style="margin-top:3px">
           ${usage
-            ? `30d <span class="tnum mono">${fmtNum(usage.tokens30d ?? 0)}</span> tokens · 占比 <span class="tnum mono">${usage.share != null ? `${usage.share}%` : '—'}</span>`
+            ? `30d <span class="tnum mono">${fmtNum(usage.tokens30d ?? 0)}</span> ${esc(rqI18n.t('tokens · 占比'))} <span class="tnum mono">${usage.share != null ? `${usage.share}%` : '—'}</span>`
             : '30d 用量待接入（routes-usage 未返回该路由）'}
-          ${tel?.availability != null ? ` · 可用率 <span class="tnum mono">${Math.round(tel.availability * 100)}%</span>` : ''}
+          ${tel?.availability != null ? ` ${esc(rqI18n.t('· 可用率'))} <span class="tnum mono">${Math.round(tel.availability * 100)}%</span>` : ''}
         </div>
       </div>
       <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:180px;justify-content:flex-end">
@@ -272,7 +272,7 @@ function renderRouteCard(host, model, { models, groups, budgets, usageMap, telem
               <span style="font-size:10px;font-weight:600;padding:1px 5px;border-radius:4px;${CH_KIND_STYLE[kind]}">${kind}</span>
             </div>
             <div style="margin-top:5px;display:flex;justify-content:space-between;font-size:10.5px;color:var(--text-3)">
-              <span>${st.label}</span>
+              <span>${esc(rqI18n.t(st.label))}</span>
               <span class="mono tnum">${tel2?.p50LatencyMs != null ? `P50 ${tel2.p50LatencyMs}ms` : '时延 —'}</span>
             </div>
           </div>
@@ -333,7 +333,7 @@ function mountModelTable(models, rerender) {
   host.innerHTML = `
     <div class="table-wrap">
       <table class="tbl">
-        <thead><tr><th>slug</th><th>显示名</th><th>provider</th><th>状态</th><th>数据密级</th><th style="text-align:right">成本（分/千tokens）</th><th style="text-align:right">输入成本（分/千tokens）</th><th>endpoint</th><th>操作</th></tr></thead>
+        <thead><tr><th>slug</th><th>显示名</th><th>provider</th><th>状态</th><th>数据密级</th><th style="text-align:right">成本（分/千tokens）</th><th style="text-align:right">${esc(rqI18n.t('输入成本（分/千tokens）'))}</th><th>endpoint</th><th>操作</th></tr></thead>
         <tbody>
           ${models.length ? models.map((m) => `
             <tr data-id="${esc(m.id ?? '')}" data-slug="${esc(m.slug)}">
@@ -405,7 +405,7 @@ function openModelForm(rerender) {
         ${field('endpoint', inputField('endpoint', { placeholder: 'https://api.example.com/v1' }), { full: true })}
         ${field('apiKey', inputField('apiKey', { placeholder: 'env:DEEPSEEK_API_KEY' }), { full: true, hint: '推荐 env:VAR_NAME 形式引用宿主环境变量，避免明文落库' })}
         ${field('成本（分/千tokens）', `<input class="input" type="number" step="any" name="costCentsPerKTokens" placeholder="如 12 = ¥0.12/千tokens">`)}
-        ${field('输入成本（分/千tokens）', `<input class="input" type="number" step="any" name="inputCostCentsPerKTokens" placeholder="如 2 = ¥0.02/千tokens（#14 输入 token 单独计价）">`)}
+        ${field(rqI18n.t('输入成本（分/千tokens）'), `<input class="input" type="number" step="any" name="inputCostCentsPerKTokens" placeholder="${esc(rqI18n.t('如 2 = ¥0.02/千tokens（#14 输入 token 单独计价）'))}">`)}
         ${field('状态', selectField('status', [{ value: 'online', label: '在线' }, { value: 'offline', label: '离线' }]))}
         ${field('数据密级上限', selectField('dataClassLimit', [
           { value: 'public', label: 'public（仅公开数据）' },
@@ -530,7 +530,7 @@ async function mountBudgets(rerender) {
               <td>${b.action === 'block' ? '<span class="badge badge-danger no-dot">超额阻断</span>' : '<span class="badge badge-warn no-dot">超额告警</span>'}</td>
               <td>${b.enabled ? '<span class="badge badge-ok no-dot">启用</span>' : '<span class="badge badge-muted no-dot">停用</span>'}${b.freezeAgent ? '<span class="badge badge-purple no-dot" style="margin-left:4px" title="超额时联动冻结相关 Agent">联动冻结</span>' : ''}</td>
               <td><div class="flex" style="gap:6px">
-                <button class="btn btn-default btn-sm stop" data-bedit="${esc(b.id)}">编辑</button>
+                <button class="btn btn-default btn-sm stop" data-bedit="${esc(b.id)}">${esc(rqI18n.t('编辑'))}</button>
                 <button class="btn btn-danger-ghost btn-sm stop" data-bdel="${esc(b.id)}">${icon('trash', 12)}</button>
               </div></td>
             </tr>`).join('') : emptyRow(9, '暂无预算规则——为组织或 Agent 设置日/月限额与熔断动作')}

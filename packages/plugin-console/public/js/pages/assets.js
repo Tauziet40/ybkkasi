@@ -90,7 +90,7 @@ function renderLedgerTab(content, params) {
             <th style="text-align:right">30d 调用</th>
             <th style="text-align:right">30d 消耗</th>
             <th style="text-align:right">成本参考</th>
-            <th style="text-align:right" title="近 30 天使用凭证数：Agent 使用资产后主动提报的使用事实（与平台自动计量互补）">使用凭证</th>
+            <th style="text-align:right" title="${esc(rqI18n.t('近 30 天使用凭证数：Agent 使用资产后主动提报的使用事实（与平台自动计量互补）'))}">${esc(rqI18n.t('使用凭证'))}</th>
             <th>发布</th>
             <th style="text-align:right">趋势</th>
           </tr>
@@ -152,9 +152,9 @@ function renderLedgerTab(content, params) {
         <td class="col-num tnum mono fs-12" style="text-align:right">${num(it.calls30d)}</td>
         <td class="col-num tnum mono fs-12" style="text-align:right">${fmtNum(it.tokens30d)}</td>
         <td class="col-num tnum mono fs-12" style="text-align:right">${fmtCents(it.cost30d)}</td>
-        <td class="col-num tnum mono fs-12" style="text-align:right" title="近 30 天使用凭证（Agent 提报的使用事实）">${num(it.usageReports30d ?? 0)}</td>
+        <td class="col-num tnum mono fs-12" style="text-align:right" title="${esc(rqI18n.t('近 30 天使用凭证（Agent 提报的使用事实）'))}">${num(it.usageReports30d ?? 0)}</td>
         <td>${lifecycleBadge(it.lifecycle)}</td>
-        <td style="text-align:right">${Array.isArray(it.trend) && it.trend.length ? trendSmall(it.trend) : '<span class="fs-11 text-4">暂无</span>'}</td>
+        <td style="text-align:right">${Array.isArray(it.trend) && it.trend.length ? trendSmall(it.trend) : `<span class="fs-11 text-4">${esc(rqI18n.t('暂无'))}</span>`}</td>
       </tr>`).join('')
     holder.querySelectorAll('tr[data-id]').forEach((tr) => {
       tr.onclick = () => {
@@ -167,7 +167,7 @@ function renderLedgerTab(content, params) {
   const load = async () => {
     const holder = $('#ledger-body')
     if (!holder) return
-    holder.innerHTML = '<tr><td colspan="9" class="text-4 fs-12" style="padding:28px;text-align:center">台账加载中…</td></tr>'
+    holder.innerHTML = `<tr><td colspan="9" class="text-4 fs-12" style="padding:28px;text-align:center">${esc(rqI18n.t('台账加载中…'))}</td></tr>`
     try {
       const data = await api.get('/api/fleet/ledger' + api.qs({ search: state.search || undefined }))
       state.items = data.items ?? []
@@ -269,7 +269,7 @@ async function renderReportTab(content, params) {
               <span class="fs-11 text-4 mono grow ellipsis">${esc(row.resource)}</span>
               <span class="fs-12 col-num" style="font-weight:600">${fmtCents(row.cost_cents)}</span>
               <span class="fs-11 text-4 col-num" style="min-width:56px;text-align:right">${esc(rqI18n.t('{n} 次', { n: row.count }))}</span>
-            </div>`).join('') || '<span class="text-4 fs-12">暂无计量数据</span>'}
+            </div>`).join('') || `<span class="text-4 fs-12">${esc(rqI18n.t('暂无计量数据'))}</span>`}
         </div>
       </div>
       <div class="card">
@@ -320,7 +320,7 @@ async function renderReportTab(content, params) {
                     <div style="height:100%;width:${Math.max((row.cost_cents / max) * 100, 2)}%;border-radius:3px;background:var(--brand-gradient, linear-gradient(90deg,var(--brand-600),var(--brand-400)))"></div>
                   </div>
                 </div>`
-            }).join('') || '<span class="text-4 fs-12">暂无计量数据</span>'}
+            }).join('') || `<span class="text-4 fs-12">${esc(rqI18n.t('暂无计量数据'))}</span>`}
           </div>
         </div>
         <div class="card">
@@ -333,7 +333,7 @@ async function renderReportTab(content, params) {
                   <span class="fs-12" style="display:block">${esc(row.reason)}</span>
                   <span class="fs-11 text-4">${Object.entries(row.byType).map(([t, n]) => rqI18n.t('{label} {n}', { label: rqI18n.t(TYPE_LABEL[t] ?? String(t)), n })).join(' · ')}${row.samples?.[0] ? rqI18n.t(' · 最近 {name}', { name: row.samples[0].name }) : ''}</span>
                 </span>
-              </div>`).join('') : '<span class="text-4 fs-12">窗口内无下架/弃用记录</span>'}
+              </div>`).join('') : `<span class="text-4 fs-12">${esc(rqI18n.t('窗口内无下架/弃用记录'))}</span>`}
           </div>
         </div>
       </div>
@@ -349,7 +349,7 @@ async function renderReportTab(content, params) {
 
 /** 报表：日消耗趋势 SVG（沿用零价快照口径）。 */
 function reportTrendSvg(byDay) {
-  if (!byDay.length) return '<span class="text-4 fs-12">窗口内无计量数据</span>'
+  if (!byDay.length) return `<span class="text-4 fs-12">${esc(rqI18n.t('窗口内无计量数据'))}</span>`
   const max = Math.max(...byDay.map((d) => d.cost_cents), 1)
   const w = 100
   const points = byDay.map((d, i) => `${(i / Math.max(byDay.length - 1, 1)) * w},${28 - (d.cost_cents / max) * 24}`)

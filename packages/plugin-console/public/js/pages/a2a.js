@@ -133,11 +133,11 @@ export async function renderA2a(content, params, ctx) {
       <div class="page-actions" id="a2a-page-actions"></div>
     </div>
     <div class="tabs" id="a2a-tabs">
-      <div class="tab ${tab === 'directory' ? 'active' : ''}" data-tab="directory">协作目录</div>
-      <div class="tab ${tab === 'tasks' ? 'active' : ''}" data-tab="tasks">任务追踪</div>
-      <div class="tab ${tab === 'fulfillment' ? 'active' : ''}" data-tab="fulfillment">履约视图</div>
-      <div class="tab ${tab === 'rules' ? 'active' : ''}" data-tab="rules">审批规则</div>
-      ${uhpVisible ? `<div class="tab ${tab === 'uhp' ? 'active' : ''}" data-tab="uhp">UHP 执行</div>` : ''}
+      <div class="tab ${tab === 'directory' ? 'active' : ''}" data-tab="directory">${esc(rqI18n.t('协作目录'))}</div>
+      <div class="tab ${tab === 'tasks' ? 'active' : ''}" data-tab="tasks">${esc(rqI18n.t('任务追踪'))}</div>
+      <div class="tab ${tab === 'fulfillment' ? 'active' : ''}" data-tab="fulfillment">${esc(rqI18n.t('履约视图'))}</div>
+      <div class="tab ${tab === 'rules' ? 'active' : ''}" data-tab="rules">${esc(rqI18n.t('审批规则'))}</div>
+      ${uhpVisible ? `<div class="tab ${tab === 'uhp' ? 'active' : ''}" data-tab="uhp">${esc(rqI18n.t('UHP 执行'))}</div>` : ''}
     </div>
     <div id="a2a-body"></div>`
   $$('#a2a-tabs .tab').forEach((el) => {
@@ -160,8 +160,8 @@ async function renderDirectory() {
     <div class="filter-bar">
       <div class="search-input">${icon('search')}<input class="input" id="a2a-q" placeholder="搜索员工名称 / slug / 能力描述" style="width:230px"></div>
       <select class="select" id="a2a-category" style="width:130px">
-        <option value="">全部分类</option>
-        ${ASSET_CATEGORIES.map((cat) => `<option value="${cat}">${cat}</option>`).join('')}
+        <option value="">${esc(rqI18n.t('全部分类'))}</option>
+        ${ASSET_CATEGORIES.map((cat) => `<option value="${cat}">${esc(rqI18n.t(cat))}</option>`).join('')}
       </select>
       <select class="select" id="a2a-autonomy" style="width:150px">
         <option value="">全部自治级别</option>
@@ -222,7 +222,7 @@ async function renderDirectory() {
           </div>
           <div class="res-desc" title="${esc(agent.description)}">${esc(agent.description || '（暂无能力描述）')}</div>
           <div class="flex" style="gap:6px;flex-wrap:wrap;margin-top:10px;min-height:22px">
-            <span class="badge badge-brand no-dot">${esc(agent.category ?? '其他')}</span>
+            <span class="badge badge-brand no-dot">${esc(rqI18n.t(agent.category ?? '其他'))}</span>
             ${(agent.skills ?? []).slice(0, 4).map((skill) => `<span class="badge badge-muted no-dot" title="${esc(skill.description ?? '')}">${esc(skill.name)}</span>`).join('')}
             ${skillCount > 4 ? `<span class="fs-11 text-4" style="align-self:center">${esc(rqI18n.t('+{n} 项', { n: skillCount - 4 }))}</span>` : ''}
             ${skillCount === 0 ? `<span class="fs-11 text-4">${esc(rqI18n.t('暂未声明技能'))}</span>` : ''}
@@ -257,7 +257,7 @@ function openAgentDrawer(agent) {
     body: `
       <div class="flex mb-8" style="gap:8px;flex-wrap:wrap;align-items:center">
         ${autonomyBadge(agent.autonomy)}
-        <span class="badge badge-brand no-dot">${esc(agent.category ?? '其他')}</span>
+        <span class="badge badge-brand no-dot">${esc(rqI18n.t(agent.category ?? '其他'))}</span>
         <span class="badge badge-info no-dot" title="可承接的最高任务密级">${esc(rqI18n.t('密级天花板'))} · ${esc(rqI18n.t(A2A_CLASS_LABEL[agent.dataClassCeiling] ?? agent.dataClassCeiling))}</span>
         <span class="badge badge-muted no-dot mono">${esc(agent.runtime)}</span>
       </div>
@@ -708,7 +708,7 @@ async function renderFulfillment() {
       { title: '失败', width: 70, render: (row) => `<span class="tnum" style="color:${row.failed ? 'var(--danger)' : 'inherit'}">${fmtNum(row.failed)}</span>` },
       { title: '中断', width: 70, render: (row) => `<span class="tnum" title="待补充输入 + 待授权审批">${fmtNum(row.interrupted)}</span>` },
       { title: '取消/驳回', width: 90, render: (row) => `<span class="tnum text-3">${fmtNum(row.canceled)} / ${fmtNum(row.rejected)}</span>` },
-      { title: '完成率', width: 84, render: (row) => `<span class="tnum">${fmtPct(row.completionRate)}</span>` },
+      { title: rqI18n.t('完成率'), width: 84, render: (row) => `<span class="tnum">${fmtPct(row.completionRate)}</span>` },
       {
         title: '验收',
         width: 118,

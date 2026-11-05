@@ -61,7 +61,7 @@ export async function renderOauthAuthorize(app, params) {
     renderOauthError(app, new URLSearchParams({ error: 'invalid_request', error_description: '缺少 req 参数（授权请求无效）' }))
     return
   }
-  app.innerHTML = pageShell('<div class="oauth-sub">正在加载授权请求…</div>')
+  app.innerHTML = pageShell(`<div class="oauth-sub">${esc(rqI18n.t('正在加载授权请求…'))}</div>`)
   let info
   try {
     const result = await rawJson('GET', `/api/authn/oidc/auth-requests/${encodeURIComponent(reqId)}`)
@@ -81,7 +81,7 @@ export async function renderOauthAuthorize(app, params) {
 
 function renderLoginPanel(app, reqId, info) {
   app.innerHTML = pageShell(`
-    <div class="oauth-sub" style="margin-bottom:14px">登录平台账号后继续授权给 <b>${esc(info.clientName)}</b></div>
+    <div class="oauth-sub" style="margin-bottom:14px">${esc(rqI18n.t('登录平台账号后继续授权给'))} <b>${esc(info.clientName)}</b></div>
     <div class="segmented" style="margin-bottom:18px" id="oauth-login-tabs">
       <span class="segmented-item" data-tab="dingtalk">钉钉扫码</span>
       <span class="segmented-item active" data-tab="password">账号密码</span>
@@ -363,7 +363,7 @@ function renderConsent(app, reqId, info) {
       <span>我已了解并同意向该应用提供上述信息</span>
     </label>` : ''}
     <div class="oauth-actions">
-      ${info.consentRequired ? '<button class="btn btn-default" id="oauth-deny">拒绝</button>' : ''}
+      ${info.consentRequired ? `<button class="btn btn-default" id="oauth-deny">${esc(rqI18n.t('拒绝'))}</button>` : ''}
       <button class="btn btn-primary" id="oauth-approve">${info.consentRequired ? '同意并授权' : '确认授权'}</button>
     </div>
     <div class="form-hint" id="oauth-consent-tip" style="margin-top:12px"></div>`)

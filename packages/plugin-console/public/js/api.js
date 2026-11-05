@@ -1,5 +1,6 @@
 /** API 客户端：令牌管理 + 统一请求封装。 */
 
+import rqI18n from './i18n.js'
 import { activeConnection, LOCAL_ID } from './connections.js'
 
 /**
@@ -230,7 +231,7 @@ export async function probeHostBase(base) {
   try {
     response = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(5000) })
   } catch {
-    return { ok: false, message: '不可达（地址错误，或目标宿主版本较早未放行跨域）' }
+    return { ok: false, message: rqI18n.t('不可达（地址错误，或目标宿主版本较早未放行跨域）') }
   }
   const payload = await response.json().catch(() => null)
   if (!response.ok || payload?.ok === false) return { ok: false, message: `HTTP ${response.status}` }

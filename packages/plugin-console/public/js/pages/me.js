@@ -16,6 +16,8 @@ const TTL_OPTIONS = [
   { hours: 720, label: '30 天（默认）' },
   { hours: 2160, label: '90 天' },
 ]
+// 模块级常量保持中文原文（键=原文）；渲染时经 rqI18n.t 翻译
+const ttlLabel = (label) => rqI18n.t(label)
 
 export async function renderMe(content) {
   const me = await api.get('/api/auth/me').catch(() => null)
@@ -83,7 +85,7 @@ export async function renderMe(content) {
       <input class="input" id="me-label" maxlength="100" placeholder="${esc(rqI18n.t('例如：我的 IDE MCP 接入'))}" style="margin:4px 0 12px">
       <label class="fs-12 text-3">${esc(rqI18n.t('有效期'))}</label>
       <select class="input" id="me-ttl" style="margin:4px 0 14px">
-        ${TTL_OPTIONS.map((option) => `<option value="${option.hours}">${esc(option.label)}</option>`).join('')}
+        ${TTL_OPTIONS.map((option) => `<option value="${option.hours}">${esc(rqI18n.t(option.label))}</option>`).join('')}
       </select>
       <button class="btn btn-primary" id="me-generate">${icon('sparkles', 14)} ${esc(rqI18n.t('生成配置（一键复制）'))}</button>`
 

@@ -287,7 +287,7 @@ function renderShell(page, params, builder) {
   for (const section of NAV) {
     const visible = section.items.filter((item) => session.can(item.perm))
     if (!visible.length) continue
-    const sec = h(`<div class="nav-section"><div class="nav-section-title">${esc(section.section)}</div></div>`)
+    const sec = h(`<div class="nav-section"><div class="nav-section-title">${esc(rqI18n.t(section.section))}</div></div>`)
     for (const item of visible) {
       const active = isActive(item)
       const el = h(`<div class="nav-item ${active ? 'active' : ''}">${icon(item.icon)}<span>${esc(item.label)}</span><span class="nav-badge hidden"></span></div>`)

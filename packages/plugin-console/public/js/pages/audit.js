@@ -19,10 +19,10 @@ export async function renderAudit(content, params, ctx) {
       <div class="page-actions" id="audit-actions"></div>
     </div>
     <div class="tabs">
-      <div class="tab ${tab === 'logs' ? 'active' : ''}" data-tab="logs">审计日志</div>
-      <div class="tab ${tab === 'alerts' ? 'active' : ''}" data-tab="alerts">告警中心</div>
-      <div class="tab ${tab === 'rules' ? 'active' : ''}" data-tab="rules">告警规则</div>
-      <div class="tab ${tab === 'cost' ? 'active' : ''}" data-tab="cost">成本分析</div>
+      <div class="tab ${tab === 'logs' ? 'active' : ''}" data-tab="logs">${esc(rqI18n.t('审计日志'))}</div>
+      <div class="tab ${tab === 'alerts' ? 'active' : ''}" data-tab="alerts">${esc(rqI18n.t('告警中心'))}</div>
+      <div class="tab ${tab === 'rules' ? 'active' : ''}" data-tab="rules">${esc(rqI18n.t('告警规则'))}</div>
+      <div class="tab ${tab === 'cost' ? 'active' : ''}" data-tab="cost">${esc(rqI18n.t('成本分析'))}</div>
     </div>
     <div id="audit-body"></div>`
   $$('.tab').forEach((el) => {
@@ -86,7 +86,7 @@ export async function renderAudit(content, params, ctx) {
                 <div class="muted-box">${row.actChain.map((a) => `${esc(a.name)}<span class="text-4">(${esc(a.type)})</span>`).join(' <span class="text-4">→</span> ')}</div>` : ''}
               <div class="card-title mt-14 mb-8">详情</div>
               <div class="code-block" style="max-height:200px">${esc(row.detail || '（空）')}</div>`,
-            foot: '<button class="btn btn-primary" data-ok>关闭</button>',
+            foot: `<button class="btn btn-primary" data-ok>${esc(rqI18n.t('关闭'))}</button>`,
           })
         },
       })
@@ -132,7 +132,7 @@ export async function renderAudit(content, params, ctx) {
         </div>
         <div style="flex-shrink:0;text-align:right">
           <div class="fs-11 text-4">${timeAgo(alert.createdAt)}</div>
-          ${!alert.read ? `<button class="btn btn-ghost btn-sm mt-8" data-read="${esc(alert.id)}">标记已读</button>` : '<span class="fs-11" style="color:var(--ok)">已读</span>'}
+          ${!alert.read ? `<button class="btn btn-ghost btn-sm mt-8" data-read="${esc(alert.id)}">${esc(rqI18n.t('标记已读'))}</button>` : `<span class="fs-11" style="color:var(--ok)">${esc(rqI18n.t('已读'))}</span>`}
         </div>
       </div>`).join('')
     body.querySelectorAll('[data-read]').forEach((btn) => {
@@ -161,7 +161,7 @@ export async function renderAudit(content, params, ctx) {
         <div style="flex-shrink:0">
           <button class="btn btn-default btn-sm" data-toggle="${esc(rule.id)}" data-enabled="${rule.enabled ? 1 : 0}">${rule.enabled ? '停用' : '启用'}</button>
         </div>
-      </div>`).join('') || '<span class="text-4 fs-13">暂无告警规则</span>'
+      </div>`).join('') || `<span class="text-4 fs-13">${esc(rqI18n.t('暂无告警规则'))}</span>`
     body.querySelectorAll('[data-toggle]').forEach((btn) => {
       btn.onclick = async () => {
         await api.patch(`/api/audit/alert-rules/${btn.dataset.toggle}`, { enabled: btn.dataset.enabled !== '1' })
@@ -187,7 +187,7 @@ export async function renderAudit(content, params, ctx) {
             ${field('描述', inputField('description'))}
           </div>
           <div class="form-hint">触发后推送渠道：钉钉机器人 / 邮件（演示环境写入告警中心）</div>`,
-        foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>创建</button>',
+        foot: `<button class="btn btn-default" data-cancel>${esc(rqI18n.t('取消'))}</button><button class="btn btn-primary" data-ok>${esc(rqI18n.t('创建'))}</button>`,
       })
       modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
       modal.el.querySelector('[data-ok]').onclick = async () => {

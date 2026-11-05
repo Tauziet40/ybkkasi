@@ -8,6 +8,19 @@
  * DOM 侧（连接页 UI）在 pages/connections.js；BASE 消费方在 api.js。
  */
 
+/**
+ * 文案翻译（零依赖纪律：本模块被 Node 纯函数单测直载，禁止 import i18n.js——
+ * 浏览器经 window.rqI18n（i18n.js 注入），Node/无 i18n 环境回退原文。与 errors.js 同法。 */
+function tr(text) {
+  try {
+    if (typeof window !== 'undefined' && window.rqI18n && typeof window.rqI18n.t === 'function') {
+      return window.rqI18n.t(text)
+    }
+  } catch { /* 忽略 */ }
+  return text
+}
+
+
 /** 连接清单存储键：[{ id, name, base, createdAt }]（不含内置本机连接）。 */
 export const CONNECTIONS_KEY = 'heng_ops_connections'
 /** 活动连接存储键：连接 id；''/缺省 = 内置本机连接。 */
@@ -133,15 +146,15 @@ export function savePanels(storage, list) {
  */
 export function upsertPanel(storage, { id, name, connectionId, dept, mountBase = '' }) {
   const deptId = String(dept ?? '').trim()
-  if (!deptId) return { ok: false, error: '请填写部门标识（如 mfg / rd）' }
+  if (!deptId) return { ok: false, error: tr('请填写部门标识（如 mfg / rd）') }
   if (!PANEL_DEPT_RE.test(deptId)) {
-    return { ok: false, error: '部门标识只能是小写字母，2–12 位（如 mfg / rd / strategy），需与目标宿主的部门标识一致' }
+    return { ok: false, error: tr('部门标识只能是小写字母，2–12 位（如 mfg / rd / strategy），需与目标宿主的部门标识一致') }
   }
   const hostId = connectionId || LOCAL_ID
   const host = hostId === LOCAL_ID
     ? { id: LOCAL_ID, name: '本机宿主服务', base: mountBase }
     : loadConnections(storage).find((item) => item.id === hostId)
-  if (!host) return { ok: false, error: '目标宿主连接不存在，请先在连接清单中新增' }
+  if (!host) return { ok: false, error: tr('目标宿主连接不存在，请先在连接清单中新增') }
   const list = loadPanels(storage)
   const duplicate = list.find((item) => item.connectionId === hostId && item.dept === deptId && item.id !== id)
   if (duplicate) return { ok: false, error: `该宿主的「${deptId}」部门已登记为「${duplicate.name}」` }
@@ -185,8 +198,8 @@ export function resolvePanels(storage, mountBase = '') {
   return loadPanels(storage).map((panel) => {
     const url = panelUrl(panel, storage, mountBase)
     const hostName = panel.connectionId === LOCAL_ID
-      ? '本机宿主服务'
-      : loadConnections(storage).find((item) => item.id === panel.connectionId)?.name ?? '（宿主已删除）'
+      ? tr('本机宿主服务')
+      : loadConnections(storage).find((item) => item.id === panel.connectionId)?.name ?? tr('（宿主已删除）')
     const active = activeConnection(storage, mountBase)
     return { ...panel, url, hostName, available: url !== '', isActiveHost: active.id === panel.connectionId }
   })

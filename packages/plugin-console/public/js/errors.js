@@ -448,15 +448,22 @@ const BINDING_DETAIL = {
   account_inactive: '账号状态异常（冻结/离职联动失效），请联系管理员确认账号状态。',
 }
 
-/** 查文案：未知原因码回落通用兜底（永不裸奔技术错误）。 */
+/** 查文案：未知原因码回落通用兜底（永不裸奔技术错误）。COPY 注册表保持中文原文（键=原文），
+ *  文案在取用时刻经 tr() 翻译——模块加载早于词典取回，禁止在常量定义处包 t()。 */
 export function errorCopy(code, detail) {
-  const base = COPY[code] ?? {
+  const raw = COPY[code] ?? {
     tone: 'danger',
     title: '操作暂时无法完成',
-    message: tr('平台返回未知状态（{code}）。请稍后重试；若持续出现，请联系平台管理员。', { code: code || 'unknown' }),
+    message: '平台返回未知状态（{code}）。请稍后重试；若持续出现，请联系平台管理员。',
     action: null,
   }
-  const extra = code === 'binding-invalid' && detail && BINDING_DETAIL[detail] ? BINDING_DETAIL[detail] : ''
+  const base = {
+    tone: raw.tone,
+    title: tr(raw.title),
+    message: COPY[code] ? tr(raw.message) : tr(raw.message, { code: code || 'unknown' }),
+    action: raw.action ? { ...raw.action, label: tr(raw.action.label) } : null,
+  }
+  const extra = code === 'binding-invalid' && detail && BINDING_DETAIL[detail] ? tr(BINDING_DETAIL[detail]) : ''
   return { ...base, ...(extra ? { message: `${base.message}${tr('（{extra}）', { extra })}` } : {}) }
 }
 

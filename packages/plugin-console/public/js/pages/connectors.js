@@ -111,7 +111,7 @@ export async function renderConnectors(content, params, ctx) {
       ? Promise.resolve(gatewayStatus)
       : api.get('/api/connector/gateway').catch(() => null)
     void statusPromise.then((gw) => {
-      gatewayStatus = gw ?? { available: false, reason: '状态获取失败（检查 connector.gateway.write 权限点）', envChecks: {} }
+      gatewayStatus = gw ?? { available: false, reason: rqI18n.t('状态获取失败（检查 connector.gateway.write 权限点）'), envChecks: {} }
       const status = gatewayStatus
       const available = status.available === true
       const envKey = status.envChecks?.OOMOL_CONNECT_ENCRYPTION_KEY
@@ -124,13 +124,13 @@ export async function renderConnectors(content, params, ctx) {
             <div class="kv"><span class="k">状态</span><span class="v" id="gw-status-val">
               <span class="badge ${available ? 'badge-ok' : 'badge-danger'} no-dot">${available ? esc(rqI18n.t('可用 · 探活 {ms}ms', { ms: status.latencyMs ?? 0 })) : esc(status.reason ?? '不可用')}</span>
             </span></div>
-            <div class="kv"><span class="k">网关地址（baseUrl）</span><span class="v mono">${esc(status.baseUrl ?? '未配置')}</span></div>
-            <div class="kv"><span class="k">上次探活</span><span class="v">${status.lastProbeAt ? `${fmtTime(status.lastProbeAt)}${status.latencyMs !== undefined ? `（${status.latencyMs}ms）` : ''}` : '—'}</span></div>
+            <div class="kv"><span class="k">${esc(rqI18n.t('网关地址（baseUrl）'))}</span><span class="v mono">${esc(status.baseUrl ?? '未配置')}</span></div>
+            <div class="kv"><span class="k">${esc(rqI18n.t('上次探活'))}</span><span class="v">${status.lastProbeAt ? `${fmtTime(status.lastProbeAt)}${status.latencyMs !== undefined ? `（${status.latencyMs}ms）` : ''}` : '—'}</span></div>
             <div class="kv"><span class="k">OOMOL_CONNECT_ENCRYPTION_KEY</span><span class="v">${envKey ? '✅ 已设置（AES-256-GCM 生效）' : '❌ 缺失 → 网关 fail-closed，拒绝写入凭证'}</span></div>
             <div class="kv"><span class="k">OOMOL_CONNECT_ADMIN_TOKEN</span><span class="v">${envToken ? '✅ 已设置' : '⚠️ 未设置（需以字面量配置 adminToken）'}</span></div>
           </div>
           <div class="section-title" style="margin:18px 0 10px">接入配置</div>
-          ${field('网关地址（baseUrl）', inputField('baseUrl', { placeholder: 'http://open-connector:3000', value: status.baseUrl ?? '' }), { required: true, hint: 'open-connector sidecar 服务地址（内网可达即可）' })}
+          ${field(rqI18n.t('网关地址（baseUrl）'), inputField('baseUrl', { placeholder: 'http://open-connector:3000', value: status.baseUrl ?? '' }), { required: true, hint: 'open-connector sidecar 服务地址（内网可达即可）' })}
           ${field('管理口令 adminToken', inputField('adminToken', { placeholder: 'env:OOMOL_CONNECT_ADMIN_TOKEN' }), { hint: '推荐用 env: 前缀间接引用环境变量，避免明文落盘；留空表示沿用现有口令' })}
           <div class="muted-box" style="margin-top:6px">💡 首次接入：在 open-connector 侧设置好两个环境变量 → 此处填写 baseUrl → 保存并探活 → 回到目录页点「同步目录」。</div>`,
         foot: `<button class="btn btn-default" id="gw-probe">${icon('refresh', 14)}立即探活</button>
@@ -327,7 +327,7 @@ export async function renderConnectors(content, params, ctx) {
       holder.appendChild(renderTable({
         columns: [
           { key: 'id', title: '动作 ID' },
-          { key: 'service', title: '服务商' },
+          { key: 'service', title: rqI18n.t('服务商') },
           { key: 'riskLevel', title: '风险级', render: (row) => `<span class="badge badge-${RISK_BADGE[row.__raw.riskLevel] ?? 'default'}">${row.__raw.riskLevel}</span>` },
           { key: 'description', title: '说明' },
         ],
@@ -352,7 +352,7 @@ export async function renderConnectors(content, params, ctx) {
           <div class="list-row" data-action="${esc(action.id)}" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer">
             <span class="mono" style="font-size:12px">${esc(action.id)}</span>
             <span class="badge badge-${RISK_BADGE[action.riskLevel] ?? 'default'}">${action.riskLevel}</span>
-          </div>`).join('') || '<div class="muted" style="font-size:12px">（无 action，或关键词过滤后为空）</div>'}
+          </div>`).join('') || `<div class="muted" style="font-size:12px">${esc(rqI18n.t('（无 action，或关键词过滤后为空）'))}</div>`}
         <div id="pv-guide" class="muted" style="margin-top:12px;font-size:12px;white-space:pre-wrap"></div>`,
     })
     drawer.body.addEventListener('click', (event) => {
@@ -429,11 +429,11 @@ export async function renderConnectors(content, params, ctx) {
           <span class="badge badge-${ref.status === 'active' ? 'ok' : ref.status === 'pending' ? 'warn' : 'danger'}">${esc(CONN_STATUS_LABEL[ref.status] ?? ref.status)}</span>
         </div>
         <div class="mono muted" style="font-size:12px">${esc(ref.alias)}</div>
-        <div style="font-size:12px">${AUTH_LABEL[ref.authType] ?? esc(ref.authType)}${ref.bridge ? ' · <span class="badge">桥接过渡</span>' : ''}</div>
+        <div style="font-size:12px">${AUTH_LABEL[ref.authType] ?? esc(ref.authType)}${ref.bridge ? ` · <span class="badge">${esc(rqI18n.t('桥接过渡'))}</span>` : ''}</div>
         ${ref.maskedProfile ? `<div class="mono muted" style="font-size:11px">${esc(Object.entries(ref.maskedProfile).map(([k, v]) => `${k}=${v}`).join(' · ').slice(0, 80))}</div>` : ''}`
       const delBtn = h('button', { class: 'btn btn-danger btn-sm', style: 'margin-top:auto' }, '删除')
       delBtn.addEventListener('click', async () => {
-        const ok = await confirmDialog({ title: '删除连接', message: rqI18n.t('确认删除 <b>{alias}</b>？若仍被权限组引用将拒绝（可先解绑）。', { alias: esc(ref.alias) }), danger: true })
+        const ok = await confirmDialog({ title: rqI18n.t('删除连接'), message: rqI18n.t('确认删除 <b>{alias}</b>？若仍被权限组引用将拒绝（可先解绑）。', { alias: esc(ref.alias) }), danger: true })
         if (!ok) return
         try {
           await api.delete(`/api/connector/connections/${ref.id}`, {})
@@ -476,7 +476,7 @@ export async function renderConnectors(content, params, ctx) {
       orgOpts = buildOrgOptions(await api.get('/api/iam/orgs'))
     } catch { /* iam.org.read 缺失时降级为手填 orgId */ }
     const modal = openModal({
-      title: '新建连接（三形态）',
+      title: rqI18n.t('新建连接（三形态）'),
       body: `
         ${field('Provider', searchableSelectField('provider', [
           { value: '', label: providerHint ?? '（目录未同步时手动输入）' },
@@ -501,11 +501,11 @@ export async function renderConnectors(content, params, ctx) {
     const renderDynamic = () => {
       const type = modal.body.querySelector('[name=authType]').value
       if (type === 'api_key') {
-        dynamic.innerHTML = field('凭证字段（JSON）', textareaField('valuesJson', { placeholder: '{"apiKey": "…"} 或 {"token": "…"}', rows: 4 }), { hint: '原样送入网关保险库后即刻丢弃，平台不落盘' })
+        dynamic.innerHTML = field('凭证字段（JSON）', textareaField('valuesJson', { placeholder: rqI18n.t('{"apiKey": "…"} 或 {"token": "…"}'), rows: 4 }), { hint: '原样送入网关保险库后即刻丢弃，平台不落盘' })
       } else if (type === 'oauth') {
         dynamic.innerHTML = field('授权范围（requestedScopes）', inputField('requestedScopes', { placeholder: '留空使用 Provider 默认 scopes，多个用英文逗号分隔' }))
       } else {
-        dynamic.innerHTML = '<div class="muted-box">免凭证连接直接登记引用，无需任何密钥材料。</div>'
+        dynamic.innerHTML = `<div class="muted-box">${esc(rqI18n.t('免凭证连接直接登记引用，无需任何密钥材料。'))}</div>`
       }
     }
     renderDynamic()
@@ -648,10 +648,10 @@ export async function renderConnectors(content, params, ctx) {
         ${field('policies（{service:{allowedActions:[],riskCap,connections?,constraints?}}）', textareaField('policiesJson', { value: JSON.stringify(defaultPolicies, null, 2), rows: 10 }), { required: true })}
         ${field('绑定主体', multiSelectField('subjects', subjectOptions, {
           values: (existing?.subjects ?? []).map((s) => `${s.type}:${s.id}`),
-          placeholder: '搜索并选择 Agent / 用户组 / 应用，可多选；留空 = 暂不授权仅持令牌',
+          placeholder: rqI18n.t('搜索并选择 Agent / 用户组 / 应用，可多选；留空 = 暂不授权仅持令牌'),
         }))}
         <div style="display:flex;gap:12px">
-          <div style="flex:1">${field('限流（次/分/主体）', inputField('rateLimitPerMin', { value: String(existing?.rateLimitPerMin ?? 60) }))}</div>
+          <div style="flex:1">${field(rqI18n.t('限流（次/分/主体）'), inputField('rateLimitPerMin', { value: String(existing?.rateLimitPerMin ?? 60) }))}</div>
         </div>
         <div id="pg-impact" class="form-hint">${isEdit ? '正在预览变更影响面…' : '变更影响面：保存前自动预览 N 个令牌 / M 个连接受影响。'}</div>`,
       foot: `<button class="btn btn-default" data-cancel>取消</button>
@@ -747,10 +747,10 @@ export async function renderConnectors(content, params, ctx) {
       holder.appendChild(buildGuidePanel({
         heroIcon: 'activity',
         title: '运行日志暂不可用',
-        badge: '<span class="badge badge-warn no-dot">未就绪</span>',
+        badge: `<span class="badge badge-warn no-dot">${esc(rqI18n.t('未就绪'))}</span>`,
         desc: '运行日志需要 <code>connector.runs.read</code> 权限点与健康的网关连接。完成网关接入并产生真实调用后，这里会逐条展示每次 Action 调用（runId / Provider / 结果 / 令牌引用），并支持台账核对与计量对账。',
         steps: [
-          { title: '接入网关', desc: '参考「目录」页签的三步指引完成网关配置与目录同步。', ...(session.can('connector.gateway.write') ? { actions: [{ label: '打开网关设置', primary: true, onClick: () => gatewayDrawer() }] } : {}) },
+          { title: rqI18n.t('接入网关'), desc: rqI18n.t('参考「目录」页签的三步指引完成网关配置与目录同步。'), ...(session.can('connector.gateway.write') ? { actions: [{ label: '打开网关设置', primary: true, onClick: () => gatewayDrawer() }] } : {}) },
           { title: '产生调用', desc: 'Agent 携 oct_ 令牌经网关调用 Action 后，运行记录即出现在此处。' },
           { title: '对账审计', desc: '点上方「oct_ 台账」核对令牌镜像；「运行对账」逐条核对网关记录 ↔ 平台计量流水，bypass 即旁路调用。' },
         ],
@@ -766,7 +766,7 @@ export async function renderConnectors(content, params, ctx) {
         { key: 'runtimeTokenId', title: '运行令牌 ID（runtimeTokenId）' },
         { key: 'startedAt', title: '时间' },
       ],
-      rows: result.items.map((run) => ({ ...run, ok: run.ok ? '<span class="badge badge-ok">成功</span>' : '<span class="badge badge-danger">失败</span>', startedAt: fmtTime(run.startedAt ?? '') })),
+      rows: result.items.map((run) => ({ ...run, ok: run.ok ? `<span class="badge badge-ok">${esc(rqI18n.t('成功'))}</span>` : `<span class="badge badge-danger">${esc(rqI18n.t('失败'))}</span>`, startedAt: fmtTime(run.startedAt ?? '') })),
     }))
   }
 }

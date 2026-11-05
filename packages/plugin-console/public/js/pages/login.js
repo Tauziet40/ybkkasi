@@ -17,7 +17,7 @@ export function renderLogin(app) {
             <div style="font-size:19px;font-weight:600;letter-spacing:2px">元冰可 · 企业AI资源管理平台</div>
           </div>
           <h1>让团队一起用 AI<br>把每一份资源都管起来</h1>
-          <p>MCP 服务、Skill 市场、Agent 本体、AI 应用、模型网关、NAS 存储——六类资源一套身份、一套权限、一套审计。一个工作台，撑起企业的全部 AI 资产。</p>
+          <p>${esc(rqI18n.t('MCP 服务、Skill 市场、Agent 本体、AI 应用、模型网关、NAS 存储——六类资源一套身份、一套权限、一套审计。一个工作台，撑起企业的全部 AI 资产。'))}</p>
 
           <div class="login-hero-grid">
             <div class="login-hero-card">
@@ -212,9 +212,8 @@ export function renderLogin(app) {
     $('#ding-step-authorize').insertAdjacentHTML('afterbegin', `
       <div class="muted-box mb-14" id="ding-blocked-notice" style="display:flex;gap:8px;border-color:#fcd34d;background:#fffbeb">
         ${icon('alert', 15)}
-        <span class="fs-12">钉钉扫码登录未就绪${message ? `：${esc(message)}` : ''}。<br>
-        请管理员在<b>钉钉开发者后台 → 该企业内部应用 → 登录与分享</b>中补充回调域名 <code class="mono">${esc(location.host)}</code>，
-        并确认 <b>AppKey</b> 与「登录应用」一致；配好后刷新本页即可扫码。当前可先用<b>账号密码</b>登录。</span>
+        <span class="fs-12">${esc(rqI18n.t('钉钉扫码登录未就绪'))}${message ? `：${esc(message)}` : ''}。<br>
+        ${esc(rqI18n.t('请管理员在'))}<b>${esc(rqI18n.t('钉钉开发者后台 → 该企业内部应用 → 登录与分享'))}</b>${esc(rqI18n.t('中补充回调域名'))} <code class="mono">${esc(location.host)}</code>${esc(rqI18n.t('，并确认'))} <b>AppKey</b> ${esc(rqI18n.t('与「登录应用」一致；配好后刷新本页即可扫码。当前可先用'))}<b>${esc(rqI18n.t('账号密码'))}</b>${esc(rqI18n.t('登录。'))}</span>
       </div>`)
   }
   const startDingOauth = async (btn, configId) => {

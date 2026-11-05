@@ -73,7 +73,7 @@ function heatStripFallback(values, { big = false } = {}) {
     const bg = n === 0 ? 'var(--surface-2)' : `hsl(201 88% ${Math.round(68 - (n / max) * 40)}%)`
     return `<span class="heat-cell" style="background:${bg}" title="${esc(rqI18n.t('第 {i} 天 · {n} 次', { i: i + 1, n }))}"></span>`
   }).join('')
-  return cells ? `<span class="heat-strip${big ? ' big' : ''}">${cells}</span>` : '<span class="fs-12 text-4">窗口内暂无使用记录</span>'
+  return cells ? `<span class="heat-strip${big ? ' big' : ''}">${cells}</span>` : `<span class="fs-12 text-4">${esc(rqI18n.t('窗口内暂无使用记录'))}</span>`
 }
 
 function chipRowFallback(options, activeValue, onPick) {
@@ -242,7 +242,7 @@ export function openAssetDrawer(asset) {
         ${autonomy ? kvRow('自治级别', `<span class="mono">${esc(autonomy)}</span>（${esc(rqI18n.t(AUTONOMY_CN[autonomy] ?? '未登记口径'))}）`) : ''}
         ${kvRow('近 30 天调用', `<span class="tnum mono">${num(asset.calls30d)}</span>`)}
         ${kvRow('近 30 天消耗', `<span class="tnum mono">${fmtNum(asset.tokens30d)} tokens</span>`)}
-        ${kvRow('成本参考', `<span class="tnum mono">${fmtCost((Number(asset.cost30d) || 0) / 100)}</span>（零价快照 · 内部采购成本参考）`)}
+        ${kvRow('成本参考', `<span class="tnum mono">${fmtCost((Number(asset.cost30d) || 0) / 100)}</span>${esc(rqI18n.t('（零价快照 · 内部采购成本参考）'))}`)}
         ${asset.dau !== undefined && asset.dau !== null ? kvRow('DAU', `<span class="tnum mono">${num(asset.dau)}</span>`) : ''}
       </div>
       <div class="flex mt-14" style="gap:8px;border-top:1px solid var(--border);padding-top:14px">
@@ -278,7 +278,7 @@ export function openAssetDrawer(asset) {
 
   // —— 权限（各域详情 API） ——
   async function renderPerm() {
-    tabBody.innerHTML = '<div class="text-4 fs-12">加载中…</div>'
+    tabBody.innerHTML = `<div class="text-4 fs-12">${esc(rqI18n.t('加载中…'))}</div>`
     let detail
     try {
       detail = await fetchDomainDetail(asset)
@@ -299,7 +299,7 @@ export function openAssetDrawer(asset) {
             ${kvRow('Client ID', `<span class="mono">${esc(detail.credential.clientId)}</span>`)}
             ${kvRow('状态', detail.credential.status === 'active' ? '正常' : '已禁用')}
             ${kvRow('活跃令牌', rqI18n.t('{n} 个', { n: detail.credential.activeTokens }))}
-          </div>` : '<div class="muted-box mb-14">未颁发机器凭证</div>'}
+          </div>` : `<div class="muted-box mb-14">${esc(rqI18n.t('未颁发机器凭证'))}</div>`}
         <div class="card-title mb-8">绑定用户（使用即授权留痕）</div>
         <div class="mb-14">
           ${(detail.boundUsers ?? []).length ? detail.boundUsers.map((b) => `
@@ -307,7 +307,7 @@ export function openAssetDrawer(asset) {
               <span class="avatar sm">${esc(String(b.userName).slice(0, 1))}</span>
               <span class="grow">${esc(b.userName)}</span>
               <span class="fs-11 text-4">${esc(rqI18n.t('{time} 绑定', { time: timeAgo(b.boundAt) }))}</span>
-            </div>`).join('') : '<span class="text-4 fs-12">暂无绑定用户</span>'}
+            </div>`).join('') : `<span class="text-4 fs-12">${esc(rqI18n.t('暂无绑定用户'))}</span>`}
         </div>`
     } else if (asset.type === 'app') {
       html += `
@@ -348,7 +348,7 @@ export function openAssetDrawer(asset) {
           ${kvRow('供应商', esc(detail.provider ?? '—'))}
           ${kvRow('路由状态', detail.status === 'online' ? '在线' : '下线')}
           ${kvRow('分级上限', esc(detail.dataClassLimit ?? 'internal'))}
-          ${kvRow('内部单价', detail.costCentsPerKTokens !== undefined ? `${fmtCost(detail.costCentsPerKTokens)} / K tokens` : '—')}
+          ${kvRow(rqI18n.t('内部单价'), detail.costCentsPerKTokens !== undefined ? `${fmtCost(detail.costCentsPerKTokens)} / K tokens` : '—')}
         </div>`
     }
     tabBody.innerHTML = html || emptyHint('该资产类型暂无权限视图')
@@ -370,12 +370,12 @@ export function openAssetDrawer(asset) {
               <div class="flex fs-12" style="padding:6px 0">
                 <span class="mono">${esc(svcName.get(asset.id) ?? asset.key)}</span>
                 <span class="badge badge-muted no-dot" style="margin-left:auto">${g.policies[asset.id]?.allowedTools === '*' ? rqI18n.t('全部工具') : rqI18n.t('{n} 个工具', { n: (g.policies[asset.id]?.allowedTools ?? []).length })}</span>
-                ${g.policies[asset.id]?.constraints?.readOnly ? '<span class="badge badge-info no-dot">只读</span>' : ''}
+                ${g.policies[asset.id]?.constraints?.readOnly ? `<span class="badge badge-info no-dot">${esc(rqI18n.t('只读'))}</span>` : ''}
               </div>
               <div class="fs-11 text-4">${esc(rqI18n.t('绑定主体 {n} 个（Agent / 应用，网关强制校验）', { n: (g.subjects ?? []).length }))}</div>
-            </div>`).join('') : '<span class="text-4 fs-12">尚无权限组授予该服务——网关将拒绝全部调用。</span>'
+            </div>`).join('') : `<span class="text-4 fs-12">${esc(rqI18n.t('尚无权限组授予该服务——网关将拒绝全部调用。'))}</span>`
         } catch {
-          holder.innerHTML = '<span class="text-4 fs-12">权限组信息加载失败</span>'
+          holder.innerHTML = `<span class="text-4 fs-12">${esc(rqI18n.t('权限组信息加载失败'))}</span>`
         }
       })()
     }
@@ -383,7 +383,7 @@ export function openAssetDrawer(asset) {
 
   // —— 拓扑（依赖关系一图穿透） ——
   async function renderTopology() {
-    tabBody.innerHTML = '<div class="text-4 fs-12">加载中…</div>'
+    tabBody.innerHTML = `<div class="text-4 fs-12">${esc(rqI18n.t('加载中…'))}</div>`
     let detail
     try {
       detail = await fetchDomainDetail(asset)
@@ -395,7 +395,7 @@ export function openAssetDrawer(asset) {
       tabBody.innerHTML = emptyHint(rqI18n.t('台账中的该{type}在对应域内已不存在或不可见', { type: rqI18n.t(TYPE_LABEL[asset.type] ?? '资产') }))
       return
     }
-    let html = '<div class="micro-label mb-8">编排拓扑 · 依赖一图穿透</div>'
+    let html = `<div class="micro-label mb-8">${esc(rqI18n.t('编排拓扑 · 依赖一图穿透'))}</div>`
     if ((asset.type === 'agent' || asset.type === 'app') && detail.topology) {
       html += `
         <div class="card card-pad mb-10">${renderTopologyList(detail.topology)}</div>
@@ -427,7 +427,7 @@ export function openAssetDrawer(asset) {
         <div class="fs-12 text-3 mb-8">安装该 Skill 时建议一并安装的前置依赖</div>
         ${deps.map((d) => `<div class="flex fs-13" style="padding:7px 0;border-bottom:1px solid var(--border);gap:8px"><span class="mono">${esc(d)}</span></div>`).join('')}` : emptyHint('该 Skill 无前置依赖')
     } else if (asset.type === 'model') {
-      html += '<div id="ad-model-chains"><span class="text-4 fs-12">加载中…</span></div>'
+      html += `<div id="ad-model-chains"><span class="text-4 fs-12">${esc(rqI18n.t('加载中…'))}</span></div>`
     } else {
       html += emptyHint('该资产类型暂无拓扑视图')
     }
@@ -456,7 +456,7 @@ export function openAssetDrawer(asset) {
 
   // —— 审计 ——
   async function renderAudit() {
-    tabBody.innerHTML = '<div class="text-4 fs-12">加载中…</div>'
+    tabBody.innerHTML = `<div class="text-4 fs-12">${esc(rqI18n.t('加载中…'))}</div>`
     const logs = await fetchAssetAudit(asset)
     if (!logs.length) {
       tabBody.innerHTML = emptyHint('窗口内与该资产相关的审计事件为 0（读操作不计入，噪音控制）')
@@ -476,7 +476,7 @@ export function openAssetDrawer(asset) {
 
   // —— 生命周期 ——
   async function renderLifecycle() {
-    tabBody.innerHTML = '<div class="text-4 fs-12">加载中…</div>'
+    tabBody.innerHTML = `<div class="text-4 fs-12">${esc(rqI18n.t('加载中…'))}</div>`
     let detail = null
     try {
       detail = await fetchDomainDetail(asset)

@@ -7,7 +7,7 @@ import { $, esc, toast, fmtNum, fmtCost, openDrawer, collectForm, field, inputFi
 /** 环比徽标：涨红降绿（成本视角），无可比基数显示 —。 */
 function deltaBadge(deltaPct) {
   if (deltaPct === null || deltaPct === undefined) return '<span class="fs-12 text-4">—</span>'
-  if (deltaPct === 0) return '<span class="fs-12 text-4">持平</span>'
+  if (deltaPct === 0) return `<span class="fs-12 text-4">${esc(rqI18n.t('持平'))}</span>`
   const up = deltaPct > 0
   return `<span class="badge no-dot" style="${up ? 'background:var(--danger-bg);color:#b91c1c' : 'background:var(--ok-bg);color:#047857'}">${up ? icon('arrowUp', 11) : icon('arrowDown', 11)} ${Math.abs(deltaPct)}%</span>`
 }
@@ -39,8 +39,8 @@ export async function renderFinops(content, params, { rerender }) {
     <div class="page-head">
       <div>
         <div class="page-title">FinOps 财务视图</div>
-        <div class="page-desc">给管理者的一页纸：钱花在哪（部门 × 模型成本穿透）、花得值不值（空转检测）。
-        金额为<b>内部成本参考</b>（零价快照口径，不对外结算）。</div>
+        <div class="page-desc">${esc(rqI18n.t('给管理者的一页纸：钱花在哪（部门 × 模型成本穿透）、花得值不值（空转检测）。'))}
+        ${esc(rqI18n.t('金额为'))}<b>${esc(rqI18n.t('内部成本参考'))}</b>${esc(rqI18n.t('（零价快照口径，不对外结算）。'))}</div>
       </div>
       <div class="page-actions">
         <input type="month" id="finops-month" class="input" style="width:auto" value="${esc(month)}" max="${esc(new Date().toISOString().slice(0, 7))}">
@@ -69,7 +69,7 @@ export async function renderFinops(content, params, { rerender }) {
       </div>
       <div class="stat-card">
         <div class="stat-icon" style="background:var(--ok-bg);color:#047857">${icon('building', 18)}</div>
-        <div class="stat-value">${orgCount} <span class="fs-14 text-4">部门</span> / ${modelCount} <span class="fs-14 text-4">模型</span></div>
+        <div class="stat-value">${orgCount} <span class="fs-14 text-4">${esc(rqI18n.t('部门'))}</span> / ${modelCount} <span class="fs-14 text-4">${esc(rqI18n.t('模型'))}</span></div>
         <div class="stat-label">参与消耗的维度</div>
         <div class="stat-foot">${modelCount > 0 ? esc(rqI18n.t('成本最高模型：{model}', { model: penetration.byModel[0].dimension })) : '本月暂无模型消耗'}</div>
       </div>
@@ -130,7 +130,7 @@ export async function renderFinops(content, params, { rerender }) {
           return `
             <div class="table-wrap">
               <table class="tbl" style="font-size:11px">
-                <thead><tr><th style="position:sticky;left:0">部门 \\ 模型</th>${models.map((m) => `<th class="mono" style="text-align:right">${esc(m)}</th>`).join('')}<th style="text-align:right">其他</th></tr></thead>
+                <thead><tr><th style="position:sticky;left:0">${esc(rqI18n.t('部门'))} \\ ${esc(rqI18n.t('模型'))}</th>${models.map((m) => `<th class="mono" style="text-align:right">${esc(m)}</th>`).join('')}<th style="text-align:right">其他</th></tr></thead>
                 <tbody>
                   ${orgs.map((org, i) => `
                     <tr>
@@ -255,9 +255,9 @@ async function mountModelCatalog(rerender) {
 
   host.innerHTML = `
     <div class="card-head">
-      <span class="card-title">${icon('plug', 15)} 模型目录（管理员通道）</span>
-      <span class="card-sub">统一模型接入网关：模型登记 · 渠道组降级 · 预算熔断</span>
-      ${canAdmin ? `<div class="card-head-actions"><button class="btn btn-primary btn-sm" id="mg-model-add">${icon('plus', 13)} 登记/更新模型</button></div>` : ''}
+      <span class="card-title">${icon('plug', 15)} ${esc(rqI18n.t('模型目录（管理员通道）'))}</span>
+      <span class="card-sub">${esc(rqI18n.t('统一模型接入网关：模型登记 · 渠道组降级 · 预算熔断'))}</span>
+      ${canAdmin ? `<div class="card-head-actions"><button class="btn btn-primary btn-sm" id="mg-model-add">${icon('plus', 13)} ${esc(rqI18n.t('登记/更新模型'))}</button></div>` : ''}
     </div>
     <div class="card-body" style="padding-top:6px">
       ${loadError ? `
@@ -265,14 +265,14 @@ async function mountModelCatalog(rerender) {
       <div style="text-align:center;margin-top:8px"><button class="btn btn-default btn-sm" id="mg-retry">重试</button></div>` : `
       <div class="table-wrap">
         <table class="tbl">
-          <thead><tr><th>slug</th><th>显示名</th><th>provider</th><th>状态</th><th>数据密级</th><th style="text-align:right">成本（分/千tokens）</th><th>endpoint</th>${canAdmin ? '<th>操作</th>' : ''}</tr></thead>
+          <thead><tr><th>slug</th><th>显示名</th><th>provider</th><th>状态</th><th>数据密级</th><th style="text-align:right">成本（分/千tokens）</th><th>endpoint</th>${canAdmin ? `<th>${esc(rqI18n.t('操作'))}</th>` : ''}</tr></thead>
           <tbody>
             ${models.length ? models.map((m) => `
               <tr data-id="${esc(m.id ?? '')}" data-slug="${esc(m.slug)}">
                 <td class="mono fs-12">${esc(m.slug)}</td>
                 <td class="fs-12">${esc(m.displayName ?? m.display_name ?? '—')}</td>
                 <td class="fs-12">${esc(m.provider ?? '—')}</td>
-                <td>${m.status === 'online' ? '<span class="badge badge-ok no-dot">在线</span>' : '<span class="badge badge-muted no-dot">离线</span>'}</td>
+                <td>${m.status === 'online' ? `<span class="badge badge-ok no-dot">${esc(rqI18n.t('在线'))}</span>` : `<span class="badge badge-muted no-dot">${esc(rqI18n.t('离线'))}</span>`}</td>
                 <td class="fs-12">${esc(m.dataClassLimit ?? '—')}</td>
                 <td class="col-num fs-12" style="text-align:right">${m.costCentsPerKTokens ?? m.cost_cents_per_k_tokens ?? '—'}</td>
                 <td class="mono fs-11 text-3 ellipsis" style="max-width:200px" title="${esc(m.endpoint ?? '')}">${esc(m.endpoint ?? '—')}</td>
@@ -353,7 +353,7 @@ function openModelForm(rerender) {
     sub: '统一网关按 slug 路由；重复 slug 提交即为更新',
     body: `
       <div class="form-grid">
-        ${field('slug', inputField('slug', { placeholder: '如 deepseek-v3 / gpt-4o' }), { required: true })}
+        ${field(rqI18n.t('slug'), inputField('slug', { placeholder: rqI18n.t('如 deepseek-v3 / gpt-4o') }), { required: true })}
         ${field('显示名', inputField('displayName', { placeholder: '如 DeepSeek V3' }))}
         ${field('provider', inputField('provider', { placeholder: '如 deepseek / openai / azure' }))}
         ${field('endpoint', inputField('endpoint', { placeholder: 'https://api.example.com/v1' }), { full: true })}
@@ -471,7 +471,7 @@ async function mountBudgets() {
     <div class="flex" style="justify-content:flex-end;margin-bottom:8px"><button class="btn btn-default btn-sm" id="mg-budget-add">${icon('plus', 12)} 新增预算</button></div>
     <div class="table-wrap">
       <table class="tbl">
-        <thead><tr><th>组织</th><th>模型</th><th>主体</th><th style="text-align:right">日限额</th><th style="text-align:right">月限额</th><th>预警比</th><th>动作</th><th>状态</th><th>操作</th></tr></thead>
+        <thead><tr><th>组织</th><th>模型</th><th>主体</th><th style="text-align:right">日限额</th><th style="text-align:right">月限额</th><th>预警比</th><th>动作</th><th>状态</th><th>${esc(rqI18n.t('操作'))}</th></tr></thead>
         <tbody>
           ${budgets.length ? budgets.map((b) => `
             <tr data-id="${esc(b.id)}">
@@ -481,11 +481,11 @@ async function mountBudgets() {
               <td class="col-num fs-12" style="text-align:right">${b.dailyLimitCents != null ? yuan(b.dailyLimitCents) : '—'}</td>
               <td class="col-num fs-12" style="text-align:right">${b.monthlyLimitCents != null ? yuan(b.monthlyLimitCents) : '—'}</td>
               <td class="col-num fs-12">${b.warnRatio != null ? `${Math.round(b.warnRatio * 100)}%` : '—'}</td>
-              <td>${b.action === 'block' ? '<span class="badge badge-danger no-dot">超额阻断</span>' : '<span class="badge badge-warn no-dot">超额告警</span>'}</td>
-              <td>${b.enabled ? '<span class="badge badge-ok no-dot">启用</span>' : '<span class="badge badge-muted no-dot">停用</span>'}${b.freezeAgent ? '<span class="badge badge-purple no-dot" style="margin-left:4px" title="超额时联动冻结相关 Agent">联动冻结</span>' : ''}</td>
+              <td>${b.action === 'block' ? `<span class="badge badge-danger no-dot">${esc(rqI18n.t('超额阻断'))}</span>` : `<span class="badge badge-warn no-dot">${esc(rqI18n.t('超额告警'))}</span>`}</td>
+              <td>${b.enabled ? `<span class="badge badge-ok no-dot">${esc(rqI18n.t('启用'))}</span>` : `<span class="badge badge-muted no-dot">${esc(rqI18n.t('停用'))}</span>`}${b.freezeAgent ? `<span class="badge badge-purple no-dot" style="margin-left:4px" title="${esc(rqI18n.t('超额时联动冻结相关 Agent'))}">${esc(rqI18n.t('联动冻结'))}</span>` : ''}</td>
               <td>
                 <div class="flex" style="gap:6px">
-                  <button class="btn btn-default btn-sm stop" data-bedit="${esc(b.id)}">编辑</button>
+                  <button class="btn btn-default btn-sm stop" data-bedit="${esc(b.id)}">${esc(rqI18n.t('编辑'))}</button>
                   <button class="btn btn-danger-ghost btn-sm stop" data-bdel="${esc(b.id)}">${icon('trash', 12)}</button>
                 </div>
               </td>

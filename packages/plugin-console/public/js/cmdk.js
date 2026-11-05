@@ -82,7 +82,7 @@ export function openCmdk() {
         idx++
       }
     }
-    if (!items.length) html = '<div style="padding:28px;text-align:center;color:var(--text-4);font-size:13px">没有匹配的结果</div>'
+    if (!items.length) html = `<div style="padding:28px;text-align:center;color:var(--text-4);font-size:13px">${esc(rqI18n.t('没有匹配的结果'))}</div>`
     list.innerHTML = html
     list.querySelectorAll('.cmdk-item').forEach((el) => {
       el.onmouseenter = () => { activeIndex = Number(el.dataset.idx); render() }
@@ -101,8 +101,8 @@ function buildStaticItems(q) {
   const pages = [
     { title: '工作台', hash: '#/dashboard', icon: 'dashboard' },
     { title: '执行中枢（目标/任务/调度）', hash: '#/exec', icon: 'target', perm: 'exec.read' },
-    { title: 'A2A 协作（数字员工协作面）', hash: '#/a2a', icon: 'flow', perm: 'a2a.directory.read' },
-    { title: 'UHP 执行（执行体与执行记录）', hash: '#/a2a?tab=uhp', icon: 'cpu', perm: 'uhp.read' },
+    { title: rqI18n.t('A2A 协作（数字员工协作面）'), hash: '#/a2a', icon: 'flow', perm: 'a2a.directory.read' },
+    { title: rqI18n.t('UHP 执行（执行体与执行记录）'), hash: '#/a2a?tab=uhp', icon: 'cpu', perm: 'uhp.read' },
     { title: '资产台账（六类统一盘点）', hash: '#/assets', icon: 'layers', perm: 'usage.read' },
     { title: 'Skill 市场', hash: '#/skills', icon: 'sparkles', perm: 'skill.read' },
     { title: '模型网关', hash: '#/gateway', icon: 'route', perm: 'usage.read' },

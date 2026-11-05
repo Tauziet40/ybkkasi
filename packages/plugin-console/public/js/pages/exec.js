@@ -72,12 +72,12 @@ export async function renderExec(content, params, ctx) {
       <div class="page-actions" id="exec-actions"></div>
     </div>
     <div class="tabs" id="exec-tabs">
-      <div class="tab ${tab === 'overview' ? 'active' : ''}" data-tab="overview">总览</div>
-      <div class="tab ${tab === 'goals' ? 'active' : ''}" data-tab="goals">目标</div>
-      <div class="tab ${tab === 'issues' ? 'active' : ''}" data-tab="issues">任务</div>
-      <div class="tab ${tab === 'routine' ? 'active' : ''}" data-tab="routine">调度</div>
+      <div class="tab ${tab === 'overview' ? 'active' : ''}" data-tab="overview">${esc(rqI18n.t('总览'))}</div>
+      <div class="tab ${tab === 'goals' ? 'active' : ''}" data-tab="goals">${esc(rqI18n.t('目标'))}</div>
+      <div class="tab ${tab === 'issues' ? 'active' : ''}" data-tab="issues">${esc(rqI18n.t('任务'))}</div>
+      <div class="tab ${tab === 'routine' ? 'active' : ''}" data-tab="routine">${esc(rqI18n.t('调度'))}</div>
     </div>
-    <div id="exec-body"><div class="card card-pad text-4" style="text-align:center">加载中…</div></div>`
+    <div id="exec-body"><div class="card card-pad text-4" style="text-align:center">${esc(rqI18n.t('加载中…'))}</div></div>`
 
   $$('#exec-tabs .tab').forEach((el) => {
     el.onclick = () => { location.hash = `#/exec?tab=${el.dataset.tab}` }
@@ -111,7 +111,7 @@ function mountErrorCard(body, title, message, retry) {
       <button class="btn btn-default" data-retry>重试</button>
     </div>`
   body.querySelector('[data-retry]').onclick = () => {
-    body.innerHTML = '<div class="card card-pad text-4" style="text-align:center">加载中…</div>'
+    body.innerHTML = `<div class="card card-pad text-4" style="text-align:center">${esc(rqI18n.t('加载中…'))}</div>`
     void retry()
   }
 }
@@ -122,7 +122,7 @@ async function renderOverviewTab(body, ctx) {
   try {
     ov = await api.get('/api/exec/overview')
   } catch (error) {
-    return mountErrorCard(body, '执行总览加载失败', rqI18n.t('{msg}（执行中枢后端可能尚未部署到当前宿主）', { msg: error.message }), () => renderTab('overview', body, ctx))
+    return mountErrorCard(body, rqI18n.t('执行总览加载失败'), rqI18n.t('{msg}（执行中枢后端可能尚未部署到当前宿主）', { msg: error.message }), () => renderTab('overview', body, ctx))
   }
   const agents = ov.agentsHealth ?? []
 
@@ -151,7 +151,7 @@ async function renderOverviewTab(body, ctx) {
                   <td class="fs-12">${esc(ORG_ROLE_LABEL[a.orgRole] ?? a.orgRole ?? '—')}</td>
                   <td class="fs-12">${esc(a.rank ?? '—')}</td>
                   <td>${a.status ? statusBadge(a.status) : '<span class="text-4 fs-12">—</span>'}</td>
-                  <td>${a.frozen ? '<span class="badge badge-purple no-dot">已冻结</span>' : '<span class="text-4 fs-12">—</span>'}</td>
+                  <td>${a.frozen ? `<span class="badge badge-purple no-dot">${esc(rqI18n.t('已冻结'))}</span>` : '<span class="text-4 fs-12">—</span>'}</td>
                   <td class="fs-12 text-3">${a.lastHeartbeatAt ? timeAgo(a.lastHeartbeatAt) : '—'}</td>
                   <td class="fs-12 text-3">${a.lastMetricsReportAt ? timeAgo(a.lastMetricsReportAt) : '—'}</td>
                   <td>${badge(HEALTH_BADGE, a.health)}</td>
@@ -424,7 +424,7 @@ async function renderIssuesTab(body, ctx) {
   try {
     all = await api.get('/api/exec/issues')
   } catch (error) {
-    return mountErrorCard(body, '任务列表加载失败', rqI18n.t('{msg}（执行中枢后端可能尚未部署到当前宿主）', { msg: error.message }), () => renderTab('issues', body, ctx))
+    return mountErrorCard(body, rqI18n.t('任务列表加载失败'), rqI18n.t('{msg}（执行中枢后端可能尚未部署到当前宿主）', { msg: error.message }), () => renderTab('issues', body, ctx))
   }
   const issues = all.issues ?? []
   const canWrite = session.can('exec.write')
@@ -664,7 +664,7 @@ async function openIssueDetail(issueId, ctx) {
       <div class="muted-box mb-14" style="white-space:pre-wrap">${esc(issue.detail)}</div>` : ''}
       <div class="card-title mb-8">血缘链（目标 → 项目）</div>
       <div class="mb-14 flex" style="gap:6px;flex-wrap:wrap;align-items:center">
-        ${ancestry.length ? ancestry.map((title, index) => `${index > 0 ? `<span class="text-4">${icon('chevronRight', 12)}</span>` : ''}<span class="badge badge-brand no-dot">${esc(title?.title ?? title)}</span>`).join('') : '<span class="text-4 fs-12">未挂接目标链</span>'}
+        ${ancestry.length ? ancestry.map((title, index) => `${index > 0 ? `<span class="text-4">${icon('chevronRight', 12)}</span>` : ''}<span class="badge badge-brand no-dot">${esc(title?.title ?? title)}</span>`).join('') : `<span class="text-4 fs-12">${esc(rqI18n.t('未挂接目标链'))}</span>`}
         ${lineage?.project ? `<span class="text-4">${icon('chevronRight', 12)}</span><span class="badge badge-info no-dot">${esc(lineage.project.name ?? lineage.project)}</span>` : ''}
       </div>
       <div class="card-title mb-8">前置任务</div>
@@ -673,7 +673,7 @@ async function openIssueDetail(issueId, ctx) {
           <div class="flex" style="padding:7px 0;border-bottom:1px solid var(--border)">
             ${badge(ISSUE_STATUS, b.status)}
             <span class="fs-12 grow ellipsis">${esc(b.title ?? b.id)}</span>
-          </div>`).join('') : '<span class="text-4 fs-12">无前置任务</span>'}
+          </div>`).join('') : `<span class="text-4 fs-12">${esc(rqI18n.t('无前置任务'))}</span>`}
       </div>
       ${contextPack ? `
       <div class="card-title mb-8">上下文包</div>
@@ -700,7 +700,7 @@ async function renderRoutineTab(body, ctx) {
       api.get('/api/exec/routines'),
     ])
   } catch (error) {
-    return mountErrorCard(body, '调度数据加载失败', rqI18n.t('{msg}（执行中枢后端可能尚未部署到当前宿主）', { msg: error.message }), () => renderTab('routine', body, ctx))
+    return mountErrorCard(body, rqI18n.t('调度数据加载失败'), rqI18n.t('{msg}（执行中枢后端可能尚未部署到当前宿主）', { msg: error.message }), () => renderTab('routine', body, ctx))
   }
   const wakes = wakesData.wakes ?? []
   const routines = routinesData.routines ?? []
@@ -736,13 +736,13 @@ async function renderRoutineTab(body, ctx) {
       <div class="card-head">
         <span class="card-title">${icon('clock', 15)} 例行规则</span>
         <span class="card-sub">${esc(rqI18n.t('{n} 条 · 定时唤醒 Agent 执行例行工作', { n: routines.length }))}</span>
-        ${canWrite ? `<div class="card-head-actions"><button class="btn btn-primary btn-sm" id="routine-create">${icon('plus', 13)} 新建例行</button></div>` : ''}
+        ${canWrite ? `<div class="card-head-actions"><button class="btn btn-primary btn-sm" id="routine-create">${icon('plus', 13)} ${esc(rqI18n.t('新建例行'))}</button></div>` : ''}
       </div>
       <div class="card-body" style="padding-top:6px">
         ${routines.length ? `
         <div class="table-wrap">
           <table class="tbl">
-            <thead><tr><th>名称</th><th>Agent</th><th>类型</th><th>规则</th><th>启用</th><th>最近触发</th>${canWrite ? '<th>操作</th>' : ''}</tr></thead>
+            <thead><tr><th>${esc(rqI18n.t('名称'))}</th><th>Agent</th><th>${esc(rqI18n.t('类型'))}</th><th>${esc(rqI18n.t('规则'))}</th><th>${esc(rqI18n.t('启用'))}</th><th>${esc(rqI18n.t('最近触发'))}</th>${canWrite ? `<th>${esc(rqI18n.t('操作'))}</th>` : ''}</tr></thead>
             <tbody>
               ${routines.map((r) => `
                 <tr data-id="${esc(r.id)}">
@@ -750,7 +750,7 @@ async function renderRoutineTab(body, ctx) {
                   <td class="fs-12">${esc(r.agentName ?? r.agentId ?? '—')}</td>
                   <td>${badge(ROUTINE_KIND, r.kind)}</td>
                   <td class="fs-12">${routineRuleText(r)}</td>
-                  <td>${r.enabled ? '<span class="badge badge-ok no-dot">启用</span>' : '<span class="badge badge-muted no-dot">停用</span>'}</td>
+                  <td>${r.enabled ? `<span class="badge badge-ok no-dot">${esc(rqI18n.t('启用'))}</span>` : `<span class="badge badge-muted no-dot">${esc(rqI18n.t('停用'))}</span>`}</td>
                   <td class="fs-12 text-3">${r.lastFiredAt ? timeAgo(r.lastFiredAt) : '未触发'}</td>
                   ${canWrite ? `
                   <td>

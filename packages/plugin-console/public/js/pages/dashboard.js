@@ -70,7 +70,13 @@ export async function renderDashboard(content, params, ctx) {
     ${sectionHead({
       label: 'WORKBENCH / CIO',
       title: esc(rqI18n.t('{greet}，{name}', { greet: rqI18n.t(greet), name: firstName })),
-      extra: `今天有 <b style="color:var(--warn)">${fmtNum(d.approvals?.pending ?? 0)}</b> 个审批待处理、<b style="color:var(--danger)">${fmtNum(d.alerts?.unread ?? 0)}</b> 条未读告警，${d.conflicts > 0 ? `以及 <b style="color:var(--brand-600)">${fmtNum(d.conflicts)}</b> 条三方同步冲突待确认。` : '平台整体运行平稳。'}`,
+      extra: rqI18n.t('今天有 {approvals} 个审批待处理、{alerts} 条未读告警，{tail}', {
+        approvals: `<b style="color:var(--warn)">${fmtNum(d.approvals?.pending ?? 0)}</b>`,
+        alerts: `<b style="color:var(--danger)">${fmtNum(d.alerts?.unread ?? 0)}</b>`,
+        tail: d.conflicts > 0
+          ? rqI18n.t('以及 {conflicts} 条三方同步冲突待确认。', { conflicts: `<b style="color:var(--brand-600)">${fmtNum(d.conflicts)}</b>` })
+          : rqI18n.t('平台整体运行平稳。'),
+      }),
       actions: `
         ${d.conflicts > 0 && session.can('iam.user.read') ? `<button class="btn btn-default" id="dash-goto-conflicts" style="color:var(--brand-600)">${icon('link', 14)}${esc(rqI18n.t('处理同步冲突（{n}）', { n: fmtNum(d.conflicts) }))}</button>` : ''}
         ${session.can('agent.read') ? `<button class="btn btn-default" id="dash-goto-agents">${icon('bot', 14)}查看 Agent</button>` : ''}
@@ -308,7 +314,7 @@ async function mountCockpitValue() {
 async function renderGoalsTab(body) {
   body.innerHTML = `<div class="card card-pad text-4" style="text-align:center">加载中…</div>`
   if (!session.can('exec.read')) {
-    body.innerHTML = permCard('目标与价值', 'exec.read', '需要「exec.read」权限（执行中枢只读）才能查看目标、项目与价值口径。')
+    body.innerHTML = permCard('目标与价值', 'exec.read', rqI18n.t('需要「exec.read」权限（执行中枢只读）才能查看目标、项目与价值口径。'))
     return
   }
   let goalsData, projectsData
@@ -407,7 +413,7 @@ function goalCardHtml(goal, projects) {
 async function renderActionsTab(body) {
   body.innerHTML = `<div class="card card-pad text-4" style="text-align:center">加载中…</div>`
   if (!session.can('exec.read')) {
-    body.innerHTML = permCard('行动项目', 'exec.read', '需要「exec.read」权限（执行中枢只读）才能查看行动项目与交付任务。')
+    body.innerHTML = permCard('行动项目', 'exec.read', rqI18n.t('需要「exec.read」权限（执行中枢只读）才能查看行动项目与交付任务。'))
     return
   }
   let projectsData, issuesData, goalsData
@@ -504,7 +510,7 @@ async function renderActionsTab(body) {
         <div class="kanban-card" data-issue="${esc(issue.id)}" style="padding:10px;cursor:pointer">
           <div class="flex" style="gap:6px;align-items:center">
             <span class="badge ${PRIORITY_BADGE[issue.priority] ?? 'badge-muted'} no-dot" style="font-size:10px">${esc(issue.priority ?? 'P3')}</span>
-            ${issue.executionRunId ? '<span class="badge badge-purple no-dot" style="font-size:10px" title="任务执行加锁中">执行中</span>' : ''}
+            ${issue.executionRunId ? `<span class="badge badge-purple no-dot" style="font-size:10px" title="${esc(rqI18n.t('任务执行加锁中'))}">${esc(rqI18n.t('执行中'))}</span>` : ''}
           </div>
           <div class="fs-13" style="font-weight:500;margin-top:6px;line-height:1.4" title="${esc(issue.title)}">${ellipsis(issue.title, 42)}</div>
           <div class="fs-11 text-3" style="margin-top:2px">${esc(issue.projectName ?? '未挂项目')}</div>
@@ -522,7 +528,7 @@ async function renderActionsTab(body) {
 // ================================================================ Tab 4：collab 人机协作
 async function renderCollabTab(body, d) {
   body.innerHTML = `
-    ${sectionHead({ label: 'COLLAB / HUMAN × AI', title: '人机协作', extra: '人负责判断，数字员工负责交付 · 把对话、任务、资源与结果留在同一个业务上下文里' })}
+    ${sectionHead({ label: 'COLLAB / HUMAN × AI', title: '人机协作', extra: rqI18n.t('人负责判断，数字员工负责交付 · 把对话、任务、资源与结果留在同一个业务上下文里') })}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px" class="mb-14">
       <div class="card card-pad">
         <div class="flex" style="justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -614,7 +620,7 @@ async function mountCollabSessions() {
         <div class="fs-13" style="font-weight:500">${esc(dept.label ?? dept.id)}</div>
         <div class="fs-11 text-3 ellipsis">${esc(rqI18n.t('{name} · 数字员工 {n} 位{suffix}', { name: dept.org?.name ?? rqI18n.t('未绑定组织'), n: (dept.agents ?? []).length, suffix: dept.allowed === false ? rqI18n.t(' · 无访问权限') : '' }))}</div>
       </div>
-      ${dept.allowed === false ? '' : `<a class="fs-11" style="color:var(--brand-600);flex-shrink:0" href="${BASE}/panel/?dept=${encodeURIComponent(dept.id)}" target="_top" rel="noopener">进入面板 ›</a>`}
+      ${dept.allowed === false ? '' : `<a class="fs-11" style="color:var(--brand-600);flex-shrink:0" href="${BASE}/panel/?dept=${encodeURIComponent(dept.id)}" target="_top" rel="noopener">${esc(rqI18n.t('进入面板 ›'))}</a>`}
     </div>`).join('')
 }
 
@@ -687,7 +693,7 @@ async function renderOpsTab(body, d, isManager) {
       <div class="card card-pad">
         <div class="card-head" style="margin-bottom:10px">
           <span class="card-title">${icon('fileCheck', 15)} 待办审批</span>
-          <div class="card-head-actions">${session.can('approval.read') ? '<a href="#/approvals" class="fs-12">全部 ›</a>' : ''}</div>
+          <div class="card-head-actions">${session.can('approval.read') ? `<a href="#/approvals" class="fs-12">${esc(rqI18n.t('全部 ›'))}</a>` : ''}</div>
         </div>
         <div id="ops-approvals"></div>
       </div>
@@ -1024,7 +1030,7 @@ const EVENT_LABELS = {
   'platform.update.available': '发现平台更新', 'platform.update.applied': '平台更新完成',
 }
 function eventLabel(name, labels = EVENT_LABELS) {
-  if (labels[name]) return labels[name]
+  if (labels[name]) return rqI18n.t(labels[name])
   const SEGMENTS = {
     iam: '账号', authn: '认证', oidc: '单点登录', mcp: 'MCP', nas: 'NAS', audit: '审计',
     skill: '技能', agent: '智能体', app: '应用', usage: '用量', market: '市场',
@@ -1036,7 +1042,7 @@ function eventLabel(name, labels = EVENT_LABELS) {
     updated: '更新', archived: '归档', granted: '通过', denied: '拒绝', fired: '触发', synced: '同步',
     available: '可更新', applied: '已应用', settled: '结算', enrolled: '接入', disabled: '停用', frozen: '冻结', activated: '启用',
   }
-  const translated = name.split('.').map((seg) => SEGMENTS[seg] ?? seg).join(' · ')
+  const translated = name.split('.').map((seg) => (SEGMENTS[seg] ? rqI18n.t(SEGMENTS[seg]) : seg)).join(' · ')
   return translated === name ? name : translated
 }
 
