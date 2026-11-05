@@ -226,9 +226,9 @@ function renderShell(page, params, builder) {
     <div class="layout">
       <aside class="sidebar">
         <div class="sidebar-brand">
-          <img class="brand-mark brand-logo" src="ybk-mark.png" alt="元冰可">
+          <img class="brand-mark brand-logo" src="ybk-mark.png" alt="method.watch">
           <div>
-            <div class="brand-name" style="font-size:13.5px;line-height:1.3">元冰可 AIOS</div>
+            <div class="brand-name" style="font-size:13.5px;line-height:1.3">method</div>
             <div class="brand-sub">企业 AI 资源管理平台</div>
           </div>
         </div>
