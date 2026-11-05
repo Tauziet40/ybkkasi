@@ -16,8 +16,8 @@
  */
 
 const PREF_KEY = 'rq_lang'
-const SUPPORTED = ['zh-CN', 'en-US', 'ja-JP']
-const NATIVE_NAMES = { 'zh-CN': '简体中文', 'en-US': 'English (US)', 'ja-JP': '日本語' }
+const SUPPORTED = ['zh-CN', 'en-US', 'ja-JP', 'fr-FR']
+const NATIVE_NAMES = { 'zh-CN': '简体中文', 'en-US': 'English (US)', 'ja-JP': '日本語', 'fr-FR': 'Français' }
 
 /** 部署前缀推导（与 console api.js 同法；panel 拷贝版由下方 deriveMount 修正 /panel 段）。 */
 function deriveMount() {
@@ -37,6 +37,7 @@ function normalize(tag) {
   if (lower === 'zh' || lower.startsWith('zh-')) return 'zh-CN'
   if (lower === 'en' || lower.startsWith('en-')) return 'en-US'
   if (lower === 'ja' || lower.startsWith('ja-')) return 'ja-JP'
+  if (lower === 'fr' || lower.startsWith('fr-')) return 'fr-FR'
   return null
 }
 
@@ -164,7 +165,7 @@ function buildSelect(className) {
   select.className = className
   select.setAttribute('aria-label', 'Language / 语言')
   const current = prefOf()
-  const options = [['auto', '语言 · Auto'], ['zh-CN', NATIVE_NAMES['zh-CN']], ['en-US', NATIVE_NAMES['en-US']], ['ja-JP', NATIVE_NAMES['ja-JP']]]
+  const options = [['auto', '语言 · Auto'], ['zh-CN', NATIVE_NAMES['zh-CN']], ['en-US', NATIVE_NAMES['en-US']], ['ja-JP', NATIVE_NAMES['ja-JP']], ['fr-FR', NATIVE_NAMES['fr-FR']]]
   for (const [value, label] of options) {
     const option = document.createElement('option')
     option.value = value

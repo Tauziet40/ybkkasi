@@ -4,7 +4,7 @@
  * 口径：
  *   - 扫描 packages/plugin-console/public/js 下全部页面与组件（pages/**、components/**），
  *     提取 `rqI18n.t('…')` 字面量键（与运行时整词匹配口径一致：键 = 中文原文）；
- *   - 对每个语言包（en-US / ja-JP，zh-CN 为原文不参与）统计缺失键；
+ *   - 对每个语言包（en-US / ja-JP / fr-FR，zh-CN 为原文不参与）统计缺失键；
  *   - **文件级门槛 ≥95%**：任一文件低于阈值即红（不允许「整体 99% 但新页面 60%」）；
  *   - 同时校验模板占位符一致（{n}/{time} 等插值名不得在译文中丢失或改名）——
  *     缺占位符会让翻译分支静默吞掉变量，比缺键更难被发现。
@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const JS_ROOT = join(ROOT, 'packages', 'plugin-console', 'public', 'js')
 const LOCALE_ROOT = join(ROOT, 'packages', 'plugin-console', 'public', 'locales')
-const LOCALES = ['en-US', 'ja-JP']
+const LOCALES = ['en-US', 'ja-JP', 'fr-FR']
 /** 文件级覆盖率门槛（QA 反馈：95% 是放行线）。 */
 const THRESHOLD = 0.95
 
@@ -100,7 +100,7 @@ for (const file of targets) {
   }
 }
 
-console.log(`\n三语文案覆盖：${filesChecked} 个前端文件，缺失/不一致 ${missingTotal} 处（门槛 ${(THRESHOLD * 100).toFixed(0)}%）`)
+console.log(`\n多语文案覆盖（${LOCALES.join(' / ')}）：${filesChecked} 个前端文件，缺失/不一致 ${missingTotal} 处（门槛 ${(THRESHOLD * 100).toFixed(0)}%）`)
 for (const line of failures) console.error(`  ✘ ${line}`)
 if (failures.length > 0) {
   if (reportOnly) {

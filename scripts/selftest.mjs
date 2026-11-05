@@ -8845,9 +8845,11 @@ try {
     check('locale 决议链（query > cookie > Accept-Language > env）',
       i18n.resolveRequestLocale({ query: 'ja' }) === 'ja-JP'
       && i18n.resolveRequestLocale({ cookie: 'en-US', acceptLanguage: 'ja-JP' }) === 'en-US'
-      && i18n.resolveRequestLocale({ acceptLanguage: 'fr-FR,ja;q=0.5' }) === 'ja-JP'
-      && i18n.resolveRequestLocale({ env: 'en-GB' }) === 'en-US')
-    // 词典齐套：全部 locale 目录 JSON 可解析 + en/ja 键集逐对一致
+      && i18n.resolveRequestLocale({ acceptLanguage: 'ko-KR,ja;q=0.5' }) === 'ja-JP'
+      && i18n.resolveRequestLocale({ env: 'en-GB' }) === 'en-US'
+      && i18n.resolveRequestLocale({ acceptLanguage: 'fr-CA,fr;q=0.9' }) === 'fr-FR'
+      && i18n.resolveRequestLocale({ cookie: 'fr' }) === 'fr-FR')
+    // 词典齐套：全部 locale 目录 JSON 可解析 + en 与 ja/fr 键集逐对一致
     const localeRoot = new URL('../packages/platform-i18n/locales/', import.meta.url).pathname
     const dictParityFails = []
     let dictPairs = 0
@@ -8857,22 +8859,29 @@ try {
       const enFiles = existsSync(join(rootDir, 'en-US')) ? readdirSync(join(rootDir, 'en-US')).filter((f) => f.endsWith('.json')) : []
       for (const name of enFiles) {
         const enPath = join(rootDir, 'en-US', name)
-        const jaPath = join(rootDir, 'ja-JP', name)
-        if (!existsSync(jaPath)) { dictParityFails.push(`缺 ja 侧文件：${jaPath}`); continue }
-        let en, ja
-        try { en = JSON.parse(readFileSync(enPath, 'utf8')); ja = JSON.parse(readFileSync(jaPath, 'utf8')) }
-        catch (error) { dictParityFails.push(`JSON 解析失败 ${name}: ${error.message}`); continue }
-        dictPairs += 1
-        const enKeys = Object.keys(en).sort()
-        const jaKeys = Object.keys(ja).sort()
-        if (JSON.stringify(enKeys) !== JSON.stringify(jaKeys)) {
-          const onlyEn = enKeys.filter((k) => !(k in ja)).slice(0, 3)
-          const onlyJa = jaKeys.filter((k) => !(k in en)).slice(0, 3)
-          dictParityFails.push(`${name} 键集不一致 onlyEn=${onlyEn} onlyJa=${onlyJa}`)
+        const en = await (async () => {
+          try { return JSON.parse(readFileSync(enPath, 'utf8')) }
+          catch (error) { dictParityFails.push(`JSON 解析失败 en-US/${name}: ${error.message}`); return null }
+        })()
+        if (!en) continue
+        for (const [langLabel, langDir] of [['ja', 'ja-JP'], ['fr', 'fr-FR']]) {
+          const langPath = join(rootDir, langDir, name)
+          if (!existsSync(langPath)) { dictParityFails.push(`缺 ${langLabel} 侧文件：${langPath}`); continue }
+          let lang
+          try { lang = JSON.parse(readFileSync(langPath, 'utf8')) }
+          catch (error) { dictParityFails.push(`JSON 解析失败 ${langDir}/${name}: ${error.message}`); continue }
+          dictPairs += 1
+          const enKeys = Object.keys(en).sort()
+          const langKeys = Object.keys(lang).sort()
+          if (JSON.stringify(enKeys) !== JSON.stringify(langKeys)) {
+            const onlyEn = enKeys.filter((k) => !(k in lang)).slice(0, 3)
+            const onlyLang = langKeys.filter((k) => !(k in en)).slice(0, 3)
+            dictParityFails.push(`${langDir}/${name} 键集不一致 onlyEn=${onlyEn} only${langLabel.toUpperCase()}=${onlyLang}`)
+          }
         }
       }
     }
-    check(`词典齐套：${dictPairs} 对 en/ja 文件 JSON 可解析且键集一致`, dictPairs >= 8 && dictParityFails.length === 0, dictParityFails.slice(0, 4).join('；'))
+    check(`词典齐套：${dictPairs} 对 en/ja/fr 文件 JSON 可解析且键集一致`, dictPairs >= 12 && dictParityFails.length === 0, dictParityFails.slice(0, 4).join('；'))
     // /locales 合并端点 + 请求级语言协商
     const localesEn = await fetch(`${BASE}/locales/en-US`).then((r) => r.json())
     check('/locales/en-US 合并端点（catalog 含通用键，规模 >100）',

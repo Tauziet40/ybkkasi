@@ -22,8 +22,8 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
 
-/** 支持的语言（UI 全球化第一批：简体中文默认 + 英语 + 日语；扩展新语言 = 加目录 + 加映射）。 */
-export const SUPPORTED_LOCALES = ['zh-CN', 'en-US', 'ja-JP'] as const
+/** 支持的语言（UI 全球化：简体中文默认 + 英语 + 日语 + 法语；扩展新语言 = 加目录 + 加映射）。 */
+export const SUPPORTED_LOCALES = ['zh-CN', 'en-US', 'ja-JP', 'fr-FR'] as const
 export type Locale = (typeof SUPPORTED_LOCALES)[number]
 export const DEFAULT_LOCALE: Locale = 'zh-CN'
 
@@ -32,15 +32,17 @@ export const LOCALE_DISPLAY_NAMES: Record<Locale, { native: string; en: string; 
   'zh-CN': { native: '简体中文', en: 'Simplified Chinese', intl: 'zh-CN' },
   'en-US': { native: 'English (US)', en: 'English (US)', intl: 'en-US' },
   'ja-JP': { native: '日本語', en: 'Japanese', intl: 'ja-JP' },
+  'fr-FR': { native: 'Français', en: 'French', intl: 'fr-FR' },
 }
 
 const LANG_PREFIX_MAP: Array<{ prefix: string; locale: Locale }> = [
   { prefix: 'zh', locale: 'zh-CN' },
   { prefix: 'en', locale: 'en-US' },
   { prefix: 'ja', locale: 'ja-JP' },
+  { prefix: 'fr', locale: 'fr-FR' },
 ]
 
-/** BCP47 宽容归一：'en'/'en-GB' → en-US，'ja' → ja-JP，'zh'/'zh-SG' → zh-CN；不支持返回 null。 */
+/** BCP47 宽容归一：'en'/'en-GB' → en-US，'ja' → ja-JP，'fr'/'fr-CA' → fr-FR，'zh'/'zh-SG' → zh-CN；不支持返回 null。 */
 export function normalizeLocale(input?: string | null): Locale | null {
   if (!input) return null
   const lower = String(input).trim().toLowerCase()
