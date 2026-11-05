@@ -79,47 +79,47 @@ import { mountUpdateBadge, openUpdateDrawer } from './update.js'
 // 的一条主线，混在资源台账里会被误读成又一类可盘点资产；资源组只留被管理对象本身。
 // 资产登记（#/register）已下线：登记入口分别落在各资源页自身的新建动作上，不再有独立的登记看板。
 const NAV = [
-  { section: '总览', items: [
-    { path: '#/dashboard', label: '工作台', icon: 'dashboard', perm: 'console.login' },
+  { section: rqI18n.t('总览'), items: [
+    { path: '#/dashboard', label: rqI18n.t('工作台'), icon: 'dashboard', perm: 'console.login' },
     // 部门面板（2026-10-22）：不再是硬编码外链，改为「宿主连接 × 部门」登记清单页（#/panels）。
     // 只有登记过的面板才有一键入口——把「从哪个宿主进哪个部门」变成可管理的事实，而不是靠目标宿主记忆。
-    { path: '#/panels', label: '部门面板', icon: 'users', perm: 'panel.read' },
+    { path: '#/panels', label: rqI18n.t('部门面板'), icon: 'users', perm: 'panel.read' },
   ] },
-  { section: '资源', items: [
-    { path: '#/assets', label: '资产台账', icon: 'boxes', perm: 'usage.read' },
-    { path: '#/skills', label: 'Skill 市场', icon: 'store', perm: 'skill.read', badge: 'skills' },
-    { path: '#/gateway', label: '模型网关', icon: 'route', perm: 'usage.read' },
-    { path: '#/agents', label: 'Agent 本体', icon: 'bot', perm: 'agent.read' },
-    { path: '#/apps', label: 'AI 应用', icon: 'app', perm: 'app.read' },
-    { path: '#/mcp', label: 'MCP 服务', icon: 'plug', perm: 'mcp.service.read' },
+  { section: rqI18n.t('资源'), items: [
+    { path: '#/assets', label: rqI18n.t('资产台账'), icon: 'boxes', perm: 'usage.read' },
+    { path: '#/skills', label: rqI18n.t('Skill 市场'), icon: 'store', perm: 'skill.read', badge: 'skills' },
+    { path: '#/gateway', label: rqI18n.t('模型网关'), icon: 'route', perm: 'usage.read' },
+    { path: '#/agents', label: rqI18n.t('Agent 本体'), icon: 'bot', perm: 'agent.read' },
+    { path: '#/apps', label: rqI18n.t('AI 应用'), icon: 'app', perm: 'app.read' },
+    { path: '#/mcp', label: rqI18n.t('MCP 服务'), icon: 'plug', perm: 'mcp.service.read' },
     // 个人接入令牌与 MCP 调用配置（归属 MCP 服务板块：配置的是本平台 /mcp 工具面的接入）
-    { path: '#/me', label: '我的接入', icon: 'user', perm: 'console.login' },
-    { path: '#/nas', label: 'NAS 存储', icon: 'server', perm: 'nas.read' },
-    { path: '#/connectors', label: '连接器', icon: 'plug', perm: 'connector.catalog.read' },
+    { path: '#/me', label: rqI18n.t('我的接入'), icon: 'user', perm: 'console.login' },
+    { path: '#/nas', label: rqI18n.t('NAS 存储'), icon: 'server', perm: 'nas.read' },
+    { path: '#/connectors', label: rqI18n.t('连接器'), icon: 'plug', perm: 'connector.catalog.read' },
   ] },
-  { section: '协作与执行', items: [
+  { section: rqI18n.t('协作与执行'), items: [
     // 执行中枢：目标/项目/任务/调度四位一体（#/exec），工作台「目标与价值/行动项目」tab 的下钻落点
-    { path: '#/exec', label: '执行中枢', icon: 'target', perm: 'exec.read' },
+    { path: '#/exec', label: rqI18n.t('执行中枢'), icon: 'target', perm: 'exec.read' },
     // A2A 协作：数字员工跨运行时协作面（目录发现 / 任务追踪 / 履约与巡检），读权限随目录
-    { path: '#/a2a', label: 'A2A 协作', icon: 'flow', perm: 'a2a.directory.read' },
+    { path: '#/a2a', label: rqI18n.t('A2A 协作'), icon: 'flow', perm: 'a2a.directory.read' },
     // UHP 执行：harnesses 注册表 + 执行记录（A2A 页的 UHP tab 的一级入口；同一页面不同落点）
-    { path: '#/a2a?tab=uhp', label: 'UHP 执行', icon: 'cpu', perm: 'uhp.read' },
+    { path: '#/a2a?tab=uhp', label: rqI18n.t('UHP 执行'), icon: 'cpu', perm: 'uhp.read' },
   ] },
-  { section: '治理', items: [
-    { path: '#/usage', label: '用量与成本', icon: 'barChart3', perm: 'usage.read' },
-    { path: '#/finops', label: '财务视图', icon: 'coins', perm: 'usage.read' },
-    { path: '#/nas-authz', label: '数据权限', icon: 'shield', perm: 'nas.authz.read' },
-    { path: '#/approvals', label: '审批中心', icon: 'fileCheck', perm: 'approval.read', badge: 'approvals' },
-    { path: '#/audit', label: '审计与告警', icon: 'shieldAlert', perm: 'audit.read', badge: 'alerts' },
-    { path: '#/authn', label: '认证与令牌', icon: 'key', perm: 'authn.principal.read' },
+  { section: rqI18n.t('治理'), items: [
+    { path: '#/usage', label: rqI18n.t('用量与成本'), icon: 'barChart3', perm: 'usage.read' },
+    { path: '#/finops', label: rqI18n.t('财务视图'), icon: 'coins', perm: 'usage.read' },
+    { path: '#/nas-authz', label: rqI18n.t('数据权限'), icon: 'shield', perm: 'nas.authz.read' },
+    { path: '#/approvals', label: rqI18n.t('审批中心'), icon: 'fileCheck', perm: 'approval.read', badge: 'approvals' },
+    { path: '#/audit', label: rqI18n.t('审计与告警'), icon: 'shieldAlert', perm: 'audit.read', badge: 'alerts' },
+    { path: '#/authn', label: rqI18n.t('认证与令牌'), icon: 'key', perm: 'authn.principal.read' },
   ] },
-  { section: '企业', items: [
-    { path: '#/iam', label: '组织与账号', icon: 'building2', perm: 'iam.user.read' },
-    { path: '#/iam?tab=roles', label: '角色权限', icon: 'shield', perm: 'iam.org.read' },
-    { path: '#/iam?tab=connectors', label: '三方集成', icon: 'link', perm: 'iam.org.read' },
-    { path: '#/access', label: '平台接入', icon: 'fingerprint', perm: 'connect.manage' },
-    { path: '#/connections', label: '宿主服务连接', icon: 'server', perm: 'console.login' },
-    { path: '#/platform', label: '插件与工具', icon: 'puzzle', perm: 'console.login' },
+  { section: rqI18n.t('企业'), items: [
+    { path: '#/iam', label: rqI18n.t('组织与账号'), icon: 'building2', perm: 'iam.user.read' },
+    { path: '#/iam?tab=roles', label: rqI18n.t('角色权限'), icon: 'shield', perm: 'iam.org.read' },
+    { path: '#/iam?tab=connectors', label: rqI18n.t('三方集成'), icon: 'link', perm: 'iam.org.read' },
+    { path: '#/access', label: rqI18n.t('平台接入'), icon: 'fingerprint', perm: 'connect.manage' },
+    { path: '#/connections', label: rqI18n.t('宿主服务连接'), icon: 'server', perm: 'console.login' },
+    { path: '#/platform', label: rqI18n.t('插件与工具'), icon: 'puzzle', perm: 'console.login' },
   ] },
 ]
 
@@ -135,9 +135,9 @@ function guard(renderThunk, target) {
       target.innerHTML = `
         <div class="card card-pad" style="text-align:center;padding:44px 24px">
           <div style="font-size:30px;margin-bottom:10px">🚫</div>
-          <div style="font-weight:600;margin-bottom:6px">页面加载失败</div>
-          <div class="fs-12 text-3" style="margin-bottom:18px">${esc(error?.message ?? '未知错误')}</div>
-          <button class="btn btn-default" id="page-retry">重试</button>
+          <div style="font-weight:600;margin-bottom:6px">${rqI18n.t('页面加载失败')}</div>
+          <div class="fs-12 text-3" style="margin-bottom:18px">${esc(error?.message ?? rqI18n.t('未知错误'))}</div>
+          <button class="btn btn-default" id="page-retry">${rqI18n.t('重试')}</button>
         </div>`
       $('#page-retry')?.addEventListener('click', () => navigate())
     })
@@ -229,7 +229,7 @@ function renderShell(page, params, builder) {
           <img class="brand-mark brand-logo" src="ybk-mark.png" alt="method.watch">
           <div>
             <div class="brand-name" style="font-size:13.5px;line-height:1.3">method</div>
-            <div class="brand-sub">企业 AI 资源管理平台</div>
+            <div class="brand-sub">${rqI18n.t('企业')} AI ${rqI18n.t('资源管理平台')}</div>
           </div>
         </div>
         <nav class="sidebar-nav" id="nav"></nav>
@@ -238,16 +238,16 @@ function renderShell(page, params, builder) {
       <div class="sidebar-mask" id="sidebar-mask"></div>
       <div class="main">
         <header class="topbar">
-          <button class="icon-btn nav-toggle" id="nav-toggle" title="导航菜单" aria-label="打开导航菜单">${icon('menu')}</button>
+          <button class="icon-btn nav-toggle" id="nav-toggle" title="${rqI18n.t('导航菜单')}" aria-label="${rqI18n.t('打开导航菜单')}">${icon('menu')}</button>
           <div class="topbar-search" id="cmdk-trigger">
             ${icon('search', 15)}
-            <span>搜索资源、执行操作…</span>
+            <span>${rqI18n.t('搜索资源')}、${rqI18n.t('执行操作')}…</span>
             <kbd>⌘K</kbd>
           </div>
           <div class="topbar-right">
             <div id="theme-switcher-host"></div>
-            ${IS_LOCAL_HOST ? '' : `<button class="badge badge-warn no-dot" id="conn-indicator" title="当前连接远程宿主服务，点击管理连接" style="cursor:pointer;border:0">${icon('server', 13)} ${esc(CONNECTION_NAME)}</button>`}
-            <button class="icon-btn" id="btn-refresh" title="刷新数据">${icon('refresh')}</button>
+            ${IS_LOCAL_HOST ? '' : `<button class="badge badge-warn no-dot" id="conn-indicator" title="${rqI18n.t('当前连接远程宿主服务，点击管理连接')}" style="cursor:pointer;border:0">${icon('server', 13)} ${esc(CONNECTION_NAME)}</button>`}
+            <button class="icon-btn" id="btn-refresh" title="${rqI18n.t('刷新数据')}">${icon('refresh')}</button>
             <div style="position:relative" id="update-host"></div>
             <div style="position:relative" id="alert-host"></div>
             <div class="avatar" id="avatar" title="${esc(session.user?.displayName ?? '')}">${esc((session.user?.displayName ?? '?').slice(0, 1))}</div>
@@ -315,7 +315,7 @@ function renderShell(page, params, builder) {
       <div class="avatar sm">${esc((session.user?.displayName ?? '?').slice(0, 1))}</div>
       <div class="grow" style="min-width:0">
         <div class="fs-13 ellipsis" style="font-weight:600">${esc(session.user?.displayName ?? '')}</div>
-        <div class="fs-11 ellipsis" style="color:var(--text-3)">${esc(session.user?.roles?.[0] ?? '成员')}</div>
+        <div class="fs-11 ellipsis" style="color:var(--text-3)">${esc(session.user?.roles?.[0] ?? rqI18n.t('成员'))}</div>
       </div>
       <button class="icon-btn" id="btn-logout" title="${esc(session.isDemo ? rqI18n.t('退出演示') : rqI18n.t('退出登录'))}" style="width:28px;height:28px">${icon(session.isDemo ? 'x' : 'logout', 15)}</button>
     </div>`
@@ -356,9 +356,9 @@ function renderShell(page, params, builder) {
     content.innerHTML = `
       <div class="card card-pad" style="text-align:center;padding:44px 24px">
         <div style="font-size:30px;margin-bottom:10px">🚫</div>
-        <div style="font-weight:600;margin-bottom:6px">页面加载失败</div>
-        <div class="fs-12 text-3" style="margin-bottom:18px">${esc(error?.message ?? '未知错误')}</div>
-        <button class="btn btn-default" id="page-retry">重试</button>
+        <div style="font-weight:600;margin-bottom:6px">${rqI18n.t('页面加载失败')}</div>
+        <div class="fs-12 text-3" style="margin-bottom:18px">${esc(error?.message ?? rqI18n.t('未知错误'))}</div>
+        <button class="btn btn-default" id="page-retry">${rqI18n.t('重试')}</button>
       </div>`
     $('#page-retry')?.addEventListener('click', () => navigate())
   })
@@ -381,7 +381,7 @@ async function refreshBadges() {
       host.innerHTML = `<button class="icon-btn" id="btn-alerts" title="${esc(rqI18n.t('{n} 条未读告警', { n: overview.alerts.unread }))}">${icon('bell')}<span class="dot"></span></button>`
       host.querySelector('#btn-alerts').onclick = () => { location.hash = '#/audit?tab=alerts' }
     } else if (host) {
-      host.innerHTML = `<button class="icon-btn" title="暂无未读告警">${icon('bell')}</button>`
+      host.innerHTML = `<button class="icon-btn" title="${rqI18n.t('暂无未读告警')}">${icon('bell')}</button>`
     }
   } catch { /* 静默 */ }
 }

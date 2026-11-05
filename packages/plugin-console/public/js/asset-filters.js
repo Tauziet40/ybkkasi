@@ -8,6 +8,7 @@ export const ASSET_TYPES = ['mcp', 'agent', 'app', 'skill', 'model', 'nas']
  */
 export function assetPlatform(item) {
   const platform = String(item?.platform ?? '').trim()
+  // 本模块为零依赖纯函数（selftest 直测）：保持中文常量原样、不引 rqI18n（Node 环境无 DOM 运行时）。
   return platform === '' ? '未标注' : platform
 }
 

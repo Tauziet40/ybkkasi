@@ -8,7 +8,7 @@ export function h(html) {
   tpl.innerHTML = html.trim()
   if (tpl.content.children.length > 1) {
     // h() 只返回首个顶层元素，多根内容会被静默丢弃；多元素场景请传字符串给 openModal/openDrawer
-    console.warn('h(): 输入含多个顶层元素，仅返回第一个（其余被丢弃，请改用字符串）', tpl.content.children)
+    console.warn(rqI18n.t('h(): 输入含多个顶层元素，仅返回第一个（其余被丢弃，请改用字符串）'), tpl.content.children)
   }
   return tpl.content.firstElementChild
 }
@@ -55,26 +55,26 @@ export function fmtPct(value) {
 
 // ---------- 状态徽章 ----------
 const STATUS_MAP = {
-  online: ['badge-ok', '已上线'], published: ['badge-ok', '已上架'], active: ['badge-ok', '正常'], healthy: ['badge-ok', '健康'], ok: ['badge-ok', '成功'],
-  gray: ['badge-info', '灰度中'], trial: ['badge-info', '试运行'], pending: ['badge-warn', '待激活'], pending_approval: ['badge-warn', '待审批'],
-  verifying: ['badge-info', '验证中'], scanning: ['badge-info', '扫描中'], pending_domain: ['badge-warn', '待领域审批'], pending_security: ['badge-warn', '待安全加签'],
-  draft: ['badge-muted', '开发中'], archived: ['badge-muted', '已归档'], deprecated: ['badge-muted', '已弃用'], unknown: ['badge-muted', '未知'],
-  degraded: ['badge-warn', '降级'], offline: ['badge-warn', '已下线'], down: ['badge-danger', '不可用'], unhealthy: ['badge-danger', '异常'],
-  rejected: ['badge-danger', '已驳回'], error: ['badge-danger', '失败'], denied: ['badge-danger', '拒绝'], frozen: ['badge-danger', '已冻结'],
-  deactivated: ['badge-muted', '已注销'], approved: ['badge-ok', '已通过'], executed: ['badge-ok', '已执行'], failed: ['badge-danger', '执行失败'],
-  superseded: ['badge-muted', '已收口'],
+  online: ['badge-ok', rqI18n.t('已上线')], published: ['badge-ok', rqI18n.t('已上架')], active: ['badge-ok', rqI18n.t('正常')], healthy: ['badge-ok', rqI18n.t('健康')], ok: ['badge-ok', rqI18n.t('成功')],
+  gray: ['badge-info', rqI18n.t('灰度中')], trial: ['badge-info', rqI18n.t('试运行')], pending: ['badge-warn', rqI18n.t('待激活')], pending_approval: ['badge-warn', rqI18n.t('待审批')],
+  verifying: ['badge-info', rqI18n.t('验证中')], scanning: ['badge-info', rqI18n.t('扫描中')], pending_domain: ['badge-warn', rqI18n.t('待领域审批')], pending_security: ['badge-warn', rqI18n.t('待安全加签')],
+  draft: ['badge-muted', rqI18n.t('开发中')], archived: ['badge-muted', rqI18n.t('已归档')], deprecated: ['badge-muted', rqI18n.t('已弃用')], unknown: ['badge-muted', rqI18n.t('未知')],
+  degraded: ['badge-warn', rqI18n.t('降级')], offline: ['badge-warn', rqI18n.t('已下线')], down: ['badge-danger', rqI18n.t('不可用')], unhealthy: ['badge-danger', rqI18n.t('异常')],
+  rejected: ['badge-danger', rqI18n.t('已驳回')], error: ['badge-danger', rqI18n.t('失败')], denied: ['badge-danger', rqI18n.t('拒绝')], frozen: ['badge-danger', rqI18n.t('已冻结')],
+  deactivated: ['badge-muted', rqI18n.t('已注销')], approved: ['badge-ok', rqI18n.t('已通过')], executed: ['badge-ok', rqI18n.t('已执行')], failed: ['badge-danger', rqI18n.t('执行失败')],
+  superseded: ['badge-muted', rqI18n.t('已收口')],
 }
 export function statusBadge(status, label) {
   const [cls, text] = STATUS_MAP[status] ?? ['badge-muted', status]
   return `<span class="badge ${cls}">${esc(rqI18n.t(label ?? text))}</span>`
 }
 export function resultBadge(result) {
-  const map = { ok: ['badge-ok', '成功'], denied: ['badge-danger', '拒绝'], error: ['badge-danger', '异常'] }
+  const map = { ok: ['badge-ok', rqI18n.t('成功')], denied: ['badge-danger', rqI18n.t('拒绝')], error: ['badge-danger', rqI18n.t('异常')] }
   const [cls, text] = map[result] ?? ['badge-muted', result]
   return `<span class="badge ${cls} no-dot">${text}</span>`
 }
 export function auditTypeBadge(type) {
-  const map = { auth: ['badge-brand', '认证'], authz: ['badge-purple', '授权'], invoke: ['badge-info', '调用'], change: ['badge-warn', '变更'] }
+  const map = { auth: ['badge-brand', rqI18n.t('认证')], authz: ['badge-purple', rqI18n.t('授权')], invoke: ['badge-info', rqI18n.t('调用')], change: ['badge-warn', rqI18n.t('变更')] }
   const [cls, text] = map[type] ?? ['badge-muted', type]
   return `<span class="badge ${cls} no-dot">${text}</span>`
 }
@@ -142,7 +142,7 @@ export function openDrawer({ title, sub, titleHtml, subHtml, body, foot, wide, o
           <div class="drawer-title">${titleHtml ?? esc(title ?? '')}</div>
           ${(titleHtml || subHtml || sub) ? `<div class="drawer-sub">${subHtml ?? esc(sub ?? '')}</div>` : ''}
         </div>
-        <button class="drawer-close" title="关闭">${icon('x')}</button>
+        <button class="drawer-close" title="${rqI18n.t('关闭')}">${icon('x')}</button>
       </div>
       <div class="drawer-body"></div>
       ${foot ? '<div class="drawer-foot"></div>' : ''}
@@ -210,7 +210,7 @@ export function closeModal() {
 }
 
 /** 确认弹窗（支持必填原因，用于 L4 高危操作）。 */
-export function confirmDialog({ title, message, requireReason, danger, confirmText = '确认' }) {
+export function confirmDialog({ title, message, requireReason, danger, confirmText = rqI18n.t('确认') }) {
   return new Promise((resolve) => {
     const modal = openModal({
       title,
@@ -221,11 +221,11 @@ export function confirmDialog({ title, message, requireReason, danger, confirmTe
         </div>
         ${requireReason ? `
         <div class="form-item" style="margin-top:14px;margin-bottom:0">
-          <label class="form-label">操作原因<span class="req">*</span></label>
-          <textarea class="form-control" id="dlg-reason" placeholder="将写入审计日志，请说明本次操作的业务背景"></textarea>
-          <div class="form-hint">高危操作的原因将永久留痕，供审计回溯</div>
+          <label class="form-label">${rqI18n.t('操作原因')}<span class="req">*</span></label>
+          <textarea class="form-control" id="dlg-reason" placeholder="${rqI18n.t('将写入审计日志，请说明本次操作的业务背景')}"></textarea>
+          <div class="form-hint">${rqI18n.t('高危操作的原因将永久留痕')}，${rqI18n.t('供审计回溯')}</div>
         </div>` : ''}`,
-      foot: `<button class="btn btn-default" id="dlg-cancel">取消</button>
+      foot: `<button class="btn btn-default" id="dlg-cancel">${rqI18n.t('取消')}</button>
              <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="dlg-ok">${esc(confirmText)}</button>`,
       onClose: () => resolve(null),
     })
@@ -322,7 +322,7 @@ export function barChart(items, { width = 560, height = 170, color = '#0a5f87', 
 
 export function lineChart(series, { width = 560, height = 170, colors = ['#0a5f87', '#059669', '#f59e0b'], labels = [] } = {}) {
   const all = series.flat()
-  if (!all.length) return '<div class="text-4 fs-12" style="padding:20px">暂无数据</div>'
+  if (!all.length) return rqI18n.t('<div class="text-4 fs-12" style="padding:20px">暂无数据</div>')
   const max = Math.max(...all, 1)
   const n = Math.max(...series.map((s) => s.length))
   const step = n > 1 ? width / (n - 1) : width
@@ -359,7 +359,7 @@ const TEXT_C = '#706864'  // 坐标轴文字（--text-3）
 
 /** 空态块：虚线边框 + 弱化底。 */
 export function emptyHint(text) {
-  return `<div class="empty-hint">${esc(text ?? '暂无数据')}</div>`
+  return `<div class="empty-hint">${esc(text ?? rqI18n.t('暂无数据'))}</div>`
 }
 
 /** 区块标题：{ label, title, extra, actions } → .page-head 结构；actions/title/extra 为 HTML 字符串。 */
@@ -386,14 +386,14 @@ export function statCard({ label, value, sub, tone = '' } = {}) {
 }
 
 const HEALTH_MAP = {
-  healthy: ['dot-ok', '健康'],
-  warning: ['dot-warn', '关注'],
-  critical: ['dot-crit', '熔断'],
-  offline: ['dot-off', '离线'],
+  healthy: ['dot-ok', rqI18n.t('健康')],
+  warning: ['dot-warn', rqI18n.t('关注')],
+  critical: ['dot-crit', rqI18n.t('熔断')],
+  offline: ['dot-off', rqI18n.t('离线')],
 }
 /** 健康红绿灯：health 'healthy'|'warning'|'critical'|'offline' → .dot 组合 + 中文标签。 */
 export function healthDot(health, { pulse = false } = {}) {
-  const [cls, label] = HEALTH_MAP[health] ?? ['dot-off', health ?? '未知']
+  const [cls, label] = HEALTH_MAP[health] ?? ['dot-off', health ?? rqI18n.t('未知')]
   const pulsing = pulse && health === 'critical'
   return `<span style="display:inline-flex;align-items:center;gap:6px">` +
     `<span class="dot ${cls}${pulsing ? ' pulse' : ''}"></span>` +
@@ -401,29 +401,29 @@ export function healthDot(health, { pulse = false } = {}) {
 }
 
 const LIFECYCLE_MAP = {
-  draft: ['pill-draft', '草稿'],
-  online: ['pill-online', '已上线'],
-  offline: ['pill-offline', '已下线'],
-  archived: ['pill-archived', '已归档'],
-  deprecated: ['pill-deprecated', '已弃用'],
+  draft: ['pill-draft', rqI18n.t('草稿')],
+  online: ['pill-online', rqI18n.t('已上线')],
+  offline: ['pill-offline', rqI18n.t('已下线')],
+  archived: ['pill-archived', rqI18n.t('已归档')],
+  deprecated: ['pill-deprecated', rqI18n.t('已弃用')],
 }
 /** 生命周期徽章：s 'draft'|'online'|'offline'|'archived'|'deprecated'。 */
 export function lifecycleBadge(s) {
-  const [cls, label] = LIFECYCLE_MAP[s] ?? ['pill', s ?? '未知']
+  const [cls, label] = LIFECYCLE_MAP[s] ?? ['pill', s ?? rqI18n.t('未知')]
   return `<span class="pill ${cls}">${esc(label)}</span>`
 }
 
 const TYPE_MAP = {
-  mcp: ['tbadge-mcp', 'MCP 服务'],
+  mcp: ['tbadge-mcp', rqI18n.t('MCP 服务')],
   agent: ['tbadge-agent', 'Agent'],
-  app: ['tbadge-app', 'AI 应用'],
+  app: ['tbadge-app', rqI18n.t('AI 应用')],
   skill: ['tbadge-skill', 'Skill'],
-  model: ['tbadge-model', '模型路由'],
-  nas: ['tbadge-nas', 'NAS 存储'],
+  model: ['tbadge-model', rqI18n.t('模型路由')],
+  nas: ['tbadge-nas', rqI18n.t('NAS 存储')],
 }
 /** 资产类型徽章：type 'mcp'|'agent'|'app'|'skill'|'model'|'nas'。 */
 export function typeBadge(type) {
-  const [cls, label] = TYPE_MAP[String(type ?? '').toLowerCase()] ?? ['tbadge', type ?? '未知']
+  const [cls, label] = TYPE_MAP[String(type ?? '').toLowerCase()] ?? ['tbadge', type ?? rqI18n.t('未知')]
   return `<span class="tbadge ${cls}">${esc(label)}</span>`
 }
 
@@ -438,7 +438,7 @@ export function progressBar(percent, { tone = '', width = '80px', label = '' } =
 
 /** 面积趋势图（带 Y 轴刻度/虚线网格/渐变填充/末点圆点）：{ series, labels, unit, color, height }。 */
 export function areaChart({ series, labels = [], unit = '', color = BRAND, height = 180 } = {}) {
-  if (!series?.length) return emptyHint('暂无数据')
+  if (!series?.length) return emptyHint(rqI18n.t('暂无数据'))
   const w = 720, h = height, padL = 42, padB = 22, padT = 10, ticks = 4
   const max = Math.max(...series) * 1.12 || 1
   const x = (i) => padL + (i / Math.max(1, series.length - 1)) * (w - padL - 8)
@@ -473,7 +473,7 @@ export function areaChart({ series, labels = [], unit = '', color = BRAND, heigh
 
 /** 双序列趋势（实线实际 + 虚线目标）：{ actual, target, labels, unit, color, height }。 */
 export function dualTrendChart({ actual = [], target = [], labels = [], unit = '', color = BRAND, height = 200 } = {}) {
-  if (!actual.length || !target.length) return emptyHint('暂无数据')
+  if (!actual.length || !target.length) return emptyHint(rqI18n.t('暂无数据'))
   const w = 720, h = height, padL = 40, padB = 22, padT = 12, ticks = 4
   const max = Math.max(...target, ...actual) * 1.15 || 1
   const x = (i) => padL + (i / Math.max(1, actual.length - 1)) * (w - padL - 10)
@@ -508,7 +508,7 @@ export function dualTrendChart({ actual = [], target = [], labels = [], unit = '
 /** 横条排行：items [{ name, value, hint }]，format 默认 fmtNum（中文数字）。 */
 export function hBarList(items, { format } = {}) {
   const list = items ?? []
-  if (!list.length) return emptyHint('暂无数据')
+  if (!list.length) return emptyHint(rqI18n.t('暂无数据'))
   const fmt = format ?? ((v) => fmtNum(v))
   const max = Math.max(...list.map((i) => Number(i.value) || 0), 1)
   return `<div style="display:flex;flex-direction:column;gap:10px">` + list.map((it, idx) => `
@@ -526,7 +526,7 @@ export function hBarList(items, { format } = {}) {
 /** 带中心数值甜甜圈（区别于上方 donut）：parts [{ label, value, color }]。centerValue 为 HTML 字符串。 */
 export function donutCenter(parts, { centerLabel = '', centerValue = '', size = 120 } = {}) {
   const segs = parts ?? []
-  if (!segs.length) return emptyHint('暂无数据')
+  if (!segs.length) return emptyHint(rqI18n.t('暂无数据'))
   const total = segs.reduce((s, p) => s + (Number(p.value) || 0), 0) || 1
   const r = 44, c = 2 * Math.PI * r
   let acc = 0
@@ -561,7 +561,7 @@ export function donutCenter(parts, { centerLabel = '', centerValue = '', size = 
 /** 30 天热力条：values 每日次数（色深 = 当日用量），big 用于详情抽屉大图。 */
 export function heatStrip(values, { big = false } = {}) {
   const vals = (values ?? []).map((v) => Number(v) || 0)
-  if (!vals.length) return emptyHint('暂无数据')
+  if (!vals.length) return emptyHint(rqI18n.t('暂无数据'))
   const max = Math.max(...vals, 1)
   const cells = vals.map((v, i) => {
     const bg = v === 0 ? '#eae7e1' : `hsl(201 88% ${Math.round(68 - (v / max) * 40)}%)`
@@ -599,10 +599,10 @@ export function tabRow(options, activeKey, onPick) {
 }
 
 // ---------- 表格 ----------
-export function renderTable({ columns, rows, rowKey = (row, i) => row.id ?? i, onRowClick, empty = '暂无数据' }) {
+export function renderTable({ columns, rows, rowKey = (row, i) => row.id ?? i, onRowClick, empty = rqI18n.t('暂无数据') }) {
   if (!rows?.length) {
     const el = h('<div class="card"></div>')
-    el.appendChild(emptyState({ title: empty, desc: '当前筛选条件下没有匹配记录', icon: 'search' }))
+    el.appendChild(emptyState({ title: empty, desc: rqI18n.t('当前筛选条件下没有匹配记录'), icon: 'search' }))
     return el
   }
   const head = columns.map((col) => `<th style="${col.width ? `width:${col.width}` : ''}">${col.title}</th>`).join('')
@@ -692,7 +692,7 @@ const pickerRegistry = new Map()
  * @param options Array<{ value, label, group? }> — label 建议传完整路径（如「法人 / 部门」）
  * @param opts.emptyLabel 允许空值时的占位项文案（如「（作为顶级组织）」）；不传则必选
  */
-export function searchableSelectField(name, options, { value, placeholder = '点击选择，支持搜索', emptyLabel } = {}) {
+export function searchableSelectField(name, options, { value, placeholder = rqI18n.t('点击选择，支持搜索'), emptyLabel } = {}) {
   const key = `ss${++pickerSeq}`
   pickerRegistry.set(key, { options, emptyLabel, placeholder })
   const selected = options.find((opt) => opt.value === value)
@@ -701,7 +701,7 @@ export function searchableSelectField(name, options, { value, placeholder = '点
       <input type="hidden" name="${esc(name)}" value="${esc(value ?? '')}">
       <input class="input" type="text" readonly data-ss-display placeholder="${esc(placeholder)}" value="${esc(selected?.label ?? '')}" title="${esc(selected?.label ?? '')}">
       <div class="searchable-select-menu" data-ss-menu>
-        <div class="searchable-select-search">${icon('search', 14)}<input type="text" data-ss-q placeholder="输入名称或路径关键词过滤"></div>
+        <div class="searchable-select-search">${icon('search', 14)}<input type="text" data-ss-q placeholder="${rqI18n.t('输入名称或路径关键词过滤')}"></div>
         <div class="searchable-select-list" data-ss-list></div>
       </div>
     </div>`
@@ -800,7 +800,7 @@ export function mountSearchableSelects(rootEl) {
  * @param options Array<{ value, label, group? }>
  * @param opts.values 初始选中值数组
  */
-export function multiSelectField(name, options, { values = [], placeholder = '搜索并选择，可多选' } = {}) {
+export function multiSelectField(name, options, { values = [], placeholder = rqI18n.t('搜索并选择，可多选') } = {}) {
   const key = `ms${++pickerSeq}`
   pickerRegistry.set(key, { options, placeholder, multi: true })
   return `
@@ -831,9 +831,9 @@ function mountMultiPicker(picker, conf) {
     chipsEl.innerHTML = selected.map((v) => `
       <span class="ms-chip" title="${esc(labelOf(v))}">
         <span class="ms-chip-label">${esc(labelOf(v))}</span>
-        <button type="button" class="ms-x" data-ms-remove="${esc(v)}" title="移除">${icon('x', 10)}</button>
+        <button type="button" class="ms-x" data-ms-remove="${esc(v)}" title="${rqI18n.t('移除')}">${icon('x', 10)}</button>
       </span>`).join('')
-    inlineQ.placeholder = selected.length ? '' : (conf.placeholder ?? '搜索并选择，可多选')
+    inlineQ.placeholder = selected.length ? '' : (conf.placeholder ?? rqI18n.t('搜索并选择，可多选'))
     chipsEl.querySelectorAll('[data-ms-remove]').forEach((btn) => {
       btn.onclick = (e) => {
         e.stopPropagation()

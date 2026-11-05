@@ -27,9 +27,9 @@ export async function renderMembers(ctx) {
   const selectedUserIds = new Set()
   let draggingUserIds = []
   $('#iam-actions').innerHTML = `
-    ${session.can('iam.org.write') ? `<button class="btn btn-default" id="org-add">${icon('plus', 14)}新建组织</button>` : ''}
-    ${session.can('iam.user.write') ? `<button class="btn btn-default" id="user-import">${icon('download', 14)}批量导入</button>` : ''}
-    ${session.can('iam.user.write') ? `<button class="btn btn-primary" id="user-add">${icon('plus', 14)}创建账号</button>` : ''}`
+    ${session.can('iam.org.write') ? `<button class="btn btn-default" id="org-add">${icon('plus', 14)}${rqI18n.t('新建组织')}</button>` : ''}
+    ${session.can('iam.user.write') ? `<button class="btn btn-default" id="user-import">${icon('download', 14)}${rqI18n.t('批量导入')}</button>` : ''}
+    ${session.can('iam.user.write') ? `<button class="btn btn-primary" id="user-add">${icon('plus', 14)}${rqI18n.t('创建账号')}</button>` : ''}`
   const userAddBtn = $('#user-add')
   if (userAddBtn) userAddBtn.onclick = () => openUserCreate(treeData, usersData)
   const orgAddBtn = $('#org-add')
@@ -43,23 +43,23 @@ export async function renderMembers(ctx) {
       <div style="display:flex;flex-direction:column;gap:14px">
         <div class="card" style="padding:10px 8px">
           <div class="flex" style="padding:4px 8px 8px;justify-content:space-between">
-            <span class="fs-12 text-3" style="font-weight:600">组织架构</span>
+            <span class="fs-12 text-3" style="font-weight:600">${rqI18n.t('组织架构')}</span>
             <span class="fs-11 text-4" id="org-user-total">${rqI18n.t('{n} 人', { n: usersData.total })}</span>
           </div>
           <div class="tree" id="org-tree"></div>
-          <div class="fs-11 text-4" style="padding:8px 8px 2px;margin-top:6px;border-top:1px dashed var(--border);display:flex;gap:5px;align-items:center">${icon('gitBranch', 11)}<span>把右侧成员拖到部门上可直接调岗</span></div>
+          <div class="fs-11 text-4" style="padding:8px 8px 2px;margin-top:6px;border-top:1px dashed var(--border);display:flex;gap:5px;align-items:center">${icon('gitBranch', 11)}<span>${rqI18n.t('把右侧成员拖到部门上可直接调岗')}</span></div>
         </div>
         <div class="card" style="padding:12px 14px" id="iam-conn-card">
-          <div class="micro-label" style="margin-bottom:8px">三方连接器</div>
-          <div class="fs-12 text-4">加载中…</div>
+          <div class="micro-label" style="margin-bottom:8px">${rqI18n.t('三方连接器')}</div>
+          <div class="fs-12 text-4">${rqI18n.t('加载中')}…</div>
         </div>
       </div>
       <div>
         <div class="filter-bar">
-          <div class="search-input">${icon('search')}<input class="input" id="member-q" placeholder="搜索姓名 / 用户名 / 邮箱"></div>
+          <div class="search-input">${icon('search')}<input class="input" id="member-q" placeholder="${rqI18n.t('搜索姓名 / 用户名 / 邮箱')}"></div>
           <select class="select" id="member-status" style="width:130px">
-            <option value="">全部状态</option><option value="active">正常</option><option value="pending">待激活</option>
-            <option value="frozen">已冻结</option><option value="deactivated">已注销</option>
+            <option value="">${rqI18n.t('全部状态')}</option><option value="active">${rqI18n.t('正常')}</option><option value="pending">${rqI18n.t('待激活')}</option>
+            <option value="frozen">${rqI18n.t('已冻结')}</option><option value="deactivated">${rqI18n.t('已注销')}</option>
           </select>
           <span class="fs-12 text-3" id="member-count"></span>
         </div>
@@ -70,20 +70,20 @@ export async function renderMembers(ctx) {
     </div>
     <div class="grid-cards g4 mt-14" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:14px">
       <div class="card" style="padding:14px">
-        <div class="flex" style="gap:6px;align-items:center;font-size:13px;font-weight:500">${icon('shield', 14)} 权限点矩阵</div>
-        <div class="fs-12 text-3 mt-4" style="line-height:1.7">角色 × 权限点统一注册，接口按权限点实时校验，越权调用即拒绝并留痕。</div>
+        <div class="flex" style="gap:6px;align-items:center;font-size:13px;font-weight:500">${icon('shield', 14)} ${rqI18n.t('权限点矩阵')}</div>
+        <div class="fs-12 text-3 mt-4" style="line-height:1.7">${rqI18n.t('角色')} × ${rqI18n.t('权限点统一注册')}，${rqI18n.t('接口按权限点实时校验')}，${rqI18n.t('越权调用即拒绝并留痕')}。</div>
       </div>
       <div class="card" style="padding:14px">
-        <div class="flex" style="gap:6px;align-items:center;font-size:13px;font-weight:500">${icon('users', 14)} 动态用户组</div>
-        <div class="fs-12 text-3 mt-4" style="line-height:1.7">用户组按组织链圈人，NAS 数据权限 C 叠加组跨域只读随组织变动自动重算。</div>
+        <div class="flex" style="gap:6px;align-items:center;font-size:13px;font-weight:500">${icon('users', 14)} ${rqI18n.t('动态用户组')}</div>
+        <div class="fs-12 text-3 mt-4" style="line-height:1.7">${rqI18n.t('用户组按组织链圈人')}，NAS ${rqI18n.t('数据权限')} C ${rqI18n.t('叠加组跨域只读随组织变动自动重算')}。</div>
       </div>
       <div class="card" style="padding:14px">
-        <div class="flex" style="gap:6px;align-items:center;font-size:13px;font-weight:500">${icon('fingerprint', 14)} 一人一号</div>
-        <div class="fs-12 text-3 mt-4" style="line-height:1.7">同一三方身份仅可绑定一个平台账号（引擎级唯一约束），冲突进入对比式工单处理。</div>
+        <div class="flex" style="gap:6px;align-items:center;font-size:13px;font-weight:500">${icon('fingerprint', 14)} ${rqI18n.t('一人一号')}</div>
+        <div class="fs-12 text-3 mt-4" style="line-height:1.7">${rqI18n.t('同一三方身份仅可绑定一个平台账号')}（${rqI18n.t('引擎级唯一约束')}），${rqI18n.t('冲突进入对比式工单处理')}。</div>
       </div>
       <div class="card" style="padding:14px">
-        <div class="flex" style="gap:6px;align-items:center;font-size:13px;font-weight:500">${icon('alert', 14)} 冻结联动</div>
-        <div class="fs-12 text-3 mt-4" style="line-height:1.7">冻结账号即吊销其全部访问令牌（含 refresh 链），登录与调用入口立即失效。</div>
+        <div class="flex" style="gap:6px;align-items:center;font-size:13px;font-weight:500">${icon('alert', 14)} ${rqI18n.t('冻结联动')}</div>
+        <div class="fs-12 text-3 mt-4" style="line-height:1.7">${rqI18n.t('冻结账号即吊销其全部访问令牌')}（${rqI18n.t('含')} refresh ${rqI18n.t('链')}），${rqI18n.t('登录与调用入口立即失效')}。</div>
       </div>
     </div>
     <div class="card" id="agent-org-card" style="margin-top:14px"></div>`
@@ -93,7 +93,7 @@ export async function renderMembers(ctx) {
 
   function renderTree() {
     treeEl.innerHTML = ''
-    const allNode = treeNode({ id: '', name: '全部成员', count: usersData.total }, true)
+    const allNode = treeNode({ id: '', name: rqI18n.t('全部成员'), count: usersData.total }, true)
     treeEl.appendChild(allNode)
     for (const node of treeData) treeEl.appendChild(treeNode(node))
   }
@@ -105,7 +105,7 @@ export async function renderMembers(ctx) {
           ${icon(isAll ? 'users' : 'building', 14)}
           <span class="ellipsis">${esc(node.name)}</span>
           <span class="tree-count">${countOf(node, isAll)}</span>
-          ${node.id && !isAll ? `<span class="tree-actions" title="组织维护：新建子组织 / 重命名 / 调整上级 / 删除">${icon('more', 13)}</span>` : ''}
+          ${node.id && !isAll ? `<span class="tree-actions" title="${rqI18n.t('组织维护：新建子组织 / 重命名 / 调整上级 / 删除')}">${icon('more', 13)}</span>` : ''}
         </div>
         <div class="tree-children ${hasChildren(node) ? 'open' : ''}"></div>
       </div>`)
@@ -158,19 +158,19 @@ export async function renderMembers(ctx) {
     document.body.appendChild(anchor)
     attachDropdown(anchor, (menu) => {
       menu.innerHTML = `
-        <button class="dropdown-item" data-act="add-child">${icon('plus')}新建子组织</button>
-        <button class="dropdown-item" data-act="leaders">${icon('users')}设置负责人</button>
-        <button class="dropdown-item" data-act="rename">${icon('edit')}重命名</button>
-        <button class="dropdown-item" data-act="move">${icon('gitBranch')}调整上级组织</button>
-        <button class="dropdown-item danger" data-act="delete">${icon('trash')}删除组织</button>`
+        <button class="dropdown-item" data-act="add-child">${icon('plus')}${rqI18n.t('新建子组织')}</button>
+        <button class="dropdown-item" data-act="leaders">${icon('users')}${rqI18n.t('设置负责人')}</button>
+        <button class="dropdown-item" data-act="rename">${icon('edit')}${rqI18n.t('重命名')}</button>
+        <button class="dropdown-item" data-act="move">${icon('gitBranch')}${rqI18n.t('调整上级组织')}</button>
+        <button class="dropdown-item danger" data-act="delete">${icon('trash')}${rqI18n.t('删除组织')}</button>`
       menu.querySelector('[data-act="add-child"]').onclick = () => { anchor.remove(); openOrgCreate(treeData, node.id) }
       menu.querySelector('[data-act="leaders"]').onclick = () => { anchor.remove(); openOrgLeaders(node) }
       menu.querySelector('[data-act="rename"]').onclick = async () => {
         anchor.remove()
         const modal = openModal({
-          title: '重命名组织',
-          body: field('组织名称', inputField('name', { value: node.name }), { required: true }),
-          foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>保存</button>',
+          title: rqI18n.t('重命名组织'),
+          body: field(rqI18n.t('组织名称'), inputField('name', { value: node.name }), { required: true }),
+          foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>保存</button>'),
         })
         modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
         modal.el.querySelector('[data-ok]').onclick = async () => {
@@ -189,8 +189,8 @@ export async function renderMembers(ctx) {
         const candidates = flattenTreePaths(treeData).filter((o) => !excluded.has(o.value))
         const modal = openModal({
           title: esc(rqI18n.t('调整上级组织（{name}）', { name: node.name })),
-          body: field('上级组织', searchableSelectField('parentId', candidates, { value: node.parentId ?? '', emptyLabel: '（作为顶级组织）', placeholder: '点击选择上级组织' })),
-          foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>保存</button>',
+          body: field(rqI18n.t('上级组织'), searchableSelectField('parentId', candidates, { value: node.parentId ?? '', emptyLabel: rqI18n.t('（作为顶级组织）'), placeholder: rqI18n.t('点击选择上级组织') })),
+          foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>保存</button>'),
         })
         mountSearchableSelects(modal.body)
         modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
@@ -214,10 +214,10 @@ export async function renderMembers(ctx) {
           ? rqI18n.t('其下还有 <b>{orgs}</b> 个子组织、<b>{users}</b> 个直属账号。将<b>一键删除整棵子树</b>，直属账号自动上移到上级组织{suffix}。', { orgs: subOrgCount, users: directUsers, suffix: node.parentId ? '' : rqI18n.t('（首个存活组织）') })
           : rqI18n.t('该组织为空（无子组织、无直属账号）。')
         const result = await confirmDialog({
-          title: '删除组织',
+          title: rqI18n.t('删除组织'),
           message: rqI18n.t('确定删除「{name}」？{desc}', { name: esc(node.name), desc: rangeDesc }),
           danger: true,
-          confirmText: cascade ? '一键删除整棵子树' : '确认删除',
+          confirmText: cascade ? rqI18n.t('一键删除整棵子树') : rqI18n.t('确认删除'),
         })
         if (!result) return
         try {
@@ -252,12 +252,12 @@ export async function renderMembers(ctx) {
     const mfaKey = ['mfaEnabled', 'mfa'].find((key) => data.users.some((u) => u && u[key] !== undefined))
     const columns = [
       {
-        title: '<input type="checkbox" class="member-checkall" title="全选本页成员">',
+        title: `<input type="checkbox" class="member-checkall" title="${rqI18n.t('全选本页成员')}">`,
         width: '36px', cls: 'col-check',
         render: (u) => `<input type="checkbox" class="member-check" data-id="${esc(u.id)}"${selectedUserIds.has(u.id) ? ' checked' : ''}>`,
       },
       {
-        title: '成员', width: '20%',
+        title: rqI18n.t('成员'), width: '20%',
         render: (u) => `
           <div class="flex" style="gap:10px">
             <div class="avatar sm">${esc(u.displayName.slice(0, 1))}</div>
@@ -266,19 +266,19 @@ export async function renderMembers(ctx) {
             </div>
           </div>`,
       },
-      { title: '账号', width: 130, render: (u) => `<span class="mono fs-12 text-3">@${esc(u.username)}</span>` },
-      { title: '角色', render: (u) => (u.roles?.length ? u.roles.map((r) => `<span class="badge badge-brand no-dot" style="margin-right:4px">${esc(r.name)}</span>`).join('') : '<span class="text-4">未分配</span>') },
-      { title: '组织 / 职位', render: (u) => `<div>${esc(u.orgName || '—')}</div><div class="col-sub">${esc(u.title || '—')}</div>` },
-      { title: '三方绑定', render: (u) => u.bindings?.length ? u.bindings.map((b) => `<span class="badge badge-purple no-dot">${esc(providerName(b.provider))}</span>`).join(' ') : '<span class="text-4">—</span>' },
-      { title: '状态', width: 90, render: (u) => statusBadge(u.status) },
-      { title: '最近登录', width: 130, render: (u) => `<span class="fs-12 text-3">${timeAgo(u.lastLoginAt)}</span>` },
+      { title: rqI18n.t('账号'), width: 130, render: (u) => `<span class="mono fs-12 text-3">@${esc(u.username)}</span>` },
+      { title: rqI18n.t('角色'), render: (u) => (u.roles?.length ? u.roles.map((r) => `<span class="badge badge-brand no-dot" style="margin-right:4px">${esc(r.name)}</span>`).join('') : rqI18n.t('<span class="text-4">未分配</span>')) },
+      { title: rqI18n.t('组织 / 职位'), render: (u) => `<div>${esc(u.orgName || '—')}</div><div class="col-sub">${esc(u.title || '—')}</div>` },
+      { title: rqI18n.t('三方绑定'), render: (u) => u.bindings?.length ? u.bindings.map((b) => `<span class="badge badge-purple no-dot">${esc(providerName(b.provider))}</span>`).join(' ') : '<span class="text-4">—</span>' },
+      { title: rqI18n.t('状态'), width: 90, render: (u) => statusBadge(u.status) },
+      { title: rqI18n.t('最近登录'), width: 130, render: (u) => `<span class="fs-12 text-3">${timeAgo(u.lastLoginAt)}</span>` },
     ]
     if (mfaKey) {
       columns.push({
         title: 'MFA', width: 90,
         render: (u) => u[mfaKey]
-          ? `<span class="fs-12" style="color:var(--ok)">${icon('shieldCheck', 12)} 已开启</span>`
-          : '<span class="fs-12" style="color:var(--warn)">未开启</span>',
+          ? `<span class="fs-12" style="color:var(--ok)">${icon('shieldCheck', 12)} ${rqI18n.t('已开启')}</span>`
+          : rqI18n.t('<span class="fs-12" style="color:var(--warn)">未开启</span>'),
       })
     }
     const table = renderTable({
@@ -335,12 +335,12 @@ export async function renderMembers(ctx) {
       <div class="flex muted-box" style="margin-bottom:10px;gap:8px;flex-wrap:wrap;align-items:center">
         ${icon('check', 14)}
         <span class="fs-12" style="font-weight:600">${esc(rqI18n.t('已选 {n} 人', { n: selectedUserIds.size }))}</span>
-        <span class="fs-11 text-4">勾选后拖到左侧组织可批量调岗</span>
+        <span class="fs-11 text-4">${rqI18n.t('勾选后拖到左侧组织可批量调岗')}</span>
         <span style="flex:1"></span>
-        <button class="btn btn-default btn-sm" data-batch="org">${icon('building', 12)}调整组织</button>
-        <button class="btn btn-default btn-sm" data-batch="title">${icon('edit', 12)}设置职位</button>
-        <button class="btn btn-default btn-sm" data-batch="roles">${icon('shield', 12)}分配角色</button>
-        <button class="btn btn-ghost btn-sm" data-batch="clear">清空选择</button>
+        <button class="btn btn-default btn-sm" data-batch="org">${icon('building', 12)}${rqI18n.t('调整组织')}</button>
+        <button class="btn btn-default btn-sm" data-batch="title">${icon('edit', 12)}${rqI18n.t('设置职位')}</button>
+        <button class="btn btn-default btn-sm" data-batch="roles">${icon('shield', 12)}${rqI18n.t('分配角色')}</button>
+        <button class="btn btn-ghost btn-sm" data-batch="clear">${rqI18n.t('清空选择')}</button>
       </div>`
     bar.querySelector('[data-batch="org"]').onclick = () => openBatchOrgModal()
     bar.querySelector('[data-batch="title"]').onclick = () => openBatchTitleModal()
@@ -380,9 +380,9 @@ export async function renderMembers(ctx) {
     const modal = openModal({
       title: rqI18n.t('批量调整组织（已选 {n} 人）', { n: selectedUserIds.size }),
       body: `
-        <div class="form-hint" style="margin-bottom:10px">所选成员将统一移动到目标组织下，立即生效并写入变更留痕。</div>
-        ${field('目标组织', searchableSelectField('orgId', flattenTreePaths(treeData), { placeholder: '点击选择：输入部门名搜索，显示「法人 / 部门」全路径' }), { required: true, full: true, hint: '同名部门跨法人重复，请认准完整路径再选' })}`,
-      foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>确认调整</button>',
+        <div class="form-hint" style="margin-bottom:10px">${rqI18n.t('所选成员将统一移动到目标组织下')}，${rqI18n.t('立即生效并写入变更留痕')}。</div>
+        ${field(rqI18n.t('目标组织'), searchableSelectField('orgId', flattenTreePaths(treeData), { placeholder: rqI18n.t('点击选择：输入部门名搜索，显示「法人 / 部门」全路径') }), { required: true, full: true, hint: rqI18n.t('同名部门跨法人重复，请认准完整路径再选') })}`,
+      foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>确认调整</button>'),
     })
     mountSearchableSelects(modal.body)
     modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
@@ -399,8 +399,8 @@ export async function renderMembers(ctx) {
   function openBatchTitleModal() {
     const modal = openModal({
       title: rqI18n.t('批量设置职位（已选 {n} 人）', { n: selectedUserIds.size }),
-      body: field('职位', inputField('title', { placeholder: '如：算法工程师；留空则清空这些成员的职位' }), { full: true }),
-      foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>确认设置</button>',
+      body: field(rqI18n.t('职位'), inputField('title', { placeholder: rqI18n.t('如：算法工程师；留空则清空这些成员的职位') }), { full: true }),
+      foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>确认设置</button>'),
     })
     modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
     modal.el.querySelector('[data-ok]').onclick = async () => {
@@ -417,16 +417,16 @@ export async function renderMembers(ctx) {
     const modal = openModal({
       title: rqI18n.t('批量分配角色（已选 {n} 人）', { n: selectedUserIds.size }),
       body: `
-        <div class="form-hint" style="margin-bottom:10px">将以勾选的角色<b>替换</b>所选成员的角色清单；不勾选任何角色 = 批量清空角色。权限点实时生效。</div>
+        <div class="form-hint" style="margin-bottom:10px">${rqI18n.t('将以勾选的角色')}<b>${rqI18n.t('替换')}</b>${rqI18n.t('所选成员的角色清单')}；${rqI18n.t('不勾选任何角色')} = ${rqI18n.t('批量清空角色')}。${rqI18n.t('权限点实时生效')}。</div>
         ${rolesData.roles.map((role) => `
           <label class="flex" style="padding:10px 4px;border-bottom:1px solid var(--border);cursor:pointer">
             <input type="checkbox" name="batch-role" value="${esc(role.id)}" style="accent-color:var(--brand-500)">
             <div class="grow">
-              <div class="fs-13" style="font-weight:500">${esc(role.name)} ${role.builtin ? '<span class="badge badge-muted no-dot">内置</span>' : ''}</div>
+              <div class="fs-13" style="font-weight:500">${esc(role.name)} ${role.builtin ? rqI18n.t('<span class="badge badge-muted no-dot">内置</span>') : ''}</div>
               <div class="fs-12 text-3">${esc(role.description)}</div>
             </div>
           </label>`).join('')}`,
-      foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>确认分配</button>',
+      foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>确认分配</button>'),
     })
     modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
     modal.el.querySelector('[data-ok]').onclick = async () => {
@@ -482,12 +482,12 @@ export async function renderMembers(ctx) {
     barEl.innerHTML = `
       <div class="flex muted-box" style="margin-bottom:10px;gap:8px;flex-wrap:wrap;align-items:center">
         ${icon('users', 14)}
-        <span class="fs-12 text-3" style="font-weight:600">负责人</span>
+        <span class="fs-12 text-3" style="font-weight:600">${rqI18n.t('负责人')}</span>
         ${leaders.length
           ? leaders.map((u) => `<span class="badge badge-brand no-dot">${esc(u.displayName)}</span>`).join('')
-            + `<span class="badge ${manual ? 'badge-purple' : 'badge-muted'} no-dot">${manual ? '手动绑定 · 同步不覆盖' : '跟随钉钉同步'}</span>`
-          : `<span class="fs-12 text-4">未设置——该部门在 NAS 数据权限中 delete/share 无人可执行，并触发负责人悬空告警</span>`}
-        <button class="btn btn-ghost btn-sm" id="org-lead-set" style="margin-left:auto">${icon('edit', 12)}设置负责人</button>
+            + `<span class="badge ${manual ? 'badge-purple' : 'badge-muted'} no-dot">${manual ? rqI18n.t('手动绑定 · 同步不覆盖') : rqI18n.t('跟随钉钉同步')}</span>`
+          : `<span class="fs-12 text-4">${rqI18n.t('未设置')}——${rqI18n.t('该部门在')} NAS ${rqI18n.t('数据权限中')} delete/share ${rqI18n.t('无人可执行')}，${rqI18n.t('并触发负责人悬空告警')}</span>`}
+        <button class="btn btn-ghost btn-sm" id="org-lead-set" style="margin-left:auto">${icon('edit', 12)}${rqI18n.t('设置负责人')}</button>
       </div>`
     barEl.querySelector('#org-lead-set').onclick = () => openOrgLeaders(orgNode)
   }
@@ -501,13 +501,13 @@ export async function renderMembers(ctx) {
       body: `
         <div class="muted-box mb-14" style="display:flex;gap:8px">
           ${icon('info', 15)}
-          <span class="fs-12">负责人是 NAS 数据权限 P/D/T 角色的推导依据（可多选，co-leader）。${manual
-            ? '当前为<b>手动绑定</b>：连接器同步不会覆盖；清空保存即恢复跟随钉钉同步。'
-            : '当前跟随钉钉同步：保存非空后转为<b>手动绑定</b>并被同步锁定——钉钉侧没配负责人的部门用这里补录。'}</span>
+          <span class="fs-12">${rqI18n.t('负责人是')} NAS ${rqI18n.t('数据权限')} P/D/T ${rqI18n.t('角色的推导依据')}（${rqI18n.t('可多选')}，co-leader）。${manual
+            ? rqI18n.t('当前为<b>手动绑定</b>：连接器同步不会覆盖；清空保存即恢复跟随钉钉同步。')
+            : rqI18n.t('当前跟随钉钉同步：保存非空后转为<b>手动绑定</b>并被同步锁定——钉钉侧没配负责人的部门用这里补录。')}</span>
         </div>
-        <div class="search-input mb-8">${icon('search')}<input class="input" id="org-lead-q" placeholder="搜索姓名 / 用户名 / 部门"></div>
+        <div class="search-input mb-8">${icon('search')}<input class="input" id="org-lead-q" placeholder="${rqI18n.t('搜索姓名 / 用户名 / 部门')}"></div>
         <div id="org-lead-list" style="max-height:320px;overflow:auto"></div>`,
-      foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" id="org-lead-save">保存</button>',
+      foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" id="org-lead-save">保存</button>'),
     })
     const listEl = modal.body.querySelector('#org-lead-list')
     const renderList = (kw) => {
@@ -522,9 +522,9 @@ export async function renderMembers(ctx) {
           <div class="avatar sm">${esc(u.displayName.slice(0, 1))}</div>
           <div class="grow">
             <div class="fs-13" style="font-weight:500">${esc(u.displayName)} <span class="fs-11 text-4">@${esc(u.username)}</span></div>
-            <div class="fs-12 text-3">${esc(u.orgName ?? '—')} · ${esc(u.title || '未设置职位')}</div>
+            <div class="fs-12 text-3">${esc(u.orgName ?? '—')} · ${esc(u.title || rqI18n.t('未设置职位'))}</div>
           </div>
-        </label>`).join('') : '<div class="muted-box">没有匹配的账号</div>'
+        </label>`).join('') : rqI18n.t('<div class="muted-box">没有匹配的账号</div>')
     }
     renderList('')
     modal.body.querySelector('#org-lead-q').oninput = debounce((e) => renderList(e.target.value), 200)
@@ -548,17 +548,17 @@ export async function renderMembers(ctx) {
 
   function openUserCreate(tree, users) {
     const modal = openModal({
-      title: '创建账号', wide: true,
+      title: rqI18n.t('创建账号'), wide: true,
       body: `
         <div class="form-grid">
-          ${field('姓名', inputField('displayName'), { required: true })}
-          ${field('用户名', inputField('username', { placeholder: '字母数字，如 zhangsan' }), { required: true })}
-          ${field('所属组织', searchableSelectField('orgId', flattenTreePaths(tree), { placeholder: '点击选择：输入部门名搜索，显示「法人 / 部门」全路径' }), { required: true, full: true, hint: '同名部门跨法人重复，请认准完整路径再选' })}
-          ${field('职位', inputField('title'))}
-          ${field('邮箱', inputField('email', { placeholder: '选填，默认 username@yuanbingke.com' }), { full: true })}
+          ${field(rqI18n.t('姓名'), inputField('displayName'), { required: true })}
+          ${field(rqI18n.t('用户名'), inputField('username', { placeholder: rqI18n.t('字母数字，如 zhangsan') }), { required: true })}
+          ${field(rqI18n.t('所属组织'), searchableSelectField('orgId', flattenTreePaths(tree), { placeholder: rqI18n.t('点击选择：输入部门名搜索，显示「法人 / 部门」全路径') }), { required: true, full: true, hint: rqI18n.t('同名部门跨法人重复，请认准完整路径再选') })}
+          ${field(rqI18n.t('职位'), inputField('title'))}
+          ${field(rqI18n.t('邮箱'), inputField('email', { placeholder: rqI18n.t('选填，默认 username@yuanbingke.com') }), { full: true })}
         </div>
-        <div class="form-hint">创建后将生成随机初始口令（仅展示一次），账号状态为「正常」。</div>`,
-      foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>创建</button>',
+        <div class="form-hint">${rqI18n.t('创建后将生成随机初始口令')}（${rqI18n.t('仅展示一次')}），${rqI18n.t('账号状态为')}「${rqI18n.t('正常')}」。</div>`,
+      foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>创建</button>'),
     })
     mountSearchableSelects(modal.body)
     modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
@@ -585,11 +585,11 @@ export async function renderMembers(ctx) {
 
   function openOrgCreate(tree, parentId) {
     const modal = openModal({
-      title: '新建组织',
+      title: rqI18n.t('新建组织'),
       body: `
-        ${field('上级组织', searchableSelectField('parentId', flattenTreePaths(tree), { value: parentId ?? '', emptyLabel: '（作为顶级组织）', placeholder: '点击选择上级组织' }), { hint: '选择后新组织挂在「法人 / 部门」路径下' })}
-        ${field('组织名称', inputField('name'), { required: true })}`,
-      foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>创建</button>',
+        ${field(rqI18n.t('上级组织'), searchableSelectField('parentId', flattenTreePaths(tree), { value: parentId ?? '', emptyLabel: rqI18n.t('（作为顶级组织）'), placeholder: rqI18n.t('点击选择上级组织') }), { hint: rqI18n.t('选择后新组织挂在「法人 / 部门」路径下') })}
+        ${field(rqI18n.t('组织名称'), inputField('name'), { required: true })}`,
+      foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>创建</button>'),
     })
     mountSearchableSelects(modal.body)
     modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
@@ -627,12 +627,12 @@ export async function renderMembers(ctx) {
       return id ? { id, label: labelById.get(id) ?? id } : { id: null, label: String(input).trim() }
     }
     const modal = openModal({
-      title: '批量导入账号',
+      title: rqI18n.t('批量导入账号'),
       body: `
-        <div class="form-hint" style="margin-bottom:10px">每行一个账号，格式：<code>用户名,姓名,组织ID或组织全路径,职位</code>（支持 Excel/CSV 导出后粘贴；组织可填 org_xxx、完整路径或唯一短名）</div>
-        ${field('导入数据', textareaField('raw', { placeholder: 'wangwu,王五,org_xxx,算法工程师\nzhaoliu,赵六,杭州元冰可科技有限公司 / 数字化技术服务平台,产品经理', rows: 6 }), { full: true })}
-        <div class="muted-box" id="import-preview">粘贴数据后在此预览解析结果…</div>`,
-      foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>导入</button>',
+        <div class="form-hint" style="margin-bottom:10px">${rqI18n.t('每行一个账号')}，${rqI18n.t('格式')}：<code>${rqI18n.t('用户名')},${rqI18n.t('姓名')},${rqI18n.t('组织ID或')}${rqI18n.t('组织')}${rqI18n.t('全路径')},${rqI18n.t('职位')}</code>（${rqI18n.t('支持')} Excel/CSV ${rqI18n.t('导出后粘贴')}；${rqI18n.t('组织')}${rqI18n.t('可填')} org_xxx、${rqI18n.t('完整路径或唯一短名')}）</div>
+        ${field(rqI18n.t('导入数据'), textareaField('raw', { placeholder: rqI18n.t('wangwu,王五,org_xxx,算法工程师') + '\n' + rqI18n.t('zhaoliu,赵六,杭州元冰可科技有限公司 / 数字化技术服务平台,产品经理'), rows: 6 }), { full: true })}
+        <div class="muted-box" id="import-preview">${rqI18n.t('粘贴数据后在此预览解析结果')}…</div>`,
+      foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>导入</button>'),
     })
     const parseRows = () => modal.body.querySelector('[name="raw"]').value.split('\n').map((rawLine) => rawLine.trim()).filter(Boolean).map((rawLine) => {
       const [username, displayName, orgInput, title] = rawLine.split(',').map((s) => s?.trim())
@@ -642,7 +642,7 @@ export async function renderMembers(ctx) {
     modal.body.querySelector('[name="raw"]').addEventListener('input', () => {
       const rows = parseRows()
       if (!rows.length) {
-        previewEl.textContent = '粘贴数据后在此预览解析结果…'
+        previewEl.textContent = rqI18n.t('粘贴数据后在此预览解析结果…')
         return
       }
       previewEl.innerHTML = rows.map((row) => {
@@ -678,19 +678,19 @@ export async function renderMembers(ctx) {
         <div class="flex mb-14" style="gap:14px">
           <div class="avatar lg">${esc(user.displayName.slice(0, 1))}</div>
           <div class="grow">
-            <div class="flex" style="gap:8px">${statusBadge(user.status)} <span class="fs-12 text-3">${esc(user.title || '未设置职位')}</span></div>
+            <div class="flex" style="gap:8px">${statusBadge(user.status)} <span class="fs-12 text-3">${esc(user.title || rqI18n.t('未设置职位'))}</span></div>
             <div class="fs-12 text-3 mt-8">${esc(user.email)}${user.phone ? ' · ' + esc(user.phone) : ''}</div>
           </div>
         </div>
         <div class="desc-grid mb-14">
-          <div class="desc-item"><span class="k">组织</span><span class="v">${esc(user.orgName ?? '—')}</span></div>
-          <div class="desc-item"><span class="k">创建时间</span><span class="v">${timeAgo(user.createdAt)}</span></div>
-          <div class="desc-item"><span class="k">最近登录</span><span class="v">${timeAgo(user.lastLoginAt)}</span></div>
-          <div class="desc-item"><span class="k">工号</span><span class="v">${esc(user.jobNumber ?? '—')}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('组织')}</span><span class="v">${esc(user.orgName ?? '—')}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('创建时间')}</span><span class="v">${timeAgo(user.createdAt)}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('最近登录')}</span><span class="v">${timeAgo(user.lastLoginAt)}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('工号')}</span><span class="v">${esc(user.jobNumber ?? '—')}</span></div>
         </div>
-        <div class="card-title mb-8">角色</div>
-        <div class="mb-14" id="ud-roles">${user.roles?.map((r) => `<span class="badge badge-brand no-dot" style="margin:0 6px 6px 0">${esc(r.name)}</span>`).join('') || '<span class="text-4 fs-12">未分配角色</span>'}</div>
-        <div class="card-title mb-8">三方身份绑定</div>
+        <div class="card-title mb-8">${rqI18n.t('角色')}</div>
+        <div class="mb-14" id="ud-roles">${user.roles?.map((r) => `<span class="badge badge-brand no-dot" style="margin:0 6px 6px 0">${esc(r.name)}</span>`).join('') || rqI18n.t('<span class="text-4 fs-12">未分配角色</span>')}</div>
+        <div class="card-title mb-8">${rqI18n.t('三方身份绑定')}</div>
         <div class="mb-14">${user.bindings?.length ? user.bindings.map((b) => `
           <div class="flex" style="padding:8px 0;border-bottom:1px solid var(--border);gap:10px;align-items:center">
             <span class="badge badge-purple no-dot">${esc(providerName(b.provider))}</span>
@@ -701,30 +701,30 @@ export async function renderMembers(ctx) {
             <span class="fs-11 text-4">${timeAgo(b.boundAt)}</span>
             <button class="btn btn-ghost btn-sm" data-bind-replace="${esc(b.provider)}" data-bind-corp="${esc(b.corpId ?? '')}" title="${esc(rqI18n.t('解绑后立刻扫码绑定新身份'))}">${icon('refresh', 12)}${esc(rqI18n.t('更换'))}</button>
             <button class="btn btn-ghost btn-sm" data-bind-unbind="${esc(b.provider)}" data-bind-corp="${esc(b.corpId ?? '')}" style="color:var(--danger)" title="${esc(rqI18n.t('解除该三方身份绑定'))}">${icon('x', 12)}${esc(rqI18n.t('解绑'))}</button>
-          </div>`).join('') : '<span class="text-4 fs-12">未绑定三方身份</span>'}
+          </div>`).join('') : rqI18n.t('<span class="text-4 fs-12">未绑定三方身份</span>')}
         </div>`,
       foot: `
-        <button class="btn btn-default" id="ud-edit">${icon('edit', 14)}编辑</button>
-        <button class="btn btn-default" id="ud-assign">${icon('shield', 14)}分配角色</button>
-        <button class="btn btn-default" id="ud-bind">${icon('link', 14)}绑定三方</button>
-        <button class="btn btn-default" id="ud-resetpw">${icon('key', 14)}重置口令</button>
-        ${user.status === 'active' ? `<button class="btn btn-danger-ghost" id="ud-freeze">${icon('alert', 14)}冻结</button>` : ''}
-        ${user.status === 'frozen' ? `<button class="btn btn-primary" id="ud-unfreeze">解除冻结</button>` : ''}
-        ${user.status === 'pending' ? `<button class="btn btn-primary" id="ud-activate">激活账号</button>` : ''}`,
+        <button class="btn btn-default" id="ud-edit">${icon('edit', 14)}${rqI18n.t('编辑')}</button>
+        <button class="btn btn-default" id="ud-assign">${icon('shield', 14)}${rqI18n.t('分配角色')}</button>
+        <button class="btn btn-default" id="ud-bind">${icon('link', 14)}${rqI18n.t('绑定三方')}</button>
+        <button class="btn btn-default" id="ud-resetpw">${icon('key', 14)}${rqI18n.t('重置口令')}</button>
+        ${user.status === 'active' ? `<button class="btn btn-danger-ghost" id="ud-freeze">${icon('alert', 14)}${rqI18n.t('冻结')}</button>` : ''}
+        ${user.status === 'frozen' ? `<button class="btn btn-primary" id="ud-unfreeze">${rqI18n.t('解除冻结')}</button>` : ''}
+        ${user.status === 'pending' ? `<button class="btn btn-primary" id="ud-activate">${rqI18n.t('激活账号')}</button>` : ''}`,
     })
 
     drawer.el.querySelector('#ud-edit').onclick = () => {
       const modal = openModal({
-        title: '编辑账号', wide: true,
+        title: rqI18n.t('编辑账号'), wide: true,
         body: `
           <div class="form-grid">
-            ${field('姓名', inputField('displayName', { value: user.displayName }), { required: true })}
-            ${field('职位', inputField('title', { value: user.title }))}
-            ${field('邮箱', inputField('email', { value: user.email }))}
-            ${field('手机号', inputField('phone', { value: user.phone }))}
-            ${field('所属组织', searchableSelectField('orgId', flattenTreePaths(tree2), { value: user.orgId, placeholder: '点击选择：输入部门名搜索，显示「法人 / 部门」全路径' }), { full: true, hint: '同名部门跨法人重复，请认准完整路径再选' })}
+            ${field(rqI18n.t('姓名'), inputField('displayName', { value: user.displayName }), { required: true })}
+            ${field(rqI18n.t('职位'), inputField('title', { value: user.title }))}
+            ${field(rqI18n.t('邮箱'), inputField('email', { value: user.email }))}
+            ${field(rqI18n.t('手机号'), inputField('phone', { value: user.phone }))}
+            ${field(rqI18n.t('所属组织'), searchableSelectField('orgId', flattenTreePaths(tree2), { value: user.orgId, placeholder: rqI18n.t('点击选择：输入部门名搜索，显示「法人 / 部门」全路径') }), { full: true, hint: rqI18n.t('同名部门跨法人重复，请认准完整路径再选') })}
           </div>`,
-        foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>保存</button>',
+        foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>保存</button>'),
       })
       mountSearchableSelects(modal.body)
       modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
@@ -737,16 +737,16 @@ export async function renderMembers(ctx) {
     }
     drawer.el.querySelector('#ud-assign').onclick = () => {
       const modal = openModal({
-        title: '分配角色',
+        title: rqI18n.t('分配角色'),
         body: rolesData.roles.map((role) => `
           <label class="flex" style="padding:10px 4px;border-bottom:1px solid var(--border);cursor:pointer">
             <input type="checkbox" name="role" value="${esc(role.id)}" ${user.roleIds.includes(role.id) ? 'checked' : ''} ${role.builtin && user.roleIds.includes(role.id) ? '' : ''} style="accent-color:var(--brand-500)">
             <div class="grow">
-              <div class="fs-13" style="font-weight:500">${esc(role.name)} ${role.builtin ? '<span class="badge badge-muted no-dot">内置</span>' : ''}</div>
+              <div class="fs-13" style="font-weight:500">${esc(role.name)} ${role.builtin ? rqI18n.t('<span class="badge badge-muted no-dot">内置</span>') : ''}</div>
               <div class="fs-12 text-3">${esc(role.description)}</div>
             </div>
           </label>`).join(''),
-        foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>保存</button>',
+        foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>保存</button>'),
       })
       modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
       modal.el.querySelector('[data-ok]').onclick = async () => {
@@ -863,24 +863,24 @@ export async function renderMembers(ctx) {
       } catch { /* 查询失败时仅提供手工录入 */ }
       const dingtalkReal = dingtalkConfigs.length > 0
       const modal = openModal({
-        title: '绑定三方身份',
+        title: rqI18n.t('绑定三方身份'),
         body: `
-          ${field('三方平台', selectField('provider', [{ value: 'dingtalk', label: '钉钉' }, { value: 'feishu', label: '飞书' }, { value: 'wecom', label: '企业微信' }]))}
+          ${field(rqI18n.t('三方平台'), selectField('provider', [{ value: 'dingtalk', label: rqI18n.t('钉钉') }, { value: 'feishu', label: rqI18n.t('飞书') }, { value: 'wecom', label: rqI18n.t('企业微信') }]))}
           <div id="bind-oauth" ${dingtalkReal ? '' : 'style="display:none"'}>
             <div class="muted-box mb-14" style="display:flex;gap:8px;border-color:var(--brand-200);background:var(--brand-50)">
-              ${icon('info', 15)}<span>无需填写任何 ID：点击按钮跳转钉钉授权，本机已登录钉钉将自动识别身份，未登录则扫码确认，授权后自动完成绑定。</span>
+              ${icon('info', 15)}<span>${rqI18n.t('无需填写任何')} ID：${rqI18n.t('点击按钮跳转钉钉授权')}，${rqI18n.t('本机已登录钉钉将自动识别身份')}，${rqI18n.t('未登录则扫码确认')}，${rqI18n.t('授权后自动完成绑定')}。</span>
             </div>
-            ${dingtalkConfigs.length > 1 ? field('选择主体', `<select class="select" id="bind-config-id">${dingtalkConfigs.map((c) => `<option value="${esc(c.id)}">${esc(c.name || c.corpId)}</option>`).join('')}</select>`) : ''}
-            <button class="btn btn-primary btn-block" id="bind-oauth-go">${icon('link', 14)}钉钉扫码授权绑定</button>
+            ${dingtalkConfigs.length > 1 ? field(rqI18n.t('选择主体'), `<select class="select" id="bind-config-id">${dingtalkConfigs.map((c) => `<option value="${esc(c.id)}">${esc(c.name || c.corpId)}</option>`).join('')}</select>`) : ''}
+            <button class="btn btn-primary btn-block" id="bind-oauth-go">${icon('link', 14)}${rqI18n.t('钉钉扫码授权绑定')}</button>
           </div>
           <details id="bind-manual-wrap" ${dingtalkReal ? '' : 'open'} style="margin-top:${dingtalkReal ? '14px' : '0'}">
-            <summary class="fs-12 text-3" style="cursor:pointer;margin-bottom:10px">管理员手动绑定（备用）</summary>
-            ${field('三方 unionId', inputField('unionId', { placeholder: '如 dd_u002' }), { required: !dingtalkReal })}
-            ${field('三方昵称', inputField('displayName'))}
-            ${field('二次验证码', inputField('verifyCode', { placeholder: '演示环境任意 6 位数字' }), { hint: '一人一号原则：同一三方身份只能绑定一个平台账号' })}
-            <button class="btn btn-default btn-block" id="bind-manual-go">手动绑定</button>
+            <summary class="fs-12 text-3" style="cursor:pointer;margin-bottom:10px">${rqI18n.t('管理员手动绑定')}（${rqI18n.t('备用')}）</summary>
+            ${field(rqI18n.t('三方 unionId'), inputField('unionId', { placeholder: rqI18n.t('如 dd_u002') }), { required: !dingtalkReal })}
+            ${field(rqI18n.t('三方昵称'), inputField('displayName'))}
+            ${field(rqI18n.t('二次验证码'), inputField('verifyCode', { placeholder: rqI18n.t('演示环境任意 6 位数字') }), { hint: rqI18n.t('一人一号原则：同一三方身份只能绑定一个平台账号') })}
+            <button class="btn btn-default btn-block" id="bind-manual-go">${rqI18n.t('手动绑定')}</button>
           </details>`,
-        foot: '<button class="btn btn-default" data-cancel>关闭</button>',
+        foot: rqI18n.t('<button class="btn btn-default" data-cancel>关闭</button>'),
       })
       modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
       const providerValue = () => modal.body.querySelector('[name="provider"]')?.value ?? 'dingtalk'
@@ -908,7 +908,7 @@ export async function renderMembers(ctx) {
     }
     drawer.el.querySelector('#ud-resetpw').onclick = async () => {
       const confirmed = await confirmDialog({
-        title: '重置口令', danger: true, confirmText: '确认重置',
+        title: rqI18n.t('重置口令'), danger: true, confirmText: rqI18n.t('确认重置'),
         message: rqI18n.t('将为 <b>{name}</b> 生成新的随机口令，原口令立即失效。新口令仅展示一次，请准备传达给本人。', { name: esc(user.displayName) }),
       })
       if (!confirmed) return
@@ -925,7 +925,7 @@ export async function renderMembers(ctx) {
     const freezeBtn = drawer.el.querySelector('#ud-freeze')
     if (freezeBtn) freezeBtn.onclick = async () => {
       const result = await confirmDialog({
-        title: '冻结账号', danger: true, requireReason: true, confirmText: '确认冻结',
+        title: rqI18n.t('冻结账号'), danger: true, requireReason: true, confirmText: rqI18n.t('确认冻结'),
         message: rqI18n.t('冻结 <b>{name}</b> 后：其名下全部访问令牌将被立即吊销，无法登录任何入口。', { name: esc(user.displayName) }),
       })
       if (!result) return
@@ -963,7 +963,7 @@ async function mountAgentOrgView(treeData) {
     host.remove()
     return
   }
-  const ORG_ROLE_LABEL = { ceo: 'CEO', cto: 'CTO', manager: '经理', engineer: '工程师', analyst: '分析师' }
+  const ORG_ROLE_LABEL = { ceo: 'CEO', cto: 'CTO', manager: rqI18n.t('经理'), engineer: rqI18n.t('工程师'), analyst: rqI18n.t('分析师') }
 
   // 组织名解析：优先本页组织树（已是全量），树里没有的（如跨组织 Agent）原样显示 ID
   const orgNames = new Map()
@@ -988,30 +988,30 @@ async function mountAgentOrgView(treeData) {
         <td class="fs-12">${esc(ORG_ROLE_LABEL[attrs.orgRole] ?? attrs.orgRole ?? '—')}</td>
         <td class="fs-12">${esc(attrs.rank ?? '—')}</td>
         <td class="fs-12">${manager ? esc(manager.name) : attrs.managerId ? `<span class="mono fs-11 text-4">${esc(attrs.managerId)}</span>` : '—'}</td>
-        <td>${frozen ? `<span class="badge badge-purple no-dot" title="${esc(attrs.frozenReason ?? '已冻结')}">已冻结</span>` : '<span class="text-4 fs-12">—</span>'}</td>
+        <td>${frozen ? `<span class="badge badge-purple no-dot" title="${esc(attrs.frozenReason ?? rqI18n.t('已冻结'))}">${rqI18n.t('已冻结')}</span>` : '<span class="text-4 fs-12">—</span>'}</td>
         <td>${statusBadge(agent.status)}</td>
       </tr>`
   }
 
   const orgBlocks = [...groups.entries()].map(([orgId, list]) => `
     <div class="fs-13" style="font-weight:600;margin:14px 0 2px;display:flex;gap:6px;align-items:center">
-      ${icon('building', 13)} ${esc(orgNames.get(orgId) ?? (orgId || '（未挂组织）'))}
+      ${icon('building', 13)} ${esc(orgNames.get(orgId) ?? (orgId || rqI18n.t('（未挂组织）')))}
       <span class="badge badge-muted no-dot">${list.length}</span>
     </div>
     <div class="table-wrap">
       <table class="tbl">
-        <thead><tr><th>Agent</th><th>组织角色</th><th>职级</th><th>汇报上级</th><th>冻结</th><th>状态</th></tr></thead>
+        <thead><tr><th>Agent</th><th>${rqI18n.t('组织角色')}</th><th>${rqI18n.t('职级')}</th><th>${rqI18n.t('汇报上级')}</th><th>${rqI18n.t('冻结')}</th><th>${rqI18n.t('状态')}</th></tr></thead>
         <tbody>${list.map(agentRow).join('')}</tbody>
       </table>
     </div>`).join('')
 
   host.innerHTML = `
     <div class="card-head">
-      <span class="card-title">${icon('bot', 15)} Agent 组织视图</span>
+      <span class="card-title">${icon('bot', 15)} Agent ${rqI18n.t('组织视图')}</span>
       <span class="card-sub">${esc(rqI18n.t('{n} 个 Agent 按组织归队 · 人与 Agent 同一张组织架构（R7 双层视图）', { n: agents.length }))}</span>
     </div>
     <div class="card-body" style="padding-top:0;padding-bottom:14px">
-      ${agents.length ? orgBlocks : `<div class="tbl-empty">${icon('bot', 28)}<span>暂无 Agent——注册 Agent 并挂到组织后在此显示名册</span></div>`}
+      ${agents.length ? orgBlocks : `<div class="tbl-empty">${icon('bot', 28)}<span>${rqI18n.t('暂无')} Agent——${rqI18n.t('注册')} Agent ${rqI18n.t('并挂到组织后在此显示名册')}</span></div>`}
     </div>`
 }
 
@@ -1038,24 +1038,24 @@ async function mountConnectorSummary() {
   const jumpTab = (tab) => { location.hash = `#/iam?tab=${tab}` }
   host.innerHTML = `
     <div class="flex" style="justify-content:space-between;align-items:center;margin-bottom:8px">
-      <div class="micro-label">三方连接器</div>
-      <button class="btn btn-ghost btn-sm" id="iam-conn-more">管理 ${icon('chevronRight', 12)}</button>
+      <div class="micro-label">${rqI18n.t('三方连接器')}</div>
+      <button class="btn btn-ghost btn-sm" id="iam-conn-more">${rqI18n.t('管理')} ${icon('chevronRight', 12)}</button>
     </div>
     ${configs.length ? configs.map((config) => `
       <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px">
         <div class="flex" style="justify-content:space-between;align-items:center">
           <span class="fs-13" style="font-weight:500">${esc(config.name || providerName(config.provider))}</span>
           ${config.enabled
-            ? `<span class="fs-11" style="display:inline-flex;align-items:center;gap:5px;color:var(--ok)"><span class="dot dot-ok" style="width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block"></span>已启用</span>`
-            : '<span class="fs-11 text-4">未启用</span>'}
+            ? `<span class="fs-11" style="display:inline-flex;align-items:center;gap:5px;color:var(--ok)"><span class="dot dot-ok" style="width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block"></span>${rqI18n.t('已启用')}</span>`
+            : rqI18n.t('<span class="fs-11 text-4">未启用</span>')}
         </div>
         <div class="fs-12 text-3" style="margin-top:6px;line-height:1.8">
-          <div class="flex" style="justify-content:space-between"><span>模式</span><span class="mono">${config.mode === 'real' ? 'real' : 'mock'}</span></div>
-          <div class="flex" style="justify-content:space-between"><span>同步频率</span><span class="mono">${(config.intervalMinutes ?? 60) > 0 ? esc(rqI18n.t('每 {n} 分钟', { n: config.intervalMinutes ?? 60 })) : '仅手动'}</span></div>
-          <div class="flex" style="justify-content:space-between"><span>最近同步</span><span class="mono">${config.lastSyncAt ? timeAgo(config.lastSyncAt) : '从未同步'}${conflictText}</span></div>
+          <div class="flex" style="justify-content:space-between"><span>${rqI18n.t('模式')}</span><span class="mono">${config.mode === 'real' ? 'real' : 'mock'}</span></div>
+          <div class="flex" style="justify-content:space-between"><span>${rqI18n.t('同步频率')}</span><span class="mono">${(config.intervalMinutes ?? 60) > 0 ? esc(rqI18n.t('每 {n} 分钟', { n: config.intervalMinutes ?? 60 })) : rqI18n.t('仅手动')}</span></div>
+          <div class="flex" style="justify-content:space-between"><span>${rqI18n.t('最近同步')}</span><span class="mono">${config.lastSyncAt ? timeAgo(config.lastSyncAt) : rqI18n.t('从未同步')}${conflictText}</span></div>
         </div>
       </div>`).join('') : `
-      <div class="fs-12 text-4" style="line-height:1.8">尚未接入三方身份源——到「三方集成」tab 配置钉钉等连接器后，通讯录将按频率自动同步。</div>`}
+      <div class="fs-12 text-4" style="line-height:1.8">${rqI18n.t('尚未接入三方身份源')}——${rqI18n.t('到')}「${rqI18n.t('三方集成')}」tab ${rqI18n.t('配置钉钉等连接器后')}，${rqI18n.t('通讯录将按频率自动同步')}。</div>`}
     ${conflictCount ? `<button class="btn btn-default btn-sm" id="iam-conn-conflicts" style="width:100%">${icon('alert', 12)}${esc(rqI18n.t('处理 {n} 条同步冲突', { n: conflictCount }))}</button>` : ''}`
   const moreBtn = host.querySelector('#iam-conn-more')
   if (moreBtn) moreBtn.onclick = () => { jumpTab('connectors') }

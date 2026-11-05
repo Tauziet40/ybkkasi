@@ -183,18 +183,18 @@ export function openOnboardingModal({ title, resource, credential, metaRows, gui
     title, wide: true,
     body: `
       <div class="form-hint mb-8" style="background:var(--warn-bg);border:1px solid var(--warn-border);border-radius:8px;padding:10px 12px;font-size:13px">
-        <b style="color:var(--warn)">📢 强提醒：注册完成后，请务必立即把下方接入指引全文发给你的 Agent</b>（点「一键复制全部指引」粘贴到 Agent 对话框或任务指令中）——Agent 只有收到指引才会执行换牌、接入验证与后续运营数据提报，不发给 Agent 接入无法完成。
+        <b style="color:var(--warn)">${rqI18n.t('📢 强提醒：注册完成后，请务必立即把下方接入指引全文发给你的 Agent')}</b>${rqI18n.t('（点「一键复制全部指引」粘贴到 Agent 对话框或任务指令中）——Agent 只有收到指引才会执行换牌、接入验证与后续运营数据提报，不发给 Agent 接入无法完成。')}
       </div>
       <div class="form-hint mb-8" style="display:flex;gap:8px;align-items:center">
         <span style="color:var(--warn)">⏳</span>
-        <span>凭证（client_secret）<b>仅此一次展示</b>，请立即通过下方「一键复制」保存；平台侧不可再查询，丢失请联系平台管理员处理。</span>
+        <span>${rqI18n.t('凭证（client_secret）')}<b>${rqI18n.t('仅此一次展示')}</b>${rqI18n.t('，请立即通过下方「一键复制」保存；平台侧不可再查询，丢失请联系平台管理员处理。')}</span>
       </div>
       <div class="desc-grid mb-8">
         ${metaRows.map(([k, v]) => `<div class="desc-item"><span class="k">${esc(k)}</span><span class="v mono">${esc(v)}</span></div>`).join('')}
       </div>
       <div class="flex mb-8" style="justify-content:space-between;align-items:center">
-        <span class="card-title">接入指引（已按模板生成，凭证已填入）</span>
-        <button class="btn btn-primary btn-sm" id="onboard-copy-all">${esc('⧉ 一键复制全部指引')}</button>
+        <span class="card-title">${rqI18n.t('接入指引（已按模板生成，凭证已填入）')}</span>
+        <button class="btn btn-primary btn-sm" id="onboard-copy-all">${esc(rqI18n.t('⧉ 一键复制全部指引'))}</button>
       </div>
       <pre class="mono fs-12" id="onboard-guide" style="white-space:pre-wrap;background:var(--bg-2);padding:12px;border-radius:8px;max-height:380px;overflow:auto;line-height:1.7">${esc(guideText)}</pre>
       <div class="form-hint mt-8">${esc(rqI18n.t('整段复制后发给执行 Agent（或开发者）照做：换牌 → 接入验证，{resource}即可自主完成接入与提报闭环。', { resource: resourceLabel }))}</div>`,

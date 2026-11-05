@@ -26,9 +26,9 @@ export async function renderUsage(content, params, ctx) {
   content.innerHTML = `
     ${sectionHead({
       label: 'USAGE REPORT / J4',
-      title: '用量与成本穿透',
-      extra: '部门 / 资产 / 应用效率三维聚合 · 价格簿零价快照 + 内部成本参考 · 对外不呈现金额结算语义',
-      actions: `<button class="btn btn-default" id="usage-csv">${icon('download', 14)} 导出 CSV</button>`,
+      title: rqI18n.t('用量与成本穿透'),
+      extra: rqI18n.t('部门 / 资产 / 应用效率三维聚合 · 价格簿零价快照 + 内部成本参考 · 对外不呈现金额结算语义'),
+      actions: `<button class="btn btn-default" id="usage-csv">${icon('download', 14)} ${rqI18n.t('导出 CSV')}</button>`,
     })}
     <div id="usage-body"></div>`
 
@@ -37,11 +37,11 @@ export async function renderUsage(content, params, ctx) {
     const box = document.createElement('div')
     body.appendChild(box)
     box.appendChild(emptyState({
-      title: loadError.status === 403 ? '无用量报表读取权限' : '用量报表暂不可用',
+      title: loadError.status === 403 ? rqI18n.t('无用量报表读取权限') : rqI18n.t('用量报表暂不可用'),
       desc: loadError.status === 403
-        ? '用量报表接口需要 usage.read 权限；如需查看请联系管理员开通。'
+        ? rqI18n.t('用量报表接口需要 usage.read 权限；如需查看请联系管理员开通。')
         : rqI18n.t('{msg}——/api/usage/report（28 天报表）可能尚未在当前宿主部署，可先前往财务视图查看月度口径报表。', { msg: loadError.message }),
-      actionText: '重试',
+      actionText: rqI18n.t('重试'),
       onAction: () => ctx.rerender(),
       icon: 'chart',
     }))
@@ -57,8 +57,8 @@ export async function renderUsage(content, params, ctx) {
 
   // 维度切换（tabRow）：切换后带 dim 参数重查（服务端按维度聚合占比/排行口径）
   const tabs = tabRow([
-    { key: 'tokens', label: '消耗（tokens）' },
-    { key: 'cost', label: '成本参考（元）' },
+    { key: 'tokens', label: rqI18n.t('消耗（tokens）') },
+    { key: 'cost', label: rqI18n.t('成本参考（元）') },
   ], dim, (key) => { location.hash = `#/usage?dim=${key}` })
   const tabsMount = document.createElement('div')
   tabsMount.appendChild(tabs)
@@ -86,12 +86,12 @@ export async function renderUsage(content, params, ctx) {
         </div>
         ${series.length ? chartHtml : emptyHint(rqI18n.t('近 {n} 天暂无用量数据——资产开始调用后每日序列自动累积', { n: days }))}
         <div class="fs-11 text-3" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;gap:16px;flex-wrap:wrap">
-          <span>口径：零价快照计量（charge 恒 0）+ 内部成本参考</span>
-          <span style="margin-left:auto">金额不对外结算，仅用于内部穿透与预算熔断</span>
+          <span>${rqI18n.t('口径：零价快照计量（charge 恒 0）+ 内部成本参考')}</span>
+          <span style="margin-left:auto">${rqI18n.t('金额不对外结算，仅用于内部穿透与预算熔断')}</span>
         </div>
       </div>
       <div class="card card-pad">
-        ${sectionHead({ label: 'BY ASSET / TOP', title: 'Top 资产消耗', extra: '按内部成本参考排序 · 近 30 天' })}
+        ${sectionHead({ label: 'BY ASSET / TOP', title: rqI18n.t('Top 资产消耗'), extra: rqI18n.t('按内部成本参考排序 · 近 30 天') })}
         ${hBarList(topAssets.map((asset) => ({
           name: asset.name || asset.key,
           value: yuan(asset.cost),
@@ -101,7 +101,7 @@ export async function renderUsage(content, params, ctx) {
     </div>
     <div class="grid-2" style="align-items:start">
       <div class="card card-pad">
-        ${sectionHead({ label: 'BY ORG', title: '部门用量分摊', extra: 'tokens 占比与环比 · 口径与审计一致' })}
+        ${sectionHead({ label: 'BY ORG', title: rqI18n.t('部门用量分摊'), extra: rqI18n.t('tokens 占比与环比 · 口径与审计一致') })}
         ${byOrg.length ? `
         <div class="table-wrap">
           <table class="tbl">
@@ -111,17 +111,17 @@ export async function renderUsage(content, params, ctx) {
             <tbody>
               ${byOrg.map((row) => `
                 <tr>
-                  <td><div class="col-strong">${esc(row.org || '（未归口）')}</div></td>
+                  <td><div class="col-strong">${esc(row.org || rqI18n.t('（未归口）'))}</div></td>
                   <td class="tnum mono fs-12" style="text-align:right">${fmtNum(row.tokens)}</td>
                   <td>${progressBar(Number(row.share) || 0, { width: '84px', label: `${Number(row.share ?? 0).toFixed(1)}%` })}</td>
                   <td class="tnum mono fs-12" style="text-align:right;color:${row.delta >= 0 ? 'var(--ok)' : 'var(--danger)'}">${row.delta == null ? '—' : `${row.delta >= 0 ? '+' : ''}${row.delta}%`}</td>
                 </tr>`).join('')}
             </tbody>
           </table>
-        </div>` : emptyHint('暂无部门分摊数据——调用事件按组织归口后自动聚合')}
+        </div>` : emptyHint(rqI18n.t('暂无部门分摊数据——调用事件按组织归口后自动聚合'))}
       </div>
       <div class="card card-pad">
-        ${sectionHead({ label: 'EFFICIENCY', title: '应用效率：单位 DAU 成本', extra: '指标 × 成本打通 · 按资产窗口 DAU 派生' })}
+        ${sectionHead({ label: 'EFFICIENCY', title: rqI18n.t('应用效率：单位 DAU 成本'), extra: rqI18n.t('指标 × 成本打通 · 按资产窗口 DAU 派生') })}
         ${unitDau.length ? `
         <div style="display:flex;flex-direction:column;gap:14px">
           ${(() => {
@@ -142,8 +142,8 @@ export async function renderUsage(content, params, ctx) {
           })()}
         </div>
         <p class="fs-11 text-3" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);line-height:1.6">
-          单位 DAU 成本高于 ¥1/DAU 的资产以琥珀色标出（低频高消耗场景常见），建议评估长文本路由或缓存编排模板优化。
-        </p>` : emptyHint('暂无单位 DAU 成本数据——需应用类资产接入 DAU 指标后派生')}
+          ${rqI18n.t('单位 DAU 成本高于 ¥1/DAU 的资产以琥珀色标出（低频高消耗场景常见），建议评估长文本路由或缓存编排模板优化。')}
+        </p>` : emptyHint(rqI18n.t('暂无单位 DAU 成本数据——需应用类资产接入 DAU 指标后派生'))}
       </div>
     </div>`
 
@@ -164,24 +164,24 @@ function bindExport(report) {
     }
     const yuan = (cents) => (Number(cents) || 0) / 100 // 分→元（与页面展示口径一致）
     const lines = []
-    lines.push(`用量与成本报表（近 ${report.days} 天，维度：${report.dim === 'cost' ? '成本参考（元）' : 'tokens'}；口径：零价快照 + 内部成本参考）`)
+    lines.push(`${rqI18n.t('用量与成本报表（近')} ${report.days} ${rqI18n.t('天，维度：')}${report.dim === 'cost' ? rqI18n.t('成本参考（元）') : 'tokens'}${rqI18n.t('；口径：零价快照 + 内部成本参考）')}`)
     lines.push('')
-    lines.push('日期,tokens,成本参考(元),调用次数')
+    lines.push(rqI18n.t('日期,tokens,成本参考(元),调用次数'))
     for (const point of report.series) {
       lines.push([cell(point.date), point.tokens ?? 0, yuan(point.cost), point.calls ?? 0].join(','))
     }
     lines.push('')
-    lines.push('部门,tokens,占比%,环比%')
+    lines.push(rqI18n.t('部门,tokens,占比%,环比%'))
     for (const row of report.byOrg ?? []) {
       lines.push([cell(row.org), row.tokens ?? 0, row.share ?? 0, row.delta ?? ''].join(','))
     }
     lines.push('')
-    lines.push('资产键,资产名,成本参考(元),调用次数,tokens')
+    lines.push(rqI18n.t('资产键,资产名,成本参考(元),调用次数,tokens'))
     for (const asset of report.topAssets ?? []) {
       lines.push([cell(asset.key), cell(asset.name), yuan(asset.cost), asset.calls ?? 0, asset.tokens ?? 0].join(','))
     }
     lines.push('')
-    lines.push('资产键,资产名,单位DAU成本(元),DAU')
+    lines.push(rqI18n.t('资产键,资产名,单位DAU成本(元),DAU'))
     for (const unit of report.unitDau ?? []) {
       lines.push([cell(unit.key), cell(unit.name), yuan(unit.costPerDau), unit.dau ?? 0].join(','))
     }

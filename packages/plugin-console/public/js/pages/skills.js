@@ -18,41 +18,41 @@ import { sectionHead, chipRow, heatStrip, emptyHint } from '../components/asset-
 import { ASSET_CATEGORIES } from '../taxonomy.js'
 
 /** Agent 状态枚举（协议值 ASCII）→ 选择器选项中文伴随（option 纯文本不能用 statusBadge） */
-const AGENT_STATUS_LABEL = { online: '已上线', offline: '已下线', draft: '开发中', archived: '已归档' }
+const AGENT_STATUS_LABEL = { online: rqI18n.t('已上线'), offline: rqI18n.t('已下线'), draft: rqI18n.t('开发中'), archived: rqI18n.t('已归档') }
 
 export async function renderSkills(content, params, ctx) {
   const data = await api.get('/api/skills')
   // 首次访问概念卡（易用性整改：Skill 术语对业务成员有门槛）
   maybeShowConceptCard(content, 'skills', {
     icon: 'sparkles',
-    title: 'Skill 是什么？',
-    subtitle: 'Skill = 给 Agent 用的「专项技能包」，像手机装 App 一样即装即用。',
+    title: rqI18n.t('Skill 是什么？'),
+    subtitle: rqI18n.t('Skill = 给 Agent 用的「专项技能包」，像手机装 App 一样即装即用。'),
     points: [
-      '能做什么：生成周报、读取合同要点、分析销售数据等专项任务。',
-      '怎么上架：提交 → 自动安全扫描 → 两级审批 → 版本化上架，高风险需安全团队加签。',
-      '怎么使用：按场景在市场挑选，下载安装即登记依赖，随时可停用。',
+      rqI18n.t('能做什么：生成周报、读取合同要点、分析销售数据等专项任务。'),
+      rqI18n.t('怎么上架：提交 → 自动安全扫描 → 两级审批 → 版本化上架，高风险需安全团队加签。'),
+      rqI18n.t('怎么使用：按场景在市场挑选，下载安装即登记依赖，随时可停用。'),
     ],
   })
 
   content.innerHTML = `
     ${sectionHead({
       label: 'SKILL MARKET',
-      title: 'Skill 市场',
-      extra: '提交 → 静态扫描 → 两级审批 → 版本化上架 · 契约五面 Ed25519 验签 · 卡片色深 = 当日使用次数（30 天热力）',
+      title: rqI18n.t('Skill 市场'),
+      extra: rqI18n.t('提交 → 静态扫描 → 两级审批 → 版本化上架 · 契约五面 Ed25519 验签 · 卡片色深 = 当日使用次数（30 天热力）'),
       actions: `
-        <button class="btn btn-default" id="skill-storage">${icon('server', 14)}存储配置</button>
-        <button class="btn btn-default" id="skill-mine">${icon('user', 14)}我的提交</button>
-        ${session.can('skill.approve') ? `<button class="btn btn-default" id="skill-review">${icon('checkSquare', 14)}待审批<span class="badge badge-danger no-dot" id="skill-review-count" style="margin-left:6px;display:none">0</span></button>` : ''}
-        ${session.can('skill.submit') ? `<button class="btn btn-primary" id="skill-submit">${icon('plus', 14)}提交新技能</button>` : ''}`,
+        <button class="btn btn-default" id="skill-storage">${icon('server', 14)}${rqI18n.t('存储配置')}</button>
+        <button class="btn btn-default" id="skill-mine">${icon('user', 14)}${rqI18n.t('我的提交')}</button>
+        ${session.can('skill.approve') ? `<button class="btn btn-default" id="skill-review">${icon('checkSquare', 14)}${rqI18n.t('待审批')}<span class="badge badge-danger no-dot" id="skill-review-count" style="margin-left:6px;display:none">0</span></button>` : ''}
+        ${session.can('skill.submit') ? `<button class="btn btn-primary" id="skill-submit">${icon('plus', 14)}${rqI18n.t('提交新技能')}</button>` : ''}`,
     })}
     <div id="skill-heatmap" class="mb-20"></div>
     <div class="filter-bar">
       <div id="skill-cats"></div>
       <div class="search-input">${icon('search')}<input class="input" id="skill-q" placeholder="${esc(rqI18n.t('搜索技能名称、描述、标签、作者...'))}" style="width:220px"></div>
       <div class="segmented" style="margin-left:auto" id="skill-sort">
-        <span class="segmented-item active" data-sort="downloads">按下载</span>
-        <span class="segmented-item" data-sort="rating">按评分</span>
-        <span class="segmented-item" data-sort="updated">按更新</span>
+        <span class="segmented-item active" data-sort="downloads">${rqI18n.t('按下载')}</span>
+        <span class="segmented-item" data-sort="rating">${rqI18n.t('按评分')}</span>
+        <span class="segmented-item" data-sort="updated">${rqI18n.t('按更新')}</span>
       </div>
     </div>
     <div class="grid-cards g3" id="skill-cards"></div>`
@@ -76,9 +76,9 @@ export async function renderSkills(content, params, ctx) {
     holder.innerHTML = ''
     if (!skills.length) {
       holder.appendChild(emptyState({
-        title: state.mode === 'review' ? '没有待审批的 Skill' : state.mode === 'mine' ? '你还没有提交过 Skill' : '没有匹配的 Skill',
-        desc: state.mode === 'market' ? '换个关键字或分类试试' : '提交第一个 Skill 到市场，让能力复用起来',
-        actionText: state.mode === 'market' ? undefined : '提交 Skill',
+        title: state.mode === 'review' ? rqI18n.t('没有待审批的 Skill') : state.mode === 'mine' ? rqI18n.t('你还没有提交过 Skill') : rqI18n.t('没有匹配的 Skill'),
+        desc: state.mode === 'market' ? rqI18n.t('换个关键字或分类试试') : rqI18n.t('提交第一个 Skill 到市场，让能力复用起来'),
+        actionText: state.mode === 'market' ? undefined : rqI18n.t('提交 Skill'),
         onAction: () => $('#skill-submit').click(),
         icon: 'sparkles',
       }))
@@ -87,14 +87,14 @@ export async function renderSkills(content, params, ctx) {
     for (const skill of skills) {
       const heat = Array.isArray(skill.heat) ? skill.heat : heatState.byId.get(skill.id)
       const riskCls = skill.riskLevel === 'high' ? 'risk-crit' : skill.riskLevel === 'medium' ? 'risk-high' : 'risk-normal'
-      const riskText = skill.riskLevel === 'high' ? '高风险' : skill.riskLevel === 'medium' ? '中风险' : '低风险'
+      const riskText = skill.riskLevel === 'high' ? rqI18n.t('高风险') : skill.riskLevel === 'medium' ? rqI18n.t('中风险') : rqI18n.t('低风险')
       const card = h(`
         <div class="res-card fade-up" data-id="${esc(skill.id)}" style="cursor:pointer">
           <div class="res-card-top">
             <div class="grow" style="min-width:0">
               <div class="res-name">
                 <span class="ellipsis" style="min-width:0" title="${esc(skill.name)}">${esc(skill.name)}</span>
-                ${skill.verified ? `<span style="color:var(--ok);display:inline-flex;flex-shrink:0" title="Ed25519 验签通过">${icon('shieldCheck', 14)}</span>` : ''}
+                ${skill.verified ? `<span style="color:var(--ok);display:inline-flex;flex-shrink:0" title="${rqI18n.t('Ed25519 验签通过')}">${icon('shieldCheck', 14)}</span>` : ''}
               </div>
               <div class="fs-12 text-4 ellipsis" style="margin-top:2px">${esc(skill.authorName)}${skill.category ? ` · ${esc(rqI18n.t(skill.category))}` : ''}</div>
             </div>
@@ -104,10 +104,10 @@ export async function renderSkills(content, params, ctx) {
           <div style="margin-top:10px">${heat ? heatStrip(heat) : `<span class="fs-11 text-4">${esc(rqI18n.t('近 30 天暂无使用记录'))}</span>`}</div>
           <div class="res-foot">
             <span class="metric mono">v${esc(skill.currentVersion)}</span>
-            <span class="metric" title="安装量">${icon('download', 13)}${esc(rqI18n.t('{n} 安装', { n: fmtNum(skill.stats.installs) }))}</span>
-            <span class="metric" title="评分">${icon('star', 13)}${skill.stats.rating || '—'}</span>
+            <span class="metric" title="${rqI18n.t('安装量')}">${icon('download', 13)}${esc(rqI18n.t('{n} 安装', { n: fmtNum(skill.stats.installs) }))}</span>
+            <span class="metric" title="${rqI18n.t('评分')}">${icon('star', 13)}${skill.stats.rating || '—'}</span>
             <span class="risk-pill ${riskCls}">${riskText}</span>
-            <span style="margin-left:auto;color:var(--brand-500)">详情 →</span>
+            <span style="margin-left:auto;color:var(--brand-500)">${rqI18n.t('详情 →')}</span>
           </div>
         </div>`)
       card.onclick = () => openSkillDetail(skill.id, ctx, refresh, heatState)
@@ -139,7 +139,7 @@ export async function renderSkills(content, params, ctx) {
 
   // 分类 chipRow（全部 + 服务端分类）：后端固定返回标准 11 项在前、存量遗留分类附后
   $('#skill-cats').appendChild(chipRow(
-    [{ value: '', label: '全部' }, ...(data.categories ?? []).map((cat) => ({ value: cat, label: cat }))],
+    [{ value: '', label: rqI18n.t('全部') }, ...(data.categories ?? []).map((cat) => ({ value: cat, label: cat }))],
     state.cat,
     (value) => { state.cat = value; state.mode = 'market'; void refresh() },
   ))
@@ -187,43 +187,43 @@ async function openSkillDetail(id, ctx, refresh, heatState) {
     body: `
       <div class="flex mb-8" style="gap:8px;flex-wrap:wrap;align-items:center">
         ${statusBadge(skill.status)}
-        <span class="risk-pill ${skill.riskLevel === 'high' ? 'risk-crit' : skill.riskLevel === 'medium' ? 'risk-high' : 'risk-normal'}">${skill.riskLevel === 'high' ? '高风险（需安全加签）' : skill.riskLevel === 'medium' ? '中风险' : '低风险'}</span>
-        ${skill.verified ? `<span class="flex" style="gap:4px;align-items:center;color:var(--ok);font-size:12px">${icon('shieldCheck', 14)} Ed25519 验签通过</span>` : ''}
+        <span class="risk-pill ${skill.riskLevel === 'high' ? 'risk-crit' : skill.riskLevel === 'medium' ? 'risk-high' : 'risk-normal'}">${skill.riskLevel === 'high' ? rqI18n.t('高风险（需安全加签）') : skill.riskLevel === 'medium' ? rqI18n.t('中风险') : rqI18n.t('低风险')}</span>
+        ${skill.verified ? `<span class="flex" style="gap:4px;align-items:center;color:var(--ok);font-size:12px">${icon('shieldCheck', 14)} ${rqI18n.t('Ed25519 验签通过')}</span>` : ''}
         ${skill.tags.map((tag) => `<span class="badge badge-muted no-dot">${esc(tag)}</span>`).join('')}
       </div>
       <div class="fs-13" style="line-height:1.7;color:var(--text-2)">${esc(skill.description || skill.summary)}</div>
       ${skill.deprecatedReason ? `
         <div class="muted-box mt-8" style="display:flex;gap:8px;border-color:var(--warn-border);background:var(--warn-bg)">
-          ${icon('alert', 15)}<span><b>弃用原因</b>${esc(rqI18n.t('：{reason}{at}', { reason: skill.deprecatedReason, at: skill.deprecatedAt ? `（${timeAgo(skill.deprecatedAt)}）` : '' }))}</span>
+          ${icon('alert', 15)}<span><b>${rqI18n.t('弃用原因')}</b>${esc(rqI18n.t('：{reason}{at}', { reason: skill.deprecatedReason, at: skill.deprecatedAt ? `（${timeAgo(skill.deprecatedAt)}）` : '' }))}</span>
         </div>` : ''}
 
       <div class="stat-grid mt-14 mb-14" style="grid-template-columns:repeat(4,1fr)">
-        ${miniStat('download', '下载量', fmtNum(skill.stats.downloads))}
-        ${miniStat('box', '安装量', fmtNum(skill.stats.installs))}
-        ${miniStat('star', '评分', rqI18n.t('{r}（{n} 人）', { r: skill.stats.rating || '—', n: skill.stats.ratingCount }))}
-        ${miniStat('layers', '版本数', versions.length)}
+        ${miniStat('download', rqI18n.t('下载量'), fmtNum(skill.stats.downloads))}
+        ${miniStat('box', rqI18n.t('安装量'), fmtNum(skill.stats.installs))}
+        ${miniStat('star', rqI18n.t('评分'), rqI18n.t('{r}（{n} 人）', { r: skill.stats.rating || '—', n: skill.stats.ratingCount }))}
+        ${miniStat('layers', rqI18n.t('版本数'), versions.length)}
       </div>
 
       <div class="mb-14">
-        <div class="micro-label mb-8">30 天使用热力</div>
-        ${heat ? heatStrip(heat, { big: true }) : emptyHint('近 30 天暂无使用记录')}
-        <p class="fs-11 text-4" style="margin-top:6px">usage 计量事件为主、计量接入前下载流水按日回填去重；色深 = 当日使用次数</p>
+        <div class="micro-label mb-8">${rqI18n.t('30 天使用热力')}</div>
+        ${heat ? heatStrip(heat, { big: true }) : emptyHint(rqI18n.t('近 30 天暂无使用记录'))}
+        <p class="fs-11 text-4" style="margin-top:6px">${rqI18n.t('usage 计量事件为主、计量接入前下载流水按日回填去重；色深 = 当日使用次数')}</p>
       </div>
 
       <div class="tabs" id="sk-tabs">
-        <div class="tab active" data-tab="readme">效果示例</div>
-        <div class="tab" data-tab="versions">版本与审批</div>
+        <div class="tab active" data-tab="readme">${rqI18n.t('效果示例')}</div>
+        <div class="tab" data-tab="versions">${rqI18n.t('版本与审批')}</div>
       </div>
       <div id="sk-tab-body"></div>`,
     foot: `
-      ${skill.status === 'published' ? `<button class="btn btn-default" id="sk-download">${icon('download', 14)}下载</button>` : ''}
-      ${skill.status === 'published' && session.can('skill.install') ? `<button class="btn btn-primary" id="sk-install">${icon('plus', 14)}安装到团队</button>` : ''}
-      ${canManage(skill) ? `<button class="btn btn-default" id="sk-edit">${icon('edit', 14)}编辑信息</button>` : ''}
-      ${canManage(skill) && skill.versions.some((v) => v.status === 'published') ? `<button class="btn btn-default" id="sk-repkg">${icon('refresh', 14)}更新资源包</button>` : ''}
-      ${session.can('skill.approve') && (current?.status === 'pending_domain' || current?.status === 'pending_security') ? `<button class="btn btn-primary" id="sk-approve">${icon('check', 14)}审批</button>` : ''}
-      ${session.can('skill.approve') && current?.status === 'approved' && skill.status !== 'published' ? `<button class="btn btn-primary" id="sk-publish">${icon('send', 14)}上架</button>` : ''}
-      ${session.can('skill.publish') && skill.status === 'published' ? `<button class="btn btn-danger-ghost" id="sk-deprecate">${icon('alert', 14)}弃用</button>` : ''}
-      ${session.can('skill.publish') && ['deprecated', 'offline', 'rejected'].includes(skill.status) ? `<button class="btn btn-danger-ghost" id="sk-delete">${icon('trash', 14)}删除</button>` : ''}`,
+      ${skill.status === 'published' ? `<button class="btn btn-default" id="sk-download">${icon('download', 14)}${rqI18n.t('下载')}</button>` : ''}
+      ${skill.status === 'published' && session.can('skill.install') ? `<button class="btn btn-primary" id="sk-install">${icon('plus', 14)}${rqI18n.t('安装到团队')}</button>` : ''}
+      ${canManage(skill) ? `<button class="btn btn-default" id="sk-edit">${icon('edit', 14)}${rqI18n.t('编辑信息')}</button>` : ''}
+      ${canManage(skill) && skill.versions.some((v) => v.status === 'published') ? `<button class="btn btn-default" id="sk-repkg">${icon('refresh', 14)}${rqI18n.t('更新资源包')}</button>` : ''}
+      ${session.can('skill.approve') && (current?.status === 'pending_domain' || current?.status === 'pending_security') ? `<button class="btn btn-primary" id="sk-approve">${icon('check', 14)}${rqI18n.t('审批')}</button>` : ''}
+      ${session.can('skill.approve') && current?.status === 'approved' && skill.status !== 'published' ? `<button class="btn btn-primary" id="sk-publish">${icon('send', 14)}${rqI18n.t('上架')}</button>` : ''}
+      ${session.can('skill.publish') && skill.status === 'published' ? `<button class="btn btn-danger-ghost" id="sk-deprecate">${icon('alert', 14)}${rqI18n.t('弃用')}</button>` : ''}
+      ${session.can('skill.publish') && ['deprecated', 'offline', 'rejected'].includes(skill.status) ? `<button class="btn btn-danger-ghost" id="sk-delete">${icon('trash', 14)}${rqI18n.t('删除')}</button>` : ''}`,
   })
 
   const tabBody = drawer.body.querySelector('#sk-tab-body')
@@ -233,7 +233,7 @@ async function openSkillDetail(id, ctx, refresh, heatState) {
         <div class="muted-box" style="display:flex;gap:8px;margin-bottom:12px">
           ${icon('info', 15)}<span>${esc(rqI18n.t('SKILL.md 由模型按需加载：何时使用 / 操作步骤 / 输出格式。适用模型：{models}', { models: skill.applicableModels.map(esc).join('、') }))}</span>
         </div>
-        <div class="code-block">${esc(current?.content ?? '（暂无内容）')}</div>`
+        <div class="code-block">${esc(current?.content ?? rqI18n.t('（暂无内容）'))}</div>`
     }
     if (tab === 'versions') {
       tabBody.innerHTML = `
@@ -330,7 +330,7 @@ async function openSkillDetail(id, ctx, refresh, heatState) {
           ${icon('info', 15)}
           <span>${needLevel === 'domain' ? rqI18n.t('领域负责人审批：评估业务适用性与描述准确性。') : rqI18n.t('安全团队加签：该 Skill 包含外联/写文件等高风险行为。')}${skill.riskLevel === 'high' ? rqI18n.t('（高风险：两级审批均须通过，允许同一人连审两级）') : ''}</span>
         </div>
-        ${field('审批意见', textareaField('opinion', { placeholder: '请说明审批依据…' }), { required: true })}`,
+        ${field(rqI18n.t('审批意见'), textareaField('opinion', { placeholder: rqI18n.t('请说明审批依据…') }), { required: true })}`,
       foot: `<button class="btn btn-danger-ghost" data-reject>${esc(rqI18n.t('驳回'))}</button><button class="btn btn-primary" data-ok>${esc(rqI18n.t('通过'))}</button>`,
     })
     modal.el.querySelector('[data-reject]').onclick = async () => {
@@ -360,8 +360,8 @@ async function openSkillDetail(id, ctx, refresh, heatState) {
   const deprecateBtn = drawer.el.querySelector('#sk-deprecate')
   if (deprecateBtn) deprecateBtn.onclick = async () => {
     const result = await confirmDialog({
-      title: '弃用 Skill', requireReason: true, danger: true, confirmText: '确认弃用',
-      message: '弃用后市场不可安装；存量引用的 Agent 会收到迁移告警。旧版本保留可回滚。',
+      title: rqI18n.t('弃用 Skill'), requireReason: true, danger: true, confirmText: rqI18n.t('确认弃用'),
+      message: rqI18n.t('弃用后市场不可安装；存量引用的 Agent 会收到迁移告警。旧版本保留可回滚。'),
     })
     if (!result) return
     try {
@@ -378,7 +378,7 @@ async function openSkillDetail(id, ctx, refresh, heatState) {
   const deleteBtn = drawer.el.querySelector('#sk-delete')
   if (deleteBtn) deleteBtn.onclick = async () => {
     const result = await confirmDialog({
-      title: rqI18n.t('删除 Skill · {name}', { name: skill.name }), requireReason: true, danger: true, confirmText: '确认删除',
+      title: rqI18n.t('删除 Skill · {name}', { name: skill.name }), requireReason: true, danger: true, confirmText: rqI18n.t('确认删除'),
       message: rqI18n.t('将永久删除该 Skill 记录（含全部版本与下载/安装登记），操作不可恢复；审计数据保留。'),
     })
     if (!result) return
@@ -391,20 +391,20 @@ async function openSkillDetail(id, ctx, refresh, heatState) {
 
 function openSubmitModal(ctx, refresh) {
   const modal = openModal({
-    title: '提交 Skill 到市场', wide: true,
+    title: rqI18n.t('提交 Skill 到市场'), wide: true,
     body: `
       <div class="muted-box mb-14" style="display:flex;gap:8px">
-        ${icon('zap', 15)}<span>提交后自动进入流水线：<b>静态扫描</b>（恶意代码 / 密钥泄露检测）→ <b>领域审批</b> → 高风险额外 <b>安全加签</b> → 上架。</span>
+        ${icon('zap', 15)}<span>${rqI18n.t('提交后自动进入流水线：')}<b>${rqI18n.t('静态扫描')}</b>${rqI18n.t('（恶意代码 / 密钥泄露检测）→')} <b>${rqI18n.t('领域审批')}</b> ${rqI18n.t('→ 高风险额外')} <b>${rqI18n.t('安全加签')}</b> ${rqI18n.t('→ 上架。')}</span>
       </div>
       <div class="form-grid">
-        ${field('名称', inputField('name'), { required: true })}
-        ${field('分类', selectField('category', ASSET_CATEGORIES.map((c) => ({ value: c, label: rqI18n.t(c) }))))}
-        ${field('一句话简介', inputField('summary'), { full: true })}
-        ${field('版本号', inputField('version', { value: '1.0.0' }))}
-        ${field('标签（逗号分隔）', inputField('tags', { placeholder: '文档,自动化' }))}
+        ${field(rqI18n.t('名称'), inputField('name'), { required: true })}
+        ${field(rqI18n.t('分类'), selectField('category', ASSET_CATEGORIES.map((c) => ({ value: c, label: rqI18n.t(c) }))))}
+        ${field(rqI18n.t('一句话简介'), inputField('summary'), { full: true })}
+        ${field(rqI18n.t('版本号'), inputField('version', { value: '1.0.0' }))}
+        ${field(rqI18n.t('标签（逗号分隔）'), inputField('tags', { placeholder: rqI18n.t('文档,自动化') }))}
       </div>
-      ${field('SKILL.md 内容', textareaField('content', { placeholder: `${rqI18n.t('# Skill 名称')}\n\n${rqI18n.t('## 何时使用')}\n…\n\n${rqI18n.t('## 操作步骤')}\n1. …`, rows: 8 }), { required: true, hint: '静态扫描将检测破坏性命令、动态执行、密钥泄露等风险模式' })}
-      ${field('Skill 包（skill.zip，选填）', '<input class="input" type="file" id="skill-pkg" accept=".zip,application/zip">', { hint: '随版本保存：上架时按存储配置写入平台本地或 NAS（见「存储配置」）' })}`,
+      ${field(rqI18n.t('SKILL.md 内容'), textareaField('content', { placeholder: `${rqI18n.t('# Skill 名称')}\n\n${rqI18n.t('## 何时使用')}\n…\n\n${rqI18n.t('## 操作步骤')}\n1. …`, rows: 8 }), { required: true, hint: rqI18n.t('静态扫描将检测破坏性命令、动态执行、密钥泄露等风险模式') })}
+      ${field(rqI18n.t('Skill 包（skill.zip，选填）'), '<input class="input" type="file" id="skill-pkg" accept=".zip,application/zip">', { hint: rqI18n.t('随版本保存：上架时按存储配置写入平台本地或 NAS（见「存储配置」）') })}`,
     foot: `<button class="btn btn-default" data-cancel>${esc(rqI18n.t('取消'))}</button><button class="btn btn-primary" data-ok>${esc(rqI18n.t('提交（进入扫描）'))}</button>`,
   })
   modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
@@ -425,18 +425,18 @@ function openSubmitModal(ctx, refresh) {
       modal.close()
       if (result.status === 'rejected') {
         openModal({
-          title: '静态扫描未通过（自动驳回）',
-          body: `<div class="form-hint" style="margin-bottom:10px">检测到阻断级问题，请修复后重新提交：</div>
+          title: rqI18n.t('静态扫描未通过（自动驳回）'),
+          body: `<div class="form-hint" style="margin-bottom:10px">${rqI18n.t('检测到阻断级问题，请修复后重新提交：')}</div>
             ${result.findings.filter((f) => f.level === 'block').map((f) => `<div class="flex" style="padding:4px 0"><span style="color:var(--danger)">${icon('alert', 14)}</span><span class="fs-13">${esc(f.message)}</span></div>`).join('')}`,
           foot: `<button class="btn btn-primary" data-ok>${esc(rqI18n.t('知道了'))}</button>`,
         })
       } else {
         const warns = result.findings?.filter((f) => f.level === 'warn') ?? []
         openModal({
-          title: '已提交，等待审批',
+          title: rqI18n.t('已提交，等待审批'),
           body: warns.length
-            ? `<div class="form-hint" style="margin-bottom:8px">扫描发现风险提示（将要求安全加签）：</div>${warns.map((f) => `<div class="flex" style="padding:3px 0"><span style="color:var(--warn)">${icon('alert', 14)}</span><span class="fs-13">${esc(f.message)}</span></div>`).join('')}`
-            : `<div class="flex" style="gap:8px;padding:8px 0"><span style="color:var(--ok)">${icon('check', 16)}</span><span>扫描通过，进入领域审批环节。</span></div>`,
+            ? `<div class="form-hint" style="margin-bottom:8px">${rqI18n.t('扫描发现风险提示（将要求安全加签）：')}</div>${warns.map((f) => `<div class="flex" style="padding:3px 0"><span style="color:var(--warn)">${icon('alert', 14)}</span><span class="fs-13">${esc(f.message)}</span></div>`).join('')}`
+            : `<div class="flex" style="gap:8px;padding:8px 0"><span style="color:var(--ok)">${icon('check', 16)}</span><span>${rqI18n.t('扫描通过，进入领域审批环节。')}</span></div>`,
           foot: `<button class="btn btn-primary" data-ok>${esc(rqI18n.t('知道了'))}</button>`,
         })
       }
@@ -463,21 +463,21 @@ function openEditModal(skill, ctx, refresh) {
         ${icon('info', 15)}<span>${esc(rqI18n.t('直接更新市场展示信息，无需重新走审批；Skill 标识（slug）与已有版本保持不变。SKILL.md 内容变更请提交新版本。'))}</span>
       </div>
       <div class="form-grid">
-        ${field('名称', inputField('name', { value: skill.name }), { required: true })}
-        ${field('分类', selectField('category', ASSET_CATEGORIES.map((c) => ({ value: c, label: rqI18n.t(c) })), { value: ASSET_CATEGORIES.includes(skill.category) ? skill.category : '其他' }))}
-        ${field('作者 / 开发者名称', inputField('authorName', { value: skill.authorName }), { hint: '市场署名（列表与详情展示）；Skill 归属账号不变' })}
-        ${field('一句话简介', inputField('summary', { value: skill.summary }), { full: true })}
-        ${field('标签（逗号分隔）', inputField('tags', { value: (skill.tags ?? []).join(','), placeholder: '文档,自动化' }))}
-        ${field('适用模型（逗号分隔）', inputField('applicableModels', { value: (skill.applicableModels ?? []).join(',') }))}
-        ${field('依赖 Skill slug（逗号分隔）', inputField('deps', { value: (skill.deps ?? []).join(',') }), { hint: '安装该 Skill 时建议一并安装的前置 Skill' })}
-        ${field('可见性', selectField('visibility', [
-          { value: 'all', label: '全员可见' },
-          { value: 'orgs', label: '指定组织可见' },
+        ${field(rqI18n.t('名称'), inputField('name', { value: skill.name }), { required: true })}
+        ${field(rqI18n.t('分类'), selectField('category', ASSET_CATEGORIES.map((c) => ({ value: c, label: rqI18n.t(c) })), { value: ASSET_CATEGORIES.includes(skill.category) ? skill.category : rqI18n.t('其他') }))}
+        ${field(rqI18n.t('作者 / 开发者名称'), inputField('authorName', { value: skill.authorName }), { hint: rqI18n.t('市场署名（列表与详情展示）；Skill 归属账号不变') })}
+        ${field(rqI18n.t('一句话简介'), inputField('summary', { value: skill.summary }), { full: true })}
+        ${field(rqI18n.t('标签（逗号分隔）'), inputField('tags', { value: (skill.tags ?? []).join(','), placeholder: rqI18n.t('文档,自动化') }))}
+        ${field(rqI18n.t('适用模型（逗号分隔）'), inputField('applicableModels', { value: (skill.applicableModels ?? []).join(',') }))}
+        ${field(rqI18n.t('依赖 Skill slug（逗号分隔）'), inputField('deps', { value: (skill.deps ?? []).join(',') }), { hint: rqI18n.t('安装该 Skill 时建议一并安装的前置 Skill') })}
+        ${field(rqI18n.t('可见性'), selectField('visibility', [
+          { value: 'all', label: rqI18n.t('全员可见') },
+          { value: 'orgs', label: rqI18n.t('指定组织可见') },
         ], { value: skill.visibility === 'orgs' ? 'orgs' : 'all' }))}
-        ${field('目标组织 ID（逗号分隔）', inputField('targetOrgs', { value: (skill.targetOrgs ?? []).join(','), placeholder: 'org_xxx,org_yyy' }), { full: true, hint: '可见性为「指定组织」时必填；成员仅在其所属组织内可见该 Skill' })}
+        ${field(rqI18n.t('目标组织 ID（逗号分隔）'), inputField('targetOrgs', { value: (skill.targetOrgs ?? []).join(','), placeholder: 'org_xxx,org_yyy' }), { full: true, hint: rqI18n.t('可见性为「指定组织」时必填；成员仅在其所属组织内可见该 Skill') })}
       </div>
-      ${field('详细描述', textareaField('description', { value: skill.description || '', rows: 6, placeholder: '面向使用者的完整说明：能力边界、前置条件、使用示例…' }))}`,
-    foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>保存</button>',
+      ${field(rqI18n.t('详细描述'), textareaField('description', { value: skill.description || '', rows: 6, placeholder: rqI18n.t('面向使用者的完整说明：能力边界、前置条件、使用示例…') }))}`,
+    foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>保存</button>'),
   })
   const syncOrgVisibility = () => {
     const needOrg = modal.body.querySelector('[name="visibility"]')?.value === 'orgs'
@@ -525,11 +525,11 @@ function openReplacePackageModal(skill, ctx, refresh) {
       </div>
       ${pkg ? `
       <div class="desc-grid mb-14">
-        <div class="desc-item"><span class="k">当前包</span><span class="v">${pkg.storage === 'nas' ? `NAS · ${esc(pkg.path ?? '')}` : esc(rqI18n.t('平台本地'))}</span></div>
-        ${pkg.sizeBytes !== undefined ? `<div class="desc-item"><span class="k">大小</span><span class="v">${fmtBytes(pkg.sizeBytes)}</span></div>` : ''}
-        ${pkg.uploadedAt ? `<div class="desc-item"><span class="k">上传于</span><span class="v">${timeAgo(pkg.uploadedAt)}</span></div>` : ''}
+        <div class="desc-item"><span class="k">${rqI18n.t('当前包')}</span><span class="v">${pkg.storage === 'nas' ? `NAS · ${esc(pkg.path ?? '')}` : esc(rqI18n.t('平台本地'))}</span></div>
+        ${pkg.sizeBytes !== undefined ? `<div class="desc-item"><span class="k">${rqI18n.t('大小')}</span><span class="v">${fmtBytes(pkg.sizeBytes)}</span></div>` : ''}
+        ${pkg.uploadedAt ? `<div class="desc-item"><span class="k">${rqI18n.t('上传于')}</span><span class="v">${timeAgo(pkg.uploadedAt)}</span></div>` : ''}
       </div>` : ''}
-      ${field('skill.zip 包', '<input class="input" type="file" id="skill-repkg" accept=".zip,application/zip">', { required: true, hint: '须为合法 ZIP（PK 魔数），base64 后上限 32MB' })}`,
+      ${field(rqI18n.t('skill.zip 包'), '<input class="input" type="file" id="skill-repkg" accept=".zip,application/zip">', { required: true, hint: rqI18n.t('须为合法 ZIP（PK 魔数），base64 后上限 32MB') })}`,
     foot: `<button class="btn btn-default" data-cancel>${esc(rqI18n.t('取消'))}</button><button class="btn btn-primary" data-ok>${esc(rqI18n.t('上传并替换'))}</button>`,
   })
   modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
@@ -565,14 +565,14 @@ async function openStorageModal() {
   const { config, nasOptions } = data
   const canWrite = session.can('skill.storage.write')
   const modal = openModal({
-    title: 'Skill 包存储配置',
+    title: rqI18n.t('Skill 包存储配置'),
     body: `
       <div class="muted-box mb-14" style="display:flex;gap:8px">
-        ${icon('info', 15)}<span>决定 Skill 上架时 skill.zip 包的存放位置：<b>平台本地</b>（内联存储）或 <b>NAS</b>（上架时上传到指定 NAS 资产的 basePath 下）。</span>
+        ${icon('info', 15)}<span>${rqI18n.t('决定 Skill 上架时 skill.zip 包的存放位置：')}<b>${rqI18n.t('平台本地')}</b>${rqI18n.t('（内联存储）或')} <b>NAS</b>${rqI18n.t('（上架时上传到指定 NAS 资产的 basePath 下）。')}</span>
       </div>
       ${canWrite ? `
       <div class="form-item">
-        <label class="form-label">存储模式</label>
+        <label class="form-label">${rqI18n.t('存储模式')}</label>
         <div class="segmented" id="st-mode">
           <span class="segmented-item ${config.mode !== 'nas' ? 'active' : ''}" data-m="local">${esc(rqI18n.t('平台本地'))}</span>
           <span class="segmented-item ${config.mode === 'nas' ? 'active' : ''}" data-m="nas">NAS</span>
@@ -580,18 +580,18 @@ async function openStorageModal() {
       </div>
       <div id="st-nas-fields" style="${config.mode === 'nas' ? '' : 'display:none'}">
         ${nasOptions.length ? `
-          ${field('目标 NAS（仅已上线）', selectField('nasId', nasOptions.map((n) => ({ value: n.id, label: rqI18n.t('{name}（{slug} · 根路径 {path}）', { name: n.name, slug: n.slug, path: n.rootPath ?? '/' }) })), { value: config.nasId }), { required: true })}
-          ${field('basePath', inputField('basePath', { value: config.basePath ?? '/skillhub', placeholder: '/skillhub' }), { required: true, hint: '以 / 开头的绝对路径（如 /共享名/skillhub），上架时按 Skill 归档' })}
+          ${field(rqI18n.t('目标 NAS（仅已上线）'), selectField('nasId', nasOptions.map((n) => ({ value: n.id, label: rqI18n.t('{name}（{slug} · 根路径 {path}）', { name: n.name, slug: n.slug, path: n.rootPath ?? '/' }) })), { value: config.nasId }), { required: true })}
+          ${field('basePath', inputField('basePath', { value: config.basePath ?? '/skillhub', placeholder: '/skillhub' }), { required: true, hint: rqI18n.t('以 / 开头的绝对路径（如 /共享名/skillhub），上架时按 Skill 归档') })}
         ` : `<div class="muted-box" style="color:var(--warn)">${esc(rqI18n.t('暂无「已上线」的 NAS 资产可选：请先在「NAS 存储」页纳管并上线。'))}</div>`}
       </div>` : `
       <div class="desc-grid">
-        <div class="desc-item"><span class="k">当前模式</span><span class="v">${config.mode === 'nas' ? 'NAS' : '平台本地'}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('当前模式')}</span><span class="v">${config.mode === 'nas' ? 'NAS' : rqI18n.t('平台本地')}</span></div>
         ${config.mode === 'nas' ? `
-          <div class="desc-item"><span class="k">目标 NAS</span><span class="v mono">${esc(config.nasId ?? '—')}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('目标 NAS')}</span><span class="v mono">${esc(config.nasId ?? '—')}</span></div>
           <div class="desc-item"><span class="k">basePath</span><span class="v mono">${esc(config.basePath ?? '—')}</span></div>` : ''}
-        <div class="desc-item"><span class="k">最近更新</span><span class="v">${config.updatedAt ? `${timeAgo(config.updatedAt)} · ${esc(config.updatedBy ?? '')}` : '—'}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('最近更新')}</span><span class="v">${config.updatedAt ? `${timeAgo(config.updatedAt)} · ${esc(config.updatedBy ?? '')}` : '—'}</span></div>
       </div>
-      <div class="form-hint mt-8">你当前没有 skill.storage.write 权限，仅可查看。</div>`}`,
+      <div class="form-hint mt-8">${rqI18n.t('你当前没有 skill.storage.write 权限，仅可查看。')}</div>`}`,
     foot: canWrite
       ? `<button class="btn btn-default" data-cancel>${esc(rqI18n.t('取消'))}</button><button class="btn btn-primary" data-ok>${esc(rqI18n.t('保存'))}</button>`
       : `<button class="btn btn-primary" data-ok>${esc(rqI18n.t('关闭'))}</button>`,
@@ -684,7 +684,7 @@ function heatCard({ days, skills, maxCell }) {
     ? `<text x="${labelW + c * (cell + gap)}" y="${height - 3}" font-size="10" fill="var(--text-4)">${esc(day.slice(5))}</text>` : '').join('')
   return `
     <div class="card">
-      <div class="card-head"><span class="card-title">${icon('chart', 15)} 技能使用热力图</span><span class="card-sub">近 30 天 · 下载/安装计量（含历史流水回填）</span></div>
+      <div class="card-head"><span class="card-title">${icon('chart', 15)} ${rqI18n.t('技能使用热力图')}</span><span class="card-sub">${rqI18n.t('近 30 天 · 下载/安装计量（含历史流水回填）')}</span></div>
       <div class="card-body" style="padding-top:10px">
         <div style="overflow-x:auto">
           <svg width="${Math.max(width, 360)}" height="${height}" style="display:block">

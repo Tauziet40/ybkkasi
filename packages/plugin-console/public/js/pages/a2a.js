@@ -25,14 +25,14 @@ import { ASSET_CATEGORIES } from '../taxonomy.js'
 
 /** 任务八态（协议枚举保留 ASCII）→ 徽标色 + 中文伴随。 */
 const A2A_STATE_META = {
-  submitted: ['badge-info', '已受理'],
-  working: ['badge-brand', '执行中'],
-  input_required: ['badge-warn', '待补充输入'],
-  auth_required: ['badge-warn', '待授权审批'],
-  completed: ['badge-ok', '已完成'],
-  failed: ['badge-danger', '执行失败'],
-  canceled: ['badge-muted', '已取消'],
-  rejected: ['badge-danger', '已拒绝'],
+  submitted: ['badge-info', rqI18n.t('已受理')],
+  working: ['badge-brand', rqI18n.t('执行中')],
+  input_required: ['badge-warn', rqI18n.t('待补充输入')],
+  auth_required: ['badge-warn', rqI18n.t('待授权审批')],
+  completed: ['badge-ok', rqI18n.t('已完成')],
+  failed: ['badge-danger', rqI18n.t('执行失败')],
+  canceled: ['badge-muted', rqI18n.t('已取消')],
+  rejected: ['badge-danger', rqI18n.t('已拒绝')],
 }
 
 /** 任务终态（协议枚举保留 ASCII）：到达后停止抽屉轮询、隐藏取消入口。 */
@@ -45,33 +45,33 @@ const A2A_TERMINAL_STATES = new Set(Object.keys({
 
 /** 协作模式（A0-A3 协商矩阵输出）→ 中文伴随。 */
 const A2A_MODE_LABEL = {
-  single_turn: '单轮问答',
-  execute_confirm: '执行 · 人在环确认',
-  execute_report: '执行 · 事后报告',
-  negotiate: '双向协商',
-  rejected: '矩阵拒绝',
+  single_turn: rqI18n.t('单轮问答'),
+  execute_confirm: rqI18n.t('执行 · 人在环确认'),
+  execute_report: rqI18n.t('执行 · 事后报告'),
+  negotiate: rqI18n.t('双向协商'),
+  rejected: rqI18n.t('矩阵拒绝'),
 }
 
 /** 自治级别 → 中文伴随（A0 只读应答 / A1 受控执行 / A2 自主执行 / A3 协商自治）。 */
 const A2A_AUTONOMY_LABEL = {
-  A0: 'A0 · 只读应答',
-  A1: 'A1 · 受控执行',
-  A2: 'A2 · 自主执行',
-  A3: 'A3 · 协商自治',
+  A0: rqI18n.t('A0 · 只读应答'),
+  A1: rqI18n.t('A1 · 受控执行'),
+  A2: rqI18n.t('A2 · 自主执行'),
+  A3: rqI18n.t('A3 · 协商自治'),
 }
 
 /** 数据密级 → 中文伴随。 */
-const A2A_CLASS_LABEL = { public: '公开', internal: '内部', secret: '秘密' }
+const A2A_CLASS_LABEL = { public: rqI18n.t('公开'), internal: rqI18n.t('内部'), secret: rqI18n.t('秘密') }
 
 /** 协商状态 → 中文伴随。 */
-const A2A_NEGOTIATION_LABEL = { open: '协商中', accepted: '已达成', rejected: '已拒绝', expired: '已超限' }
+const A2A_NEGOTIATION_LABEL = { open: rqI18n.t('协商中'), accepted: rqI18n.t('已达成'), rejected: rqI18n.t('已拒绝'), expired: rqI18n.t('已超限') }
 
 /** 历史事件来源 / 类型 → 中文伴随。 */
-const A2A_HISTORY_FROM = { caller: '发起方', target: '目标员工', system: '系统' }
-const A2A_HISTORY_TYPE = { message: '消息', status: '状态', offer: '协商要约' }
+const A2A_HISTORY_FROM = { caller: rqI18n.t('发起方'), target: rqI18n.t('目标员工'), system: rqI18n.t('系统') }
+const A2A_HISTORY_TYPE = { message: rqI18n.t('消息'), status: rqI18n.t('状态'), offer: rqI18n.t('协商要约') }
 
 /** 验收结论徽标用词（统计口径，与按钮文案分键：按钮见 A2A_ACCEPT_ACTIONS）。 */
-const A2A_ACCEPTANCE_LABEL = { accepted: '验收通过', rejected: '验收驳回' }
+const A2A_ACCEPTANCE_LABEL = { accepted: rqI18n.t('验收通过'), rejected: rqI18n.t('验收驳回') }
 
 /**
  * 人工验收动作（decision 协议值 → 抽屉按钮与确认弹窗文案）：
@@ -79,20 +79,20 @@ const A2A_ACCEPTANCE_LABEL = { accepted: '验收通过', rejected: '验收驳回
  * 按钮文案用「通过验收 / 验收驳回」独立键，不与统计用词「验收通过」共用（Q-19）。
  */
 const A2A_ACCEPT_ACTIONS = {
-  accepted: { label: '通过验收', action: '确认通过', button: 'btn-primary', icon: 'check', hint: '确认该任务交付达到验收标准：结论与理由写入审计日志，任务归档为验收通过。' },
-  rejected: { label: '驳回验收', action: '确认驳回', button: 'btn-danger-ghost', icon: 'x', hint: '驳回该任务交付：结论与理由写入审计日志，由发起方跟进整改后重新发起协作。' },
+  accepted: { label: rqI18n.t('通过验收'), action: rqI18n.t('确认通过'), button: 'btn-primary', icon: 'check', hint: rqI18n.t('确认该任务交付达到验收标准：结论与理由写入审计日志，任务归档为验收通过。') },
+  rejected: { label: rqI18n.t('驳回验收'), action: rqI18n.t('确认驳回'), button: 'btn-danger-ghost', icon: 'x', hint: rqI18n.t('驳回该任务交付：结论与理由写入审计日志，由发起方跟进整改后重新发起协作。') },
 }
 
 /** 脱敏占位（后端 contentRedacted：仅持目录读权限的非发起方看不到正文）。 */
-const A2A_REDACTED_NOTE = '正文已按权限脱敏（需发起方、验收员或平台管理员权限）'
+const A2A_REDACTED_NOTE = rqI18n.t('正文已按权限脱敏（需发起方、验收员或平台管理员权限）')
 
 /** UHP 执行记录状态（协议枚举保留 ASCII）→ 徽标色 + 中文伴随。 */
 const UHP_STATUS_META = {
-  queued: ['badge-muted', '排队中'],
-  in_progress: ['badge-brand', '执行中'],
-  completed: ['badge-ok', '已完成'],
-  failed: ['badge-danger', '执行失败'],
-  canceled: ['badge-muted', '已取消'],
+  queued: ['badge-muted', rqI18n.t('排队中')],
+  in_progress: ['badge-brand', rqI18n.t('执行中')],
+  completed: ['badge-ok', rqI18n.t('已完成')],
+  failed: ['badge-danger', rqI18n.t('执行失败')],
+  canceled: ['badge-muted', rqI18n.t('已取消')],
 }
 
 /** 发起协作后的落点：跨 hash 重渲染传递，任务追踪渲染完成后打开该任务抽屉。 */
@@ -116,19 +116,19 @@ export async function renderA2a(content, params, ctx) {
   // 首次访问概念卡（与 Agent/Skill 页同款：协作协议对业务成员有门槛）
   maybeShowConceptCard(content, 'a2a', {
     icon: 'flow',
-    title: 'A2A 协作是什么？',
-    subtitle: 'A2A = 数字员工之间的协作协议：能力目录发现 → 协商定模式 → 执行 → 人工验收闭环。',
+    title: rqI18n.t('A2A 协作是什么？'),
+    subtitle: rqI18n.t('A2A = 数字员工之间的协作协议：能力目录发现 → 协商定模式 → 执行 → 人工验收闭环。'),
     points: [
-      '协作目录：在线员工的能力卡片（技能、自治级别、可承接密级），跨运行时统一发现。',
-      '任务追踪：每笔协作任务的八态推进全程留痕，协商要约与交付物可回溯。',
-      '验收闭环：任务完成 ≠ 业务闭环，人工验收通过才归档（验收不轻信自报）。',
+      rqI18n.t('协作目录：在线员工的能力卡片（技能、自治级别、可承接密级），跨运行时统一发现。'),
+      rqI18n.t('任务追踪：每笔协作任务的八态推进全程留痕，协商要约与交付物可回溯。'),
+      rqI18n.t('验收闭环：任务完成 ≠ 业务闭环，人工验收通过才归档（验收不轻信自报）。'),
     ],
   })
   content.innerHTML = `
     <div class="page-head">
       <div>
-        <div class="page-title">A2A 协作</div>
-        <div class="page-desc">数字员工跨运行时协作面：能力目录发现、协作任务全链路追踪（八态状态机 + 协商 + 人工验收）、履约与一致性巡检。</div>
+        <div class="page-title">${rqI18n.t('A2A 协作')}</div>
+        <div class="page-desc">${rqI18n.t('数字员工跨运行时协作面：能力目录发现、协作任务全链路追踪（八态状态机 + 协商 + 人工验收）、履约与一致性巡检。')}</div>
       </div>
       <div class="page-actions" id="a2a-page-actions"></div>
     </div>
@@ -158,18 +158,18 @@ async function renderDirectory() {
   const body = $('#a2a-body')
   body.innerHTML = `
     <div class="filter-bar">
-      <div class="search-input">${icon('search')}<input class="input" id="a2a-q" placeholder="搜索员工名称 / slug / 能力描述" style="width:230px"></div>
+      <div class="search-input">${icon('search')}<input class="input" id="a2a-q" placeholder="${rqI18n.t('搜索员工名称 / slug / 能力描述')}" style="width:230px"></div>
       <select class="select" id="a2a-category" style="width:130px">
         <option value="">${esc(rqI18n.t('全部分类'))}</option>
         ${ASSET_CATEGORIES.map((cat) => `<option value="${cat}">${esc(rqI18n.t(cat))}</option>`).join('')}
       </select>
       <select class="select" id="a2a-autonomy" style="width:150px">
-        <option value="">全部自治级别</option>
+        <option value="">${rqI18n.t('全部自治级别')}</option>
         ${Object.entries(A2A_AUTONOMY_LABEL).map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`).join('')}
       </select>
-      <select class="select" id="a2a-runtime" style="width:130px"><option value="">全部运行时</option></select>
+      <select class="select" id="a2a-runtime" style="width:130px"><option value="">${rqI18n.t('全部运行时')}</option></select>
       <select class="select" id="a2a-dataclass" style="width:160px">
-        <option value="">可承接任意密级</option>
+        <option value="">${rqI18n.t('可承接任意密级')}</option>
         ${Object.entries(A2A_CLASS_LABEL).map(([value, label]) => `<option value="${esc(value)}">${esc(rqI18n.t('可承接「{cls}」', { cls: rqI18n.t(label) }))}</option>`).join('')}
       </select>
     </div>
@@ -192,7 +192,7 @@ async function renderDirectory() {
     if (!holder) return
     holder.innerHTML = ''
     if (!agents.length) {
-      holder.appendChild(emptyState({ title: '没有匹配的数字员工', desc: '换个关键字或筛选条件试试；仅「已上线」员工会进入协作目录', icon: 'bot' }))
+      holder.appendChild(emptyState({ title: rqI18n.t('没有匹配的数字员工'), desc: rqI18n.t('换个关键字或筛选条件试试；仅「已上线」员工会进入协作目录'), icon: 'bot' }))
       return
     }
     // 运行时筛选项按当前目录出现过的运行时回填（仅首渲染填充一次）
@@ -220,17 +220,17 @@ async function renderDirectory() {
             </div>
             ${autonomyBadge(agent.autonomy)}
           </div>
-          <div class="res-desc" title="${esc(agent.description)}">${esc(agent.description || '（暂无能力描述）')}</div>
+          <div class="res-desc" title="${esc(agent.description)}">${esc(agent.description || rqI18n.t('（暂无能力描述）'))}</div>
           <div class="flex" style="gap:6px;flex-wrap:wrap;margin-top:10px;min-height:22px">
-            <span class="badge badge-brand no-dot">${esc(rqI18n.t(agent.category ?? '其他'))}</span>
+            <span class="badge badge-brand no-dot">${esc(rqI18n.t(agent.category ?? rqI18n.t('其他')))}</span>
             ${(agent.skills ?? []).slice(0, 4).map((skill) => `<span class="badge badge-muted no-dot" title="${esc(skill.description ?? '')}">${esc(skill.name)}</span>`).join('')}
             ${skillCount > 4 ? `<span class="fs-11 text-4" style="align-self:center">${esc(rqI18n.t('+{n} 项', { n: skillCount - 4 }))}</span>` : ''}
             ${skillCount === 0 ? `<span class="fs-11 text-4">${esc(rqI18n.t('暂未声明技能'))}</span>` : ''}
           </div>
           <div class="res-foot">
-            <span class="metric" title="运行时">${icon('server', 13)}${esc(agent.runtime)}</span>
-            <span class="metric" title="密级天花板（可承接的最高任务密级）">${icon('shield', 13)}${esc(rqI18n.t(A2A_CLASS_LABEL[agent.dataClassCeiling] ?? agent.dataClassCeiling))}</span>
-            <span class="metric" title="技能数">${icon('zap', 13)}${skillCount}</span>
+            <span class="metric" title="${rqI18n.t('运行时')}">${icon('server', 13)}${esc(agent.runtime)}</span>
+            <span class="metric" title="${rqI18n.t('密级天花板（可承接的最高任务密级）')}">${icon('shield', 13)}${esc(rqI18n.t(A2A_CLASS_LABEL[agent.dataClassCeiling] ?? agent.dataClassCeiling))}</span>
+            <span class="metric" title="${rqI18n.t('技能数')}">${icon('zap', 13)}${skillCount}</span>
             <span style="margin-left:auto;color:var(--brand-500)">${esc(rqI18n.t('详情 →'))}</span>
           </div>
         </div>`)
@@ -257,16 +257,16 @@ function openAgentDrawer(agent) {
     body: `
       <div class="flex mb-8" style="gap:8px;flex-wrap:wrap;align-items:center">
         ${autonomyBadge(agent.autonomy)}
-        <span class="badge badge-brand no-dot">${esc(rqI18n.t(agent.category ?? '其他'))}</span>
-        <span class="badge badge-info no-dot" title="可承接的最高任务密级">${esc(rqI18n.t('密级天花板'))} · ${esc(rqI18n.t(A2A_CLASS_LABEL[agent.dataClassCeiling] ?? agent.dataClassCeiling))}</span>
+        <span class="badge badge-brand no-dot">${esc(rqI18n.t(agent.category ?? rqI18n.t('其他')))}</span>
+        <span class="badge badge-info no-dot" title="${rqI18n.t('可承接的最高任务密级')}">${esc(rqI18n.t('密级天花板'))} · ${esc(rqI18n.t(A2A_CLASS_LABEL[agent.dataClassCeiling] ?? agent.dataClassCeiling))}</span>
         <span class="badge badge-muted no-dot mono">${esc(agent.runtime)}</span>
       </div>
-      <div class="fs-13" style="line-height:1.7;color:var(--text-2)">${esc(agent.description || '（暂无能力描述）')}</div>
+      <div class="fs-13" style="line-height:1.7;color:var(--text-2)">${esc(agent.description || rqI18n.t('（暂无能力描述）'))}</div>
       <div class="desc-grid mt-14 mb-14">
-        <div class="desc-item"><span class="k">员工 ID</span><span class="v mono">${esc(agent.agentId)}</span></div>
-        <div class="desc-item"><span class="k">计量主体</span><span class="v mono">${esc(agent.meteringSubject ?? '—')}</span></div>
-        <div class="desc-item"><span class="k">能力卡片</span><span class="v mono">${esc(agent.url ?? '—')}</span></div>
-        <div class="desc-item"><span class="k">卡片更新</span><span class="v">${timeAgo(agent.updatedAt)}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('员工 ID')}</span><span class="v mono">${esc(agent.agentId)}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('计量主体')}</span><span class="v mono">${esc(agent.meteringSubject ?? '—')}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('能力卡片')}</span><span class="v mono">${esc(agent.url ?? '—')}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('卡片更新')}</span><span class="v">${timeAgo(agent.updatedAt)}</span></div>
       </div>
       <div class="micro-label mb-8">${esc(rqI18n.t('技能清单（{n}）', { n: (agent.skills ?? []).length }))}</div>
       ${(agent.skills ?? []).map((skill) => `
@@ -277,7 +277,7 @@ function openAgentDrawer(agent) {
           </div>
           ${skill.description ? `<div class="fs-12 text-3" style="margin-top:4px">${esc(skill.description)}</div>` : ''}
           ${(skill.tags ?? []).length ? `<div class="flex" style="gap:6px;flex-wrap:wrap;margin-top:6px">${skill.tags.map((tag) => `<span class="badge badge-muted no-dot">${esc(tag)}</span>`).join('')}</div>` : ''}
-        </div>`).join('') || emptyHint('该员工暂未声明技能（卡片技能面为空）')}
+        </div>`).join('') || emptyHint(rqI18n.t('该员工暂未声明技能（卡片技能面为空）'))}
       ${canInvoke ? invokeFormHtml(agent) : `
       <div class="muted-box mt-14" style="display:flex;gap:8px">
         ${icon('info', 15)}
@@ -294,7 +294,7 @@ function invokeFormHtml(agent) {
       <div class="micro-label mb-8">${icon('send', 13)} ${esc(rqI18n.t('发起协作'))}</div>
       <div class="form-item">
         <label class="form-label">${esc(rqI18n.t('协作消息'))}<span class="req">*</span></label>
-        <textarea class="form-control" id="a2a-invoke-message" rows="3" placeholder="描述本次协作要完成的事项（将作为任务消息发送给对方员工）"></textarea>
+        <textarea class="form-control" id="a2a-invoke-message" rows="3" placeholder="${rqI18n.t('描述本次协作要完成的事项（将作为任务消息发送给对方员工）')}"></textarea>
       </div>
       <div class="form-item">
         <label class="form-label">${esc(rqI18n.t('数据密级'))}</label>
@@ -305,7 +305,7 @@ function invokeFormHtml(agent) {
       </div>
       <div class="form-item" style="margin-bottom:0">
         <label class="form-label">${esc(rqI18n.t('协作链 ID（可选）'))}</label>
-        <input class="input" id="a2a-invoke-context" placeholder="留空自动生成；填写同一 ID 可归入同一协作会话">
+        <input class="input" id="a2a-invoke-context" placeholder="${rqI18n.t('留空自动生成；填写同一 ID 可归入同一协作会话')}">
       </div>
       <button class="btn btn-primary" id="a2a-invoke-submit" style="margin-top:12px">${icon('send', 14)}${esc(rqI18n.t('发起协作'))}</button>
     </div>`
@@ -365,9 +365,9 @@ async function renderTasks(params) {
   body.innerHTML = `
     <div class="filter-bar">
       <div class="grow" id="a2a-state-chips"></div>
-      ${contextFilter ? `<span class="badge badge-info no-dot" style="cursor:pointer" id="a2a-context-clear" title="点击清除协作会话过滤">${esc(rqI18n.t('协作会话'))} · ${esc(shortTaskId(contextFilter))} ✕</span>` : ''}
+      ${contextFilter ? `<span class="badge badge-info no-dot" style="cursor:pointer" id="a2a-context-clear" title="${rqI18n.t('点击清除协作会话过滤')}">${esc(rqI18n.t('协作会话'))} · ${esc(shortTaskId(contextFilter))} ✕</span>` : ''}
       <select class="select" id="a2a-agent-filter" style="width:190px">
-        <option value="">全部目标员工</option>
+        <option value="">${rqI18n.t('全部目标员工')}</option>
         ${agents.map((agent) => `<option value="${esc(agent.agentId)}">${esc(agent.name)}（${esc(agent.slug)}）</option>`).join('')}
       </select>
     </div>
@@ -390,26 +390,26 @@ async function renderTasks(params) {
     holder.innerHTML = ''
     const table = renderTable({
       columns: [
-        { title: '任务', width: 130, render: (task) => `<span class="mono fs-12" title="${esc(task.taskId)}">${esc(shortTaskId(task.taskId))}</span>` },
-        { title: '目标员工', render: (task) => `<div class="col-strong">${esc(task.agentSlug)}</div><div class="col-sub mono">${esc(shortTaskId(task.contextId))}</div>` },
-        { title: '状态', width: 108, render: (task) => stateBadge(task.state) },
-        { title: '模式', width: 140, render: (task) => `<span class="fs-12">${esc(rqI18n.t(A2A_MODE_LABEL[task.mode] ?? task.mode))}</span>` },
-        { title: '密级', width: 64, render: (task) => `<span class="fs-12">${esc(rqI18n.t(A2A_CLASS_LABEL[task.dataClass] ?? task.dataClass))}</span>` },
-        { title: 'Token 消耗', width: 110, render: (task) => `<span class="mono fs-12 text-3" title="输入 / 输出">${fmtNum(task.inputTokens ?? 0)} / ${fmtNum(task.outputTokens ?? 0)}</span>` },
-        { title: '发起方', width: 130, render: (task) => `<span class="mono fs-12 text-3">${esc(task.callerSubject)}</span>` },
-        { title: '验收', width: 90, render: (task) => task.acceptance ? acceptanceBadge(task.acceptance.status) : '<span class="text-4 fs-12">—</span>' },
-        { title: '创建', width: 96, render: (task) => `<span class="fs-12 text-3">${timeAgo(task.createdAt)}</span>` },
+        { title: rqI18n.t('任务'), width: 130, render: (task) => `<span class="mono fs-12" title="${esc(task.taskId)}">${esc(shortTaskId(task.taskId))}</span>` },
+        { title: rqI18n.t('目标员工'), render: (task) => `<div class="col-strong">${esc(task.agentSlug)}</div><div class="col-sub mono">${esc(shortTaskId(task.contextId))}</div>` },
+        { title: rqI18n.t('状态'), width: 108, render: (task) => stateBadge(task.state) },
+        { title: rqI18n.t('模式'), width: 140, render: (task) => `<span class="fs-12">${esc(rqI18n.t(A2A_MODE_LABEL[task.mode] ?? task.mode))}</span>` },
+        { title: rqI18n.t('密级'), width: 64, render: (task) => `<span class="fs-12">${esc(rqI18n.t(A2A_CLASS_LABEL[task.dataClass] ?? task.dataClass))}</span>` },
+        { title: rqI18n.t('Token 消耗'), width: 110, render: (task) => `<span class="mono fs-12 text-3" title="${rqI18n.t('输入 / 输出')}">${fmtNum(task.inputTokens ?? 0)} / ${fmtNum(task.outputTokens ?? 0)}</span>` },
+        { title: rqI18n.t('发起方'), width: 130, render: (task) => `<span class="mono fs-12 text-3">${esc(task.callerSubject)}</span>` },
+        { title: rqI18n.t('验收'), width: 90, render: (task) => task.acceptance ? acceptanceBadge(task.acceptance.status) : '<span class="text-4 fs-12">—</span>' },
+        { title: rqI18n.t('创建'), width: 96, render: (task) => `<span class="fs-12 text-3">${timeAgo(task.createdAt)}</span>` },
       ],
       rows: tasks,
       rowKey: (task) => task.taskId,
       onRowClick: (taskId) => openTaskDrawer(taskId, refresh),
-      empty: '暂无协作任务（任务经 A2A 端点发起后在此追踪）',
+      empty: rqI18n.t('暂无协作任务（任务经 A2A 端点发起后在此追踪）'),
     })
     holder.appendChild(table)
   }
 
   $('#a2a-state-chips').appendChild(chipRow(
-    [{ value: '', label: '全部' }, ...Object.entries(A2A_STATE_META).map(([value, meta]) => ({ value, label: meta[1] }))],
+    [{ value: '', label: rqI18n.t('全部') }, ...Object.entries(A2A_STATE_META).map(([value, meta]) => ({ value, label: meta[1] }))],
     state.state,
     (value) => { state.state = value; void refresh() },
   ))
@@ -467,24 +467,24 @@ async function openTaskDrawer(taskId, onChanged) {
       </div>
       ${task.stateReason ? `<div class="muted-box mb-14" style="display:flex;gap:8px">${icon('info', 15)}<span><b>${esc(rqI18n.t('状态说明'))}</b> · ${esc(task.stateReason)}</span></div>` : ''}
       <div class="desc-grid mb-14">
-        <div class="desc-item"><span class="k">任务 ID</span><span class="v mono">${esc(task.taskId)}</span></div>
-        <div class="desc-item"><span class="k">协作会话</span><span class="v mono">${esc(task.contextId)}</span></div>
-        <div class="desc-item"><span class="k">目标员工</span><span class="v">${esc(task.agentSlug)}</span></div>
-        <div class="desc-item"><span class="k">发起方</span><span class="v mono">${esc(task.callerSubject)}${task.onBehalfUser ? ` <span class="fs-11 text-3" style="font-family:var(--font)">（${esc(rqI18n.t('代表用户'))} ${esc(task.onBehalfUser)}）</span>` : ''}</span></div>
-        <div class="desc-item"><span class="k">自治级别</span><span class="v">${esc(rqI18n.t(A2A_AUTONOMY_LABEL[task.callerAutonomy] ?? task.callerAutonomy))} → ${esc(rqI18n.t(A2A_AUTONOMY_LABEL[task.targetAutonomy] ?? task.targetAutonomy))}</span></div>
-        <div class="desc-item"><span class="k">模型 / 尝试</span><span class="v">${esc(task.model || '—')} · ${esc(rqI18n.t('{n} 次', { n: task.attempts ?? 0 }))}</span></div>
-        <div class="desc-item"><span class="k">Token 消耗</span><span class="v mono">${fmtNum(task.inputTokens ?? 0)} ${esc(rqI18n.t('入'))} / ${fmtNum(task.outputTokens ?? 0)} ${esc(rqI18n.t('出'))}</span></div>
-        ${task.approvalId ? `<div class="desc-item"><span class="k">关联审批工单</span><span class="v mono">${esc(task.approvalId)}</span></div>` : ''}
-        <div class="desc-item"><span class="k">创建时间</span><span class="v">${timeAgo(task.createdAt)}</span></div>
-        ${task.startedAt ? `<div class="desc-item"><span class="k">开始执行</span><span class="v">${timeAgo(task.startedAt)}</span></div>` : ''}
-        ${task.finishedAt ? `<div class="desc-item"><span class="k">到达终态</span><span class="v">${timeAgo(task.finishedAt)}</span></div>` : ''}
+        <div class="desc-item"><span class="k">${rqI18n.t('任务 ID')}</span><span class="v mono">${esc(task.taskId)}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('协作会话')}</span><span class="v mono">${esc(task.contextId)}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('目标员工')}</span><span class="v">${esc(task.agentSlug)}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('发起方')}</span><span class="v mono">${esc(task.callerSubject)}${task.onBehalfUser ? ` <span class="fs-11 text-3" style="font-family:var(--font)">（${esc(rqI18n.t('代表用户'))} ${esc(task.onBehalfUser)}）</span>` : ''}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('自治级别')}</span><span class="v">${esc(rqI18n.t(A2A_AUTONOMY_LABEL[task.callerAutonomy] ?? task.callerAutonomy))} → ${esc(rqI18n.t(A2A_AUTONOMY_LABEL[task.targetAutonomy] ?? task.targetAutonomy))}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('模型 / 尝试')}</span><span class="v">${esc(task.model || '—')} · ${esc(rqI18n.t('{n} 次', { n: task.attempts ?? 0 }))}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('Token 消耗')}</span><span class="v mono">${fmtNum(task.inputTokens ?? 0)} ${esc(rqI18n.t('入'))} / ${fmtNum(task.outputTokens ?? 0)} ${esc(rqI18n.t('出'))}</span></div>
+        ${task.approvalId ? `<div class="desc-item"><span class="k">${rqI18n.t('关联审批工单')}</span><span class="v mono">${esc(task.approvalId)}</span></div>` : ''}
+        <div class="desc-item"><span class="k">${rqI18n.t('创建时间')}</span><span class="v">${timeAgo(task.createdAt)}</span></div>
+        ${task.startedAt ? `<div class="desc-item"><span class="k">${rqI18n.t('开始执行')}</span><span class="v">${timeAgo(task.startedAt)}</span></div>` : ''}
+        ${task.finishedAt ? `<div class="desc-item"><span class="k">${rqI18n.t('到达终态')}</span><span class="v">${timeAgo(task.finishedAt)}</span></div>` : ''}
       </div>
       <div class="micro-label mb-8">${esc(rqI18n.t('任务消息'))}</div>
       ${messageBlock(task)}
       ${negotiationSection(task)}
       ${artifactsSection(task)}
       <div class="micro-label mb-8">${esc(rqI18n.t('历史时间线'))}</div>
-      ${(task.history ?? []).length ? `<div class="timeline mb-14">${[...task.history].reverse().map((entry) => historyItem(entry, task)).join('')}</div>` : emptyHint('暂无历史事件')}
+      ${(task.history ?? []).length ? `<div class="timeline mb-14">${[...task.history].reverse().map((entry) => historyItem(entry, task)).join('')}</div>` : emptyHint(rqI18n.t('暂无历史事件'))}
       <div class="micro-label mb-8">${esc(rqI18n.t('交付验收'))}</div>
       ${acceptanceSection(task)}`
 
@@ -598,24 +598,24 @@ function messageBlock(task) {
   if (task.contentRedacted) {
     return `<div class="muted-box mb-14" style="display:flex;gap:8px">${icon('lock', 15)}<span class="fs-12 text-3">${esc(rqI18n.t(A2A_REDACTED_NOTE))}</span></div>`
   }
-  return `<div class="code-block mb-14" style="max-height:160px">${esc('（空）')}</div>`
+  return `<div class="code-block mb-14" style="max-height:160px">${esc(rqI18n.t('（空）'))}</div>`
 }
 
 /** 验收确认弹窗：decision 由抽屉按钮注入，理由必填（护栏要求），提交后刷新列表。 */
 function openAcceptanceModal(task, decision, drawer, onChanged) {
   const meta = A2A_ACCEPT_ACTIONS[decision] ?? {}
   const modal = openModal({
-    titleHtml: `${esc(rqI18n.t(meta.label ?? '交付验收'))} · <span class="mono">${esc(shortTaskId(task.taskId))}</span>`,
+    titleHtml: `${esc(rqI18n.t(meta.label ?? rqI18n.t('交付验收')))} · <span class="mono">${esc(shortTaskId(task.taskId))}</span>`,
     body: `
       <div class="muted-box mb-14" style="display:flex;gap:8px">
         ${icon('info', 15)}<span class="fs-13">${esc(rqI18n.t(meta.hint ?? ''))}</span>
       </div>
       <div class="form-item" style="margin-bottom:0">
         <label class="form-label">${esc(rqI18n.t('验收理由'))}<span class="req">*</span></label>
-        <textarea class="form-control" id="a2a-accept-reason" rows="3" placeholder="验收结论与依据（交付物核验情况、业务影响…），将写入审计日志"></textarea>
+        <textarea class="form-control" id="a2a-accept-reason" rows="3" placeholder="${rqI18n.t('验收结论与依据（交付物核验情况、业务影响…），将写入审计日志')}"></textarea>
         <div class="form-hint">${esc(rqI18n.t('验收结论是任务归档口径：验收不轻信员工自报，由人做最终判断'))}</div>
       </div>`,
-    foot: `<button class="btn btn-default" data-cancel>${esc(rqI18n.t('取消'))}</button><button class="btn ${esc(meta.button ?? 'btn-primary')}" data-ok>${esc(rqI18n.t(meta.action ?? '提交'))}</button>`,
+    foot: `<button class="btn btn-default" data-cancel>${esc(rqI18n.t('取消'))}</button><button class="btn ${esc(meta.button ?? 'btn-primary')}" data-ok>${esc(rqI18n.t(meta.action ?? rqI18n.t('提交')))}</button>`,
   })
   modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
   modal.el.querySelector('[data-ok]').onclick = async (e) => {
@@ -647,7 +647,7 @@ function openCancelModal(task, reload, onChanged) {
       </div>
       <div class="form-item" style="margin-bottom:0">
         <label class="form-label">${esc(rqI18n.t('取消理由'))}<span class="req">*</span></label>
-        <textarea class="form-control" id="a2a-cancel-reason" rows="3" placeholder="说明取消原因（将写入审计日志）"></textarea>
+        <textarea class="form-control" id="a2a-cancel-reason" rows="3" placeholder="${rqI18n.t('说明取消原因（将写入审计日志）')}"></textarea>
       </div>`,
     foot: `<button class="btn btn-default" data-cancel>${esc(rqI18n.t('取消'))}</button><button class="btn btn-danger" data-ok>${esc(rqI18n.t('确认取消'))}</button>`,
   })
@@ -702,27 +702,27 @@ async function renderFulfillment() {
   holder.innerHTML = ''
   holder.appendChild(renderTable({
     columns: [
-      { title: '数字员工', render: (row) => `<div class="col-strong">${esc(row.agentName)}</div><div class="col-sub mono">${esc(row.agentSlug)}</div>` },
-      { title: '接收', width: 70, render: (row) => `<span class="tnum">${fmtNum(row.received)}</span>` },
-      { title: '完成', width: 70, render: (row) => `<span class="tnum" style="color:${row.completed ? 'var(--ok)' : 'inherit'}">${fmtNum(row.completed)}</span>` },
-      { title: '失败', width: 70, render: (row) => `<span class="tnum" style="color:${row.failed ? 'var(--danger)' : 'inherit'}">${fmtNum(row.failed)}</span>` },
-      { title: '中断', width: 70, render: (row) => `<span class="tnum" title="待补充输入 + 待授权审批">${fmtNum(row.interrupted)}</span>` },
-      { title: '取消/驳回', width: 90, render: (row) => `<span class="tnum text-3">${fmtNum(row.canceled)} / ${fmtNum(row.rejected)}</span>` },
+      { title: rqI18n.t('数字员工'), render: (row) => `<div class="col-strong">${esc(row.agentName)}</div><div class="col-sub mono">${esc(row.agentSlug)}</div>` },
+      { title: rqI18n.t('接收'), width: 70, render: (row) => `<span class="tnum">${fmtNum(row.received)}</span>` },
+      { title: rqI18n.t('完成'), width: 70, render: (row) => `<span class="tnum" style="color:${row.completed ? 'var(--ok)' : 'inherit'}">${fmtNum(row.completed)}</span>` },
+      { title: rqI18n.t('失败'), width: 70, render: (row) => `<span class="tnum" style="color:${row.failed ? 'var(--danger)' : 'inherit'}">${fmtNum(row.failed)}</span>` },
+      { title: rqI18n.t('中断'), width: 70, render: (row) => `<span class="tnum" title="${rqI18n.t('待补充输入 + 待授权审批')}">${fmtNum(row.interrupted)}</span>` },
+      { title: rqI18n.t('取消/驳回'), width: 90, render: (row) => `<span class="tnum text-3">${fmtNum(row.canceled)} / ${fmtNum(row.rejected)}</span>` },
       { title: rqI18n.t('完成率'), width: 84, render: (row) => `<span class="tnum">${fmtPct(row.completionRate)}</span>` },
       {
-        title: '验收',
+        title: rqI18n.t('验收'),
         width: 118,
         render: (row) => `
           <span class="tnum" title="${esc(rqI18n.t('验收通过 {a} · 验收驳回 {b}', { a: fmtNum(row.acceptanceAccepted), b: fmtNum(row.acceptanceRejected) }))}">${fmtPct(row.acceptancePassRate)}</span>
           <div class="col-sub">${esc(rqI18n.t('{a} 过 / {b} 驳', { a: fmtNum(row.acceptanceAccepted), b: fmtNum(row.acceptanceRejected) }))}</div>`,
       },
-      { title: '平均耗时', width: 96, render: (row) => `<span class="tnum fs-12">${fmtDuration(row.avgDurationMs)}</span>` },
-      { title: 'P95 耗时', width: 96, render: (row) => `<span class="tnum fs-12">${fmtDuration(row.p95DurationMs)}</span>` },
-      { title: 'Token 消耗', width: 116, render: (row) => `<span class="mono fs-12 text-3" title="输入 / 输出">${fmtNum(row.inputTokens ?? 0)} / ${fmtNum(row.outputTokens ?? 0)}</span>` },
+      { title: rqI18n.t('平均耗时'), width: 96, render: (row) => `<span class="tnum fs-12">${fmtDuration(row.avgDurationMs)}</span>` },
+      { title: rqI18n.t('P95 耗时'), width: 96, render: (row) => `<span class="tnum fs-12">${fmtDuration(row.p95DurationMs)}</span>` },
+      { title: rqI18n.t('Token 消耗'), width: 116, render: (row) => `<span class="mono fs-12 text-3" title="${rqI18n.t('输入 / 输出')}">${fmtNum(row.inputTokens ?? 0)} / ${fmtNum(row.outputTokens ?? 0)}</span>` },
     ],
     rows: fulfillment,
     rowKey: (row) => row.agentId,
-    empty: '暂无协作履约数据（协作任务产生后自动聚合）',
+    empty: rqI18n.t('暂无协作履约数据（协作任务产生后自动聚合）'),
   }))
   renderPatrol($('#a2a-patrol'), patrols)
   if (collab) bindCollabCostCard(collab)
@@ -766,22 +766,22 @@ function bindCollabCostCard(collab) {
   if (!holder) return
   const rows = collab.top ?? []
   if (!rows.length) {
-    holder.innerHTML = emptyHint('暂无协作链计量数据（协作任务产生计量事件后自动聚合）')
+    holder.innerHTML = emptyHint(rqI18n.t('暂无协作链计量数据（协作任务产生计量事件后自动聚合）'))
     return
   }
   const yuan = (cents) => (Number(cents) || 0) / 100
   const table = renderTable({
     columns: [
-      { title: '协作会话', render: (row) => `<span class="mono fs-12" title="${esc(row.contextId)}">${esc(shortTaskId(row.contextId))}</span>` },
-      { title: '事件数', width: 90, render: (row) => `<span class="tnum">${fmtNum(row.events)}</span>` },
-      { title: 'Token 消耗', width: 120, render: (row) => `<span class="mono fs-12 text-3">${fmtNum(row.tokens ?? 0)}</span>` },
-      { title: '成本参考', width: 110, render: (row) => `<span class="tnum fs-12" title="${esc(rqI18n.t('计量 {a} · 计费 {b}（分）', { a: fmtNum(row.cost_cents ?? 0), b: fmtNum(row.charge_cents ?? 0) }))}">${fmtCost(yuan(row.cost_cents))}</span>` },
-      { title: '最近活动', width: 110, render: (row) => `<span class="fs-12 text-3">${timeAgo(row.lastAt)}</span>` },
+      { title: rqI18n.t('协作会话'), render: (row) => `<span class="mono fs-12" title="${esc(row.contextId)}">${esc(shortTaskId(row.contextId))}</span>` },
+      { title: rqI18n.t('事件数'), width: 90, render: (row) => `<span class="tnum">${fmtNum(row.events)}</span>` },
+      { title: rqI18n.t('Token 消耗'), width: 120, render: (row) => `<span class="mono fs-12 text-3">${fmtNum(row.tokens ?? 0)}</span>` },
+      { title: rqI18n.t('成本参考'), width: 110, render: (row) => `<span class="tnum fs-12" title="${esc(rqI18n.t('计量 {a} · 计费 {b}（分）', { a: fmtNum(row.cost_cents ?? 0), b: fmtNum(row.charge_cents ?? 0) }))}">${fmtCost(yuan(row.cost_cents))}</span>` },
+      { title: rqI18n.t('最近活动'), width: 110, render: (row) => `<span class="fs-12 text-3">${timeAgo(row.lastAt)}</span>` },
     ],
     rows,
     rowKey: (row) => row.contextId,
     onRowClick: (contextId) => { location.hash = `#/a2a?tab=tasks&context=${encodeURIComponent(contextId)}` },
-    empty: '暂无协作链计量数据（协作任务产生计量事件后自动聚合）',
+    empty: rqI18n.t('暂无协作链计量数据（协作任务产生计量事件后自动聚合）'),
   })
   holder.innerHTML = ''
   holder.appendChild(table)
@@ -814,7 +814,7 @@ function renderPatrol(holder, patrols) {
                 <div class="flex fs-12" style="padding:3px 0;gap:6px"><span style="color:var(--warn)">${icon('alert', 13)}</span><span>${esc(line)}</span></div>`).join('')}
             </div>`).join('')}
           ${patrols.length > 1 ? `<div class="fs-11 text-4 mt-8">${esc(rqI18n.t('已保留最近 {n} 份巡检报告，此处展示最新一份。', { n: patrols.length }))}</div>` : ''}
-        ` : emptyHint('暂无巡检报告（例行巡检按平台巡检周期执行后在此汇总）')}
+        ` : emptyHint(rqI18n.t('暂无巡检报告（例行巡检按平台巡检周期执行后在此汇总）'))}
       </div>
     </div>`
 }
@@ -848,7 +848,7 @@ async function renderRules() {
     const holder = $('#a2a-rules-body')
     if (holder) {
       holder.innerHTML = ''
-      holder.appendChild(emptyState({ title: '审批规则加载失败', desc: error.message, icon: 'fileCheck' }))
+      holder.appendChild(emptyState({ title: rqI18n.t('审批规则加载失败'), desc: error.message, icon: 'fileCheck' }))
     }
     return
   }
@@ -860,27 +860,27 @@ async function renderRules() {
     holder.innerHTML = ''
     const table = renderTable({
       columns: [
-        { title: '规则名称', render: (rule) => `<div class="col-strong">${esc(rule.name)}</div>` },
-        { title: '关键词匹配', render: (rule) => rule.matchKeyword ? `<span class="mono fs-12">${esc(rule.matchKeyword)}</span>` : '<span class="text-4 fs-12">—</span>' },
+        { title: rqI18n.t('规则名称'), render: (rule) => `<div class="col-strong">${esc(rule.name)}</div>` },
+        { title: rqI18n.t('关键词匹配'), render: (rule) => rule.matchKeyword ? `<span class="mono fs-12">${esc(rule.matchKeyword)}</span>` : '<span class="text-4 fs-12">—</span>' },
         {
-          title: '密级阈值',
+          title: rqI18n.t('密级阈值'),
           width: 120,
           render: (rule) => rule.matchDataClassAtLeast
             ? `<span class="fs-12">${esc(rqI18n.t(A2A_RULE_CLASS_LABEL[rule.matchDataClassAtLeast] ?? rule.matchDataClassAtLeast))}</span>`
             : '<span class="text-4 fs-12">—</span>',
         },
-        { title: '状态', width: 84, render: (rule) => `<span class="badge ${rule.enabled ? 'badge-ok' : 'badge-muted'} no-dot">${esc(rqI18n.t(rule.enabled ? '启用' : '停用'))}</span>` },
-        { title: '创建人', width: 140, render: (rule) => `<span class="mono fs-12 text-3">${esc(rule.createdBy ?? '—')}</span>` },
-        { title: '创建', width: 96, render: (rule) => `<span class="fs-12 text-3">${timeAgo(rule.createdAt)}</span>` },
+        { title: rqI18n.t('状态'), width: 84, render: (rule) => `<span class="badge ${rule.enabled ? 'badge-ok' : 'badge-muted'} no-dot">${esc(rqI18n.t(rule.enabled ? rqI18n.t('启用') : rqI18n.t('停用')))}</span>` },
+        { title: rqI18n.t('创建人'), width: 140, render: (rule) => `<span class="mono fs-12 text-3">${esc(rule.createdBy ?? '—')}</span>` },
+        { title: rqI18n.t('创建'), width: 96, render: (rule) => `<span class="fs-12 text-3">${timeAgo(rule.createdAt)}</span>` },
         ...(canAdmin ? [{
-          title: '操作',
+          title: rqI18n.t('操作'),
           width: 80,
           render: (rule) => `<button class="btn btn-danger-ghost btn-sm" data-del="${esc(rule.id)}" data-name="${esc(rule.name)}">${icon('trash', 13)}${esc(rqI18n.t('删除'))}</button>`,
         }] : []),
       ],
       rows: list,
       rowKey: (rule) => rule.id,
-      empty: '暂无审批规则（命中规则的任务将进入人工审批）',
+      empty: rqI18n.t('暂无审批规则（命中规则的任务将进入人工审批）'),
     })
     holder.appendChild(table)
     holder.querySelectorAll('[data-del]').forEach((btn) => {
@@ -890,7 +890,7 @@ async function renderRules() {
 }
 
 /** 密级阈值展示（规则命中口径：任务密级达到阈值即命中）。 */
-const A2A_RULE_CLASS_LABEL = { internal: '内部及以上', secret: '秘密及以上' }
+const A2A_RULE_CLASS_LABEL = { internal: rqI18n.t('内部及以上'), secret: rqI18n.t('秘密及以上') }
 
 /** 新增审批规则弹窗（a2a.admin）：名称必填，关键词 / 密级阈值至少一个匹配条件。 */
 function openRuleModal(onCreated) {
@@ -899,11 +899,11 @@ function openRuleModal(onCreated) {
     body: `
       <div class="form-item">
         <label class="form-label">${esc(rqI18n.t('规则名称'))}<span class="req">*</span></label>
-        <input class="input" id="a2a-rule-name" placeholder="如：涉密任务人工把关">
+        <input class="input" id="a2a-rule-name" placeholder="${rqI18n.t('如：涉密任务人工把关')}">
       </div>
       <div class="form-item">
         <label class="form-label">${esc(rqI18n.t('关键词匹配'))}</label>
-        <input class="input" id="a2a-rule-keyword" placeholder="消息包含该关键词时命中（可选）">
+        <input class="input" id="a2a-rule-keyword" placeholder="${rqI18n.t('消息包含该关键词时命中（可选）')}">
       </div>
       <div class="form-item">
         <label class="form-label">${esc(rqI18n.t('密级阈值'))}</label>
@@ -989,7 +989,7 @@ async function renderUhp() {
   if (loadError) {
     body.innerHTML = ''
     body.appendChild(emptyState({
-      title: 'UHP 数据加载失败',
+      title: rqI18n.t('UHP 数据加载失败'),
       desc: loadError.message,
       icon: 'zap',
     }))
@@ -1039,26 +1039,26 @@ async function renderUhp() {
     holder.innerHTML = ''
     const table = renderTable({
       columns: [
-        { title: '执行体 ID', render: (item) => `<span class="mono fs-12 col-strong">${esc(item.id)}</span>` },
-        { title: '目标员工', render: (item) => `<div class="col-strong">${esc(item.agentName ?? item.agentId)}</div><div class="col-sub mono">${esc(item.agentId)}</div>` },
-        { title: '模型', width: 130, render: (item) => `<span class="mono fs-12">${esc(item.model)}</span>` },
-        { title: '渠道组', width: 100, render: (item) => item.channelGroup ? `<span class="mono fs-12">${esc(item.channelGroup)}</span>` : '<span class="text-4 fs-12">—</span>' },
-        { title: '步数预算', width: 88, render: (item) => `<span class="tnum fs-12">${item.stepBudget != null ? fmtNum(item.stepBudget) : '—'}</span>` },
-        { title: '时间预算', width: 96, render: (item) => `<span class="tnum fs-12">${item.timeBudgetMs != null ? esc(rqI18n.t('{n} ms', { n: fmtNum(item.timeBudgetMs) })) : '—'}</span>` },
-        { title: '密级天花板', width: 96, render: (item) => `<span class="fs-12">${esc(rqI18n.t(A2A_CLASS_LABEL[item.dataClassCeiling] ?? item.dataClassCeiling ?? '—'))}</span>` },
-        { title: '工具权限组', width: 96, render: (item) => `<span class="tnum fs-12">${(item.toolPermGroupIds ?? []).length}</span>` },
-        { title: '状态', width: 84, render: (item) => `<span class="badge ${item.enabled ? 'badge-ok' : 'badge-muted'} no-dot">${esc(rqI18n.t(item.enabled ? '启用' : '停用'))}</span>` },
+        { title: rqI18n.t('执行体 ID'), render: (item) => `<span class="mono fs-12 col-strong">${esc(item.id)}</span>` },
+        { title: rqI18n.t('目标员工'), render: (item) => `<div class="col-strong">${esc(item.agentName ?? item.agentId)}</div><div class="col-sub mono">${esc(item.agentId)}</div>` },
+        { title: rqI18n.t('模型'), width: 130, render: (item) => `<span class="mono fs-12">${esc(item.model)}</span>` },
+        { title: rqI18n.t('渠道组'), width: 100, render: (item) => item.channelGroup ? `<span class="mono fs-12">${esc(item.channelGroup)}</span>` : '<span class="text-4 fs-12">—</span>' },
+        { title: rqI18n.t('步数预算'), width: 88, render: (item) => `<span class="tnum fs-12">${item.stepBudget != null ? fmtNum(item.stepBudget) : '—'}</span>` },
+        { title: rqI18n.t('时间预算'), width: 96, render: (item) => `<span class="tnum fs-12">${item.timeBudgetMs != null ? esc(rqI18n.t('{n} ms', { n: fmtNum(item.timeBudgetMs) })) : '—'}</span>` },
+        { title: rqI18n.t('密级天花板'), width: 96, render: (item) => `<span class="fs-12">${esc(rqI18n.t(A2A_CLASS_LABEL[item.dataClassCeiling] ?? item.dataClassCeiling ?? '—'))}</span>` },
+        { title: rqI18n.t('工具权限组'), width: 96, render: (item) => `<span class="tnum fs-12">${(item.toolPermGroupIds ?? []).length}</span>` },
+        { title: rqI18n.t('状态'), width: 84, render: (item) => `<span class="badge ${item.enabled ? 'badge-ok' : 'badge-muted'} no-dot">${esc(rqI18n.t(item.enabled ? rqI18n.t('启用') : rqI18n.t('停用')))}</span>` },
         ...(canAdmin ? [{
-          title: '操作',
+          title: rqI18n.t('操作'),
           width: 130,
           render: (item) => `
-            <button class="btn btn-ghost btn-sm" data-toggle="${esc(item.id)}" data-enabled="${item.enabled ? '1' : '0'}">${icon(item.enabled ? 'x' : 'check', 13)}${esc(rqI18n.t(item.enabled ? '停用' : '启用'))}</button>
+            <button class="btn btn-ghost btn-sm" data-toggle="${esc(item.id)}" data-enabled="${item.enabled ? '1' : '0'}">${icon(item.enabled ? 'x' : 'check', 13)}${esc(rqI18n.t(item.enabled ? rqI18n.t('停用') : rqI18n.t('启用')))}</button>
             <button class="btn btn-danger-ghost btn-sm" data-del="${esc(item.id)}">${icon('trash', 13)}${esc(rqI18n.t('删除'))}</button>`,
         }] : []),
       ],
       rows: list,
       rowKey: (item) => item.id,
-      empty: '暂无 UHP 执行体（harness 将模型与工具权限组绑定为可执行单元）',
+      empty: rqI18n.t('暂无 UHP 执行体（harness 将模型与工具权限组绑定为可执行单元）'),
     })
     holder.appendChild(table)
     if (canAdmin) {
@@ -1068,7 +1068,7 @@ async function renderUhp() {
           btn.classList.add('btn-loading')
           try {
             await api.patch(`/api/uhp/harnesses/${encodeURIComponent(btn.dataset.toggle)}`, { enabled })
-            toast(rqI18n.t(enabled ? '执行体已启用' : '执行体已停用'))
+            toast(rqI18n.t(enabled ? rqI18n.t('执行体已启用') : rqI18n.t('执行体已停用')))
             await refreshHarnesses()
           } catch (error) {
             toast(error.message, 'error')
@@ -1104,14 +1104,14 @@ async function renderUhp() {
     holder.innerHTML = ''
     const table = renderTable({
       columns: [
-        { title: '执行记录 ID', render: (item) => `<span class="mono fs-12" title="${esc(item.id)}">${esc(shortTaskId(item.id))}</span>` },
-        { title: '状态', width: 96, render: (item) => uhpStatusBadge(item.status) },
-        { title: '模型', width: 130, render: (item) => `<span class="mono fs-12">${esc(item.model)}</span>` },
-        { title: '执行体', width: 130, render: (item) => `<span class="mono fs-12 text-3" title="${esc(item.harness_id ?? '')}">${esc(shortTaskId(item.harness_id ?? '—'))}</span>` },
-        { title: 'Token 消耗', width: 120, render: (item) => `<span class="mono fs-12 text-3" title="输入 / 输出">${fmtNum(item.usage?.input_tokens ?? 0)} / ${fmtNum(item.usage?.output_tokens ?? 0)}</span>` },
-        { title: '会话', width: 110, render: (item) => `<span class="mono fs-12 text-4" title="${esc(item.session_id ?? '')}">${esc(shortTaskId(item.session_id ?? '—'))}</span>` },
-        { title: '任务', width: 110, render: (item) => item.task_id ? `<span class="mono fs-12 text-3" title="${esc(item.task_id)}">${esc(shortTaskId(item.task_id))}</span>` : '<span class="text-4 fs-12">—</span>' },
-        { title: '创建时间', width: 96, render: (item) => `<span class="fs-12 text-3">${timeAgo(item.created_at)}</span>` },
+        { title: rqI18n.t('执行记录 ID'), render: (item) => `<span class="mono fs-12" title="${esc(item.id)}">${esc(shortTaskId(item.id))}</span>` },
+        { title: rqI18n.t('状态'), width: 96, render: (item) => uhpStatusBadge(item.status) },
+        { title: rqI18n.t('模型'), width: 130, render: (item) => `<span class="mono fs-12">${esc(item.model)}</span>` },
+        { title: rqI18n.t('执行体'), width: 130, render: (item) => `<span class="mono fs-12 text-3" title="${esc(item.harness_id ?? '')}">${esc(shortTaskId(item.harness_id ?? '—'))}</span>` },
+        { title: rqI18n.t('Token 消耗'), width: 120, render: (item) => `<span class="mono fs-12 text-3" title="${rqI18n.t('输入 / 输出')}">${fmtNum(item.usage?.input_tokens ?? 0)} / ${fmtNum(item.usage?.output_tokens ?? 0)}</span>` },
+        { title: rqI18n.t('会话'), width: 110, render: (item) => `<span class="mono fs-12 text-4" title="${esc(item.session_id ?? '')}">${esc(shortTaskId(item.session_id ?? '—'))}</span>` },
+        { title: rqI18n.t('任务'), width: 110, render: (item) => item.task_id ? `<span class="mono fs-12 text-3" title="${esc(item.task_id)}">${esc(shortTaskId(item.task_id))}</span>` : '<span class="text-4 fs-12">—</span>' },
+        { title: rqI18n.t('创建时间'), width: 96, render: (item) => `<span class="fs-12 text-3">${timeAgo(item.created_at)}</span>` },
       ],
       rows: items,
       rowKey: (item) => item.id,
@@ -1119,7 +1119,7 @@ async function renderUhp() {
         const item = items.find((row) => row.id === id)
         if (item) openUhpResponseDrawer(item)
       },
-      empty: '暂无 UHP 执行记录（经 /v1/uhp 发起的执行在此留痕）',
+      empty: rqI18n.t('暂无 UHP 执行记录（经 /v1/uhp 发起的执行在此留痕）'),
     })
     holder.appendChild(table)
   }
@@ -1138,7 +1138,7 @@ function openHarnessModal(agents, onCreated) {
     body: `
       <div class="form-item">
         <label class="form-label">${esc(rqI18n.t('执行体 ID'))}</label>
-        <input class="input" id="a2a-harness-id" placeholder="留空由平台自动生成；自定义 ID 需全局唯一">
+        <input class="input" id="a2a-harness-id" placeholder="${rqI18n.t('留空由平台自动生成；自定义 ID 需全局唯一')}">
       </div>
       <div class="form-item">
         <label class="form-label">${esc(rqI18n.t('目标员工'))}<span class="req">*</span></label>
@@ -1150,15 +1150,15 @@ function openHarnessModal(agents, onCreated) {
       </div>
       <div class="form-item">
         <label class="form-label">${esc(rqI18n.t('模型'))}<span class="req">*</span></label>
-        <input class="input" id="a2a-harness-model" placeholder="如 deepseek-chat（经模型网关路由）">
+        <input class="input" id="a2a-harness-model" placeholder="${rqI18n.t('如 deepseek-chat（经模型网关路由）')}">
       </div>
       <div class="form-item">
         <label class="form-label">${esc(rqI18n.t('步数预算'))}</label>
-        <input class="input" id="a2a-harness-steps" placeholder="单次执行最大工具调用步数（留空使用平台默认）">
+        <input class="input" id="a2a-harness-steps" placeholder="${rqI18n.t('单次执行最大工具调用步数（留空使用平台默认）')}">
       </div>
       <div class="form-item">
         <label class="form-label">${esc(rqI18n.t('时间预算（毫秒）'))}</label>
-        <input class="input" id="a2a-harness-time" placeholder="单次执行最长耗时（留空使用平台默认）">
+        <input class="input" id="a2a-harness-time" placeholder="${rqI18n.t('单次执行最长耗时（留空使用平台默认）')}">
       </div>
       <div class="form-item">
         <label class="form-label">${esc(rqI18n.t('密级天花板'))}</label>
@@ -1220,16 +1220,16 @@ function openUhpResponseDrawer(item) {
         <span class="badge badge-muted no-dot mono">${esc(item.harness_id ?? '—')}</span>
       </div>
       <div class="desc-grid mb-14">
-        <div class="desc-item"><span class="k">执行记录 ID</span><span class="v mono">${esc(item.id)}</span></div>
-        <div class="desc-item"><span class="k">模型</span><span class="v mono">${esc(item.model)}</span></div>
-        <div class="desc-item"><span class="k">会话 ID</span><span class="v mono">${esc(item.session_id ?? '—')}</span></div>
-        ${item.task_id ? `<div class="desc-item"><span class="k">关联任务</span><span class="v mono">${esc(item.task_id)}</span></div>` : ''}
-        <div class="desc-item"><span class="k">Token 消耗</span><span class="v mono">${fmtNum(item.usage?.input_tokens ?? 0)} ${esc(rqI18n.t('入'))} / ${fmtNum(item.usage?.output_tokens ?? 0)} ${esc(rqI18n.t('出'))}</span></div>
-        <div class="desc-item"><span class="k">创建时间</span><span class="v">${timeAgo(item.created_at)}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('执行记录 ID')}</span><span class="v mono">${esc(item.id)}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('模型')}</span><span class="v mono">${esc(item.model)}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('会话 ID')}</span><span class="v mono">${esc(item.session_id ?? '—')}</span></div>
+        ${item.task_id ? `<div class="desc-item"><span class="k">${rqI18n.t('关联任务')}</span><span class="v mono">${esc(item.task_id)}</span></div>` : ''}
+        <div class="desc-item"><span class="k">${rqI18n.t('Token 消耗')}</span><span class="v mono">${fmtNum(item.usage?.input_tokens ?? 0)} ${esc(rqI18n.t('入'))} / ${fmtNum(item.usage?.output_tokens ?? 0)} ${esc(rqI18n.t('出'))}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('创建时间')}</span><span class="v">${timeAgo(item.created_at)}</span></div>
       </div>
       ${item.error ? `<div class="muted-box mb-14" style="display:flex;gap:8px;border-color:var(--danger-border)">${icon('alert', 15)}<span class="fs-12">${esc(typeof item.error === 'string' ? item.error : safeJson(item.error))}</span></div>` : ''}
       <div class="micro-label mb-8">${esc(rqI18n.t('输出内容'))}</div>
-      <div class="code-block mb-14" style="max-height:320px">${esc(item.output_text || '（空）')}</div>
+      <div class="code-block mb-14" style="max-height:320px">${esc(item.output_text || rqI18n.t('（空）'))}</div>
       <div class="micro-label mb-8">${esc(rqI18n.t('元数据（metadata）'))}</div>
       <div class="code-block" style="max-height:220px">${esc(safeJson(item.metadata))}</div>`,
   })
@@ -1245,12 +1245,12 @@ function stateBadge(state) {
 }
 
 function autonomyBadge(autonomy) {
-  return `<span class="badge badge-purple no-dot" title="自治级别（A0 只读应答 → A3 协商自治）">${esc(rqI18n.t(A2A_AUTONOMY_LABEL[autonomy] ?? autonomy))}</span>`
+  return `<span class="badge badge-purple no-dot" title="${rqI18n.t('自治级别（A0 只读应答 → A3 协商自治）')}">${esc(rqI18n.t(A2A_AUTONOMY_LABEL[autonomy] ?? autonomy))}</span>`
 }
 
 function acceptanceBadge(status) {
   const label = A2A_ACCEPTANCE_LABEL[status]
-  return `<span class="badge ${status === 'accepted' ? 'badge-ok' : 'badge-danger'} no-dot" title="人工验收结论">${esc(rqI18n.t(label ?? status))}</span>`
+  return `<span class="badge ${status === 'accepted' ? 'badge-ok' : 'badge-danger'} no-dot" title="${rqI18n.t('人工验收结论')}">${esc(rqI18n.t(label ?? status))}</span>`
 }
 
 /** 交付验收区（C-5/Q-16）：无验收权限与发起人本人（职责分离）均给出明确降级文案。 */
@@ -1260,7 +1260,7 @@ function acceptanceSection(task) {
     return `
       <div class="muted-box" style="display:flex;gap:8px;align-items:flex-start">
         ${icon(A2A_ACCEPT_ACTIONS[task.acceptance.status]?.icon ?? 'info', 15)}
-        <span><b>${esc(rqI18n.t(label ?? '已验收'))}</b> · ${esc(task.acceptance.by)} · ${timeAgo(task.acceptance.at)}
+        <span><b>${esc(rqI18n.t(label ?? rqI18n.t('已验收')))}</b> · ${esc(task.acceptance.by)} · ${timeAgo(task.acceptance.at)}
           <div class="fs-12 text-3" style="margin-top:4px">${esc(task.acceptance.reason)}</div>
         </span>
       </div>`
@@ -1274,7 +1274,7 @@ function acceptanceSection(task) {
     }
     return `<div class="muted-box" style="display:flex;gap:8px">${icon('info', 15)}<span>${esc(rqI18n.t('任务已完成，等待人工验收：完成 ≠ 业务闭环，验收通过才归档。'))}</span></div>`
   }
-  return emptyHint('任务到达「已完成」后开放人工验收')
+  return emptyHint(rqI18n.t('任务到达「已完成」后开放人工验收'))
 }
 
 function negotiationSection(task) {
@@ -1296,7 +1296,7 @@ function negotiationSection(task) {
           : redacted
             ? `<div class="fs-12 text-3" style="margin-top:6px;display:flex;gap:6px;align-items:center">${icon('lock', 13)}${esc(rqI18n.t(A2A_REDACTED_NOTE))}</div>`
             : `<div class="code-block" style="margin-top:6px;max-height:140px">${esc(safeJson(offer.proposal))}</div>`}
-      </div>`).join('') || emptyHint('协商引擎未产生要约（按协商矩阵直接定模式执行）')}`
+      </div>`).join('') || emptyHint(rqI18n.t('协商引擎未产生要约（按协商矩阵直接定模式执行）'))}`
 }
 
 function artifactsSection(task) {
@@ -1360,7 +1360,7 @@ function shortTaskId(id) {
 }
 
 function safeJson(value) {
-  if (value === undefined || value === null || value === '') return '（无）'
+  if (value === undefined || value === null || value === '') return rqI18n.t('（无）')
   if (typeof value === 'string') return value
   try { return JSON.stringify(value, null, 2) } catch { return String(value) }
 }

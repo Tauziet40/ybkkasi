@@ -29,10 +29,10 @@ export async function renderAssets(content, params, ctx) {
   content.innerHTML = `
     ${sectionHead({
       label: 'ASSET LEDGER',
-      title: '资产台账',
-      extra: 'MCP / Agent / 应用 / Skill / 模型路由 / NAS 六类资产一处盘点 · 统一归属、健康、用量与成本穿透',
+      title: rqI18n.t('资产台账'),
+      extra: rqI18n.t('MCP / Agent / 应用 / Skill / 模型路由 / NAS 六类资产一处盘点 · 统一归属、健康、用量与成本穿透'),
       actions: `
-        ${/* 一键巡检是留痕写操作（POST，演示态被 405 闸门拦截）——演示访客隐藏 */ session.isDemo ? '' : `<button class="btn btn-default" id="ledger-healthcheck">${icon('zap', 14)} 一键巡检</button>`}`,
+        ${/* 一键巡检是留痕写操作（POST，演示态被 405 闸门拦截）——演示访客隐藏 */ session.isDemo ? '' : `<button class="btn btn-default" id="ledger-healthcheck">${icon('zap', 14)} ${rqI18n.t('一键巡检')}</button>`}`,
     })}
     <div id="asset-tabs" class="mb-14"></div>
     <div id="asset-tab-body"></div>`
@@ -56,8 +56,8 @@ export async function renderAssets(content, params, ctx) {
 
   $('#asset-tabs').appendChild(tabRow(
     [
-      { key: 'ledger', label: '六类台账' },
-      { key: 'report', label: '运营报表' },
+      { key: 'ledger', label: rqI18n.t('六类台账') },
+      { key: 'report', label: rqI18n.t('运营报表') },
     ],
     tab,
     (key) => { location.hash = `#/assets?tab=${key}` },
@@ -78,27 +78,27 @@ function renderLedgerTab(content, params) {
   body.innerHTML = `
     <div class="filter-bar" id="ledger-filters" style="margin-bottom:10px">
       <div id="ledger-chips"></div>
-      <div class="search-input" style="margin-left:auto">${icon('search')}<input class="input" id="ledger-q" placeholder="搜索名称 / 资源键 / 组织" style="width:220px" value="${esc(searchSeed)}"></div>
+      <div class="search-input" style="margin-left:auto">${icon('search')}<input class="input" id="ledger-q" placeholder="${rqI18n.t('搜索名称 / 资源键 / 组织')}" style="width:220px" value="${esc(searchSeed)}"></div>
     </div>
     <div class="card table-wrap fade-up">
       <table class="tbl">
         <thead>
           <tr>
-            <th>资产</th>
-            <th>归属 / 负责人</th>
-            <th>健康</th>
-            <th style="text-align:right">30d 调用</th>
-            <th style="text-align:right">30d 消耗</th>
-            <th style="text-align:right">成本参考</th>
+            <th>${rqI18n.t('资产')}</th>
+            <th>${rqI18n.t('归属 / 负责人')}</th>
+            <th>${rqI18n.t('健康')}</th>
+            <th style="text-align:right">${rqI18n.t('30d 调用')}</th>
+            <th style="text-align:right">${rqI18n.t('30d 消耗')}</th>
+            <th style="text-align:right">${rqI18n.t('成本参考')}</th>
             <th style="text-align:right" title="${esc(rqI18n.t('近 30 天使用凭证数：Agent 使用资产后主动提报的使用事实（与平台自动计量互补）'))}">${esc(rqI18n.t('使用凭证'))}</th>
-            <th>发布</th>
-            <th style="text-align:right">趋势</th>
+            <th>${rqI18n.t('发布')}</th>
+            <th style="text-align:right">${rqI18n.t('趋势')}</th>
           </tr>
         </thead>
-        <tbody id="ledger-body"><tr><td colspan="9" class="text-4 fs-12" style="padding:28px;text-align:center">${icon('activity', 14)} 台账加载中…</td></tr></tbody>
+        <tbody id="ledger-body"><tr><td colspan="9" class="text-4 fs-12" style="padding:28px;text-align:center">${icon('activity', 14)} ${rqI18n.t('台账加载中…')}</td></tr></tbody>
       </table>
     </div>
-    <p class="fs-11 text-3" style="margin-top:8px">点击行打开右侧详情抽屉（概览 / 监控 / 权限 / 拓扑 / 审计 / 生命周期）· 列表不跳页</p>`
+    <p class="fs-11 text-3" style="margin-top:8px">${rqI18n.t('点击行打开右侧详情抽屉（概览 / 监控 / 权限 / 拓扑 / 审计 / 生命周期）· 列表不跳页')}</p>`
 
   const syncUrl = () => {
     const p = new URLSearchParams()
@@ -115,7 +115,7 @@ function renderLedgerTab(content, params) {
     for (const it of state.items) counts.set(it.type, (counts.get(it.type) ?? 0) + 1)
     holder.appendChild(chipRow(
       [
-        { value: '', label: '全部', count: state.items.length },
+        { value: '', label: rqI18n.t('全部'), count: state.items.length },
         ...TYPE_ORDER.map((t) => ({ value: t, label: TYPE_LABEL[t], count: counts.get(t) ?? 0 })),
       ],
       state.type,
@@ -214,7 +214,7 @@ async function renderReportTab(content, params) {
   const days = params.get('days') ?? 30
   const typeFilter = params.get('type') ?? ''
   const body = $('#asset-tab-body')
-  body.innerHTML = `<div class="text-4 fs-12" style="padding:24px;text-align:center">报表加载中…</div>`
+  body.innerHTML = rqI18n.t('<div class="text-4 fs-12" style="padding:24px;text-align:center">报表加载中…</div>')
   const [inv, report, benefit, retire] = await Promise.all([
     api.get(`/api/assets/inventory?days=${days}${typeFilter ? `&type=${typeFilter}` : ''}`),
     api.get(`/api/assets/report?days=${days}`),
@@ -224,43 +224,43 @@ async function renderReportTab(content, params) {
 
   body.innerHTML = `
     <div class="flex mb-14" style="gap:10px;align-items:center">
-      <span class="fs-12 text-3">统计窗口</span>
+      <span class="fs-12 text-3">${rqI18n.t('统计窗口')}</span>
       <select id="asset-days" class="select" style="width:auto">
         ${[7, 14, 30, 90].map((d) => `<option value="${d}" ${String(d) === String(days) ? 'selected' : ''}>${esc(rqI18n.t('近 {n} 天', { n: d }))}</option>`).join('')}
       </select>
-      <span class="fs-11 text-4">口径：内部成本为零价快照，不对外结算</span>
+      <span class="fs-11 text-4">${rqI18n.t('口径：内部成本为零价快照，不对外结算')}</span>
     </div>
 
     <div class="stat-grid mb-20">
       <div class="stat-card">
         <div class="stat-icon" style="background:var(--brand-50);color:var(--brand-500)">${icon('layers', 18)}</div>
         <div class="stat-value">${inv.items.length}</div>
-        <div class="stat-sub">纳管资产</div>
+        <div class="stat-sub">${rqI18n.t('纳管资产')}</div>
         <div class="stat-foot">${Object.entries(inv.summary.byType).map(([t, v]) => rqI18n.t('{label} {n}', { label: rqI18n.t(TYPE_LABEL[t] ?? String(t)), n: v.total })).join(' · ')}</div>
       </div>
       <div class="stat-card">
         <div class="stat-icon" style="background:var(--ok-bg);color:#047857">${icon('activity', 18)}</div>
         <div class="stat-value">${Object.values(inv.summary.byType).reduce((s, v) => s + v.inService, 0)}</div>
-        <div class="stat-sub">在服务资产</div>
-        <div class="stat-foot">已上线 / 灰度中 / 已上架</div>
+        <div class="stat-sub">${rqI18n.t('在服务资产')}</div>
+        <div class="stat-foot">${rqI18n.t('已上线 / 灰度中 / 已上架')}</div>
       </div>
       <div class="stat-card">
         <div class="stat-icon" style="background:${inv.summary.unhealthy > 0 ? 'var(--danger-bg)' : 'var(--ok-bg)'};color:${inv.summary.unhealthy > 0 ? '#b91c1c' : '#047857'}">${icon(inv.summary.unhealthy > 0 ? 'alert' : 'shieldCheck', 18)}</div>
         <div class="stat-value" style="color:${inv.summary.unhealthy > 0 ? 'var(--danger)' : 'inherit'}">${inv.summary.unhealthy}</div>
-        <div class="stat-sub">健康异常</div>
-        <div class="stat-foot">不可用 / 降级</div>
+        <div class="stat-sub">${rqI18n.t('健康异常')}</div>
+        <div class="stat-foot">${rqI18n.t('不可用 / 降级')}</div>
       </div>
       <div class="stat-card">
         <div class="stat-icon" style="background:var(--purple-bg);color:#6d28d9">${icon('coins', 18)}</div>
         <div class="stat-value">${fmtCents(inv.summary.costCents30d)}</div>
         <div class="stat-sub">${esc(rqI18n.t('{n} 天内部成本参考', { n: days }))}</div>
-        <div class="stat-foot">零价快照 · 成本仅内部口径</div>
+        <div class="stat-foot">${rqI18n.t('零价快照 · 成本仅内部口径')}</div>
       </div>
     </div>
 
     <div class="grid-2 mb-20" style="grid-template-columns:1.1fr 1fr;align-items:start">
       <div class="card">
-        <div class="card-head"><span class="card-title">${icon('zap', 15)} 消耗 Top 资产</span><span class="card-sub">${esc(rqI18n.t('近 {n} 天 · 计量口径', { n: days }))}</span></div>
+        <div class="card-head"><span class="card-title">${icon('zap', 15)} ${rqI18n.t('消耗 Top 资产')}</span><span class="card-sub">${esc(rqI18n.t('近 {n} 天 · 计量口径', { n: days }))}</span></div>
         <div class="card-body" style="padding-top:8px">
           ${report.topResources.slice(0, 8).map((row, i) => `
             <div class="flex" style="padding:9px 0;border-bottom:1px solid var(--border);gap:10px;align-items:center">
@@ -273,7 +273,7 @@ async function renderReportTab(content, params) {
         </div>
       </div>
       <div class="card">
-        <div class="card-head"><span class="card-title">${icon('trending', 15)} 日消耗趋势</span><span class="card-sub">全资产合计</span></div>
+        <div class="card-head"><span class="card-title">${icon('trending', 15)} ${rqI18n.t('日消耗趋势')}</span><span class="card-sub">${rqI18n.t('全资产合计')}</span></div>
         <div class="card-body">${reportTrendSvg(report.byDay)}</div>
       </div>
     </div>
@@ -281,17 +281,17 @@ async function renderReportTab(content, params) {
     <div class="grid-2 mb-20" style="grid-template-columns:1.35fr 1fr;align-items:start">
       <div class="card">
         <div class="card-head">
-          <span class="card-title">${icon('coins', 15)} 成本穿透</span>
+          <span class="card-title">${icon('coins', 15)} ${rqI18n.t('成本穿透')}</span>
           <span class="card-sub">${esc(rqI18n.t('内部采购成本参考（零价快照，不对外结算）· 近 {n} 天', { n: days }))}</span>
         </div>
         <div class="card-body" style="padding:10px 8px 14px">
           <div class="flex mb-10" style="gap:18px;padding:0 6px">
-            <span class="fs-12 text-4">调用 <b class="fs-14" style="color:var(--text-1)">${benefit.totals.count}</b> 次</span>
-            <span class="fs-12 text-4">内部成本 <b class="fs-14" style="color:var(--text-1)">${fmtCents(benefit.totals.cost_cents)}</b></span>
+            <span class="fs-12 text-4">${rqI18n.t('调用')} <b class="fs-14" style="color:var(--text-1)">${benefit.totals.count}</b> ${rqI18n.t('次')}</span>
+            <span class="fs-12 text-4">${rqI18n.t('内部成本')} <b class="fs-14" style="color:var(--text-1)">${fmtCents(benefit.totals.cost_cents)}</b></span>
           </div>
           <div class="table-wrap">
             <table class="tbl">
-              <thead><tr><th>资产</th><th style="text-align:right">调用</th><th style="text-align:right">次数占比</th><th style="text-align:right">内部成本</th><th style="text-align:right">单位 DAU 成本</th></tr></thead>
+              <thead><tr><th>${rqI18n.t('资产')}</th><th style="text-align:right">${rqI18n.t('调用')}</th><th style="text-align:right">${rqI18n.t('次数占比')}</th><th style="text-align:right">${rqI18n.t('内部成本')}</th><th style="text-align:right">${rqI18n.t('单位 DAU 成本')}</th></tr></thead>
               <tbody>
                 ${benefit.rows.length ? benefit.rows.slice(0, 10).map((row) => `
                   <tr>
@@ -301,7 +301,7 @@ async function renderReportTab(content, params) {
                     <td class="col-num fs-12" style="text-align:right;font-weight:600">${fmtCents(row.cost_cents)}</td>
                     <td class="col-num fs-12" style="text-align:right">${row.cost_per_dau_cents !== null && row.cost_per_dau_cents !== undefined ? fmtCents(row.cost_per_dau_cents) : '—'}</td>
                   </tr>`).join('') : `
-                  <tr><td colspan="5"><div class="tbl-empty">${icon('coins', 28)}<span>窗口内暂无计量事件（成本随调用累积）</span></div></td></tr>`}
+                  <tr><td colspan="5"><div class="tbl-empty">${icon('coins', 28)}<span>${rqI18n.t('窗口内暂无计量事件（成本随调用累积）')}</span></div></td></tr>`}
               </tbody>
             </table>
           </div>
@@ -309,7 +309,7 @@ async function renderReportTab(content, params) {
       </div>
       <div style="display:flex;flex-direction:column;gap:16px">
         <div class="card">
-          <div class="card-head"><span class="card-title">${icon('users', 15)} 主体分摊（谁在用）</span><span class="card-sub">${esc(rqI18n.t('近 {n} 天', { n: days }))}</span></div>
+          <div class="card-head"><span class="card-title">${icon('users', 15)} ${rqI18n.t('主体分摊（谁在用）')}</span><span class="card-sub">${esc(rqI18n.t('近 {n} 天', { n: days }))}</span></div>
           <div class="card-body" style="padding-top:8px">
             ${report.byPrincipal.slice(0, 6).map((row) => {
               const max = Math.max(...report.byPrincipal.map((r) => r.cost_cents), 1)
@@ -324,7 +324,7 @@ async function renderReportTab(content, params) {
           </div>
         </div>
         <div class="card">
-          <div class="card-head"><span class="card-title">${icon('alert', 15)} 下架分析</span><span class="card-sub">近 90 天 · 原因聚合</span></div>
+          <div class="card-head"><span class="card-title">${icon('alert', 15)} ${rqI18n.t('下架分析')}</span><span class="card-sub">${rqI18n.t('近 90 天 · 原因聚合')}</span></div>
           <div class="card-body" style="padding-top:8px">
             ${retire.reasons?.length ? retire.reasons.slice(0, 5).map((row) => `
               <div class="flex" style="padding:7px 0;border-bottom:1px solid var(--border);gap:8px;align-items:flex-start">

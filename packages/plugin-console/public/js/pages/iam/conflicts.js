@@ -27,8 +27,8 @@ export async function renderConflicts(ctx) {
   const orgPathById = new Map(buildOrgPaths(orgs).map((opt) => [opt.value, opt.label]))
   $('#conflict-count').textContent = String(pending.length)
   $('#iam-actions').innerHTML = `
-    <button class="btn btn-default" id="cf-batch-platform" ${pending.length ? '' : 'disabled'}>${icon('shield', 14)}一键保留平台</button>
-    <button class="btn btn-danger-ghost" id="cf-batch-third" ${pending.length ? '' : 'disabled'}>${icon('refresh', 14)}一键以三方为准</button>`
+    <button class="btn btn-default" id="cf-batch-platform" ${pending.length ? '' : 'disabled'}>${icon('shield', 14)}${rqI18n.t('一键保留平台')}</button>
+    <button class="btn btn-danger-ghost" id="cf-batch-third" ${pending.length ? '' : 'disabled'}>${icon('refresh', 14)}${rqI18n.t('一键以三方为准')}</button>`
   if (pending.length) {
     $('#cf-batch-platform').onclick = () => batchResolve('platform')
     $('#cf-batch-third').onclick = () => batchResolve('third_party')
@@ -36,7 +36,7 @@ export async function renderConflicts(ctx) {
   const body = $('#iam-body')
   if (!pending.length) {
     body.innerHTML = ''
-    body.appendChild(emptyState({ title: '没有待处理的同步冲突', desc: '三方通讯录与平台数据一致，或冲突均已处理', icon: 'shieldCheck' }))
+    body.appendChild(emptyState({ title: rqI18n.t('没有待处理的同步冲突'), desc: rqI18n.t('三方通讯录与平台数据一致，或冲突均已处理'), icon: 'shieldCheck' }))
     return
   }
   // 批量处理：逐条调用单条 resolve 接口，逐条容错，最后汇总结果（不新增后端接口）
@@ -47,7 +47,7 @@ export async function renderConflicts(ctx) {
         ? rqI18n.t('将忽略三方差异，{n} 条冲突全部保留平台侧当前数据并关闭工单。', { n: pending.length })
         : rqI18n.t('将用三方通讯录数据覆盖平台侧数据，共 {n} 条，立即生效并留痕。确认继续？', { n: pending.length }),
       danger: keep !== 'platform',
-      confirmText: rqI18n.t(keep === 'platform' ? '确认全部保留平台' : '确认全部以三方为准'),
+      confirmText: rqI18n.t(keep === 'platform' ? rqI18n.t('确认全部保留平台') : rqI18n.t('确认全部以三方为准')),
     })
     if (!confirmed) return
     let ok = 0
@@ -61,7 +61,7 @@ export async function renderConflicts(ctx) {
       }
     }
     if (failed.length) toast(rqI18n.t('已处理 {ok} 条，失败 {f} 条：{msg}', { ok, f: failed.length, msg: failed[0] }), 'error')
-    else toast(rqI18n.t(keep === 'platform' ? '一键保留平台完成：共处理 {n} 条冲突' : '一键以三方为准完成：共处理 {n} 条冲突', { n: ok }), 'success')
+    else toast(rqI18n.t(keep === 'platform' ? rqI18n.t('一键保留平台完成：共处理 {n} 条冲突') : rqI18n.t('一键以三方为准完成：共处理 {n} 条冲突'), { n: ok }), 'success')
     ctx.rerender()
   }
   for (const conflict of pending) {
@@ -69,23 +69,23 @@ export async function renderConflicts(ctx) {
       <div class="card card-pad mb-14">
         <div class="flex-between mb-14">
           <div class="flex">
-            <span class="badge badge-warn">${esc(conflict.kind === 'user_attr' ? '属性差异' : conflict.kind)}</span>
-            <span class="fs-12 text-3">来源：${esc(providerName(conflict.provider))} · ${timeAgo(conflict.createdAt)}</span>
+            <span class="badge badge-warn">${esc(conflict.kind === 'user_attr' ? rqI18n.t('属性差异') : conflict.kind)}</span>
+            <span class="fs-12 text-3">${rqI18n.t('来源')}：${esc(providerName(conflict.provider))} · ${timeAgo(conflict.createdAt)}</span>
           </div>
         </div>
         <div class="grid-2">
           <div style="border:1px solid var(--warn-border);background:var(--warn-bg);border-radius:10px;padding:14px">
-            <div class="fs-12" style="font-weight:600;color:#b45309;margin-bottom:8px">三方数据（钉钉）</div>
+            <div class="fs-12" style="font-weight:600;color:#b45309;margin-bottom:8px">${rqI18n.t('三方数据')}（${rqI18n.t('钉钉')}）</div>
             ${diffRows(conflict.thirdPartyData)}
           </div>
           <div style="border:1px solid var(--border);background:var(--surface-2);border-radius:10px;padding:14px">
-            <div class="fs-12" style="font-weight:600;margin-bottom:8px">平台数据</div>
+            <div class="fs-12" style="font-weight:600;margin-bottom:8px">${rqI18n.t('平台数据')}</div>
             ${diffRows(conflict.platformData)}
           </div>
         </div>
         <div class="flex mt-14" style="justify-content:flex-end">
-          <button class="btn btn-default" data-keep="platform">保留平台</button>
-          <button class="btn btn-primary" data-keep="third_party">以三方为准</button>
+          <button class="btn btn-default" data-keep="platform">${rqI18n.t('保留平台')}</button>
+          <button class="btn btn-primary" data-keep="third_party">${rqI18n.t('以三方为准')}</button>
         </div>
       </div>`)
     card.querySelectorAll('[data-keep]').forEach((btn) => {

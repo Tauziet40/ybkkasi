@@ -29,12 +29,12 @@ export async function renderMcp(content, params, ctx) {
   // 首次访问概念卡（易用性整改：MCP 术语对业务成员有门槛）
   maybeShowConceptCard(content, 'mcp', {
     icon: 'plug',
-    title: 'MCP 是什么？',
-    subtitle: 'MCP = Agent 连接外部工具与数据的标准接口，可以理解为「万能插头」。',
+    title: rqI18n.t('MCP 是什么？'),
+    subtitle: rqI18n.t('MCP = Agent 连接外部工具与数据的标准接口，可以理解为「万能插头」。'),
     points: [
-      '供给侧：把知识库、工单、图表等能力以统一规格提供给 Agent 调用。',
-      '供给链路：注册登记 → 安全审核 → 测试验证 → 灰度发布 → 运行监控。',
-      '平台托管：网关统一鉴权、限流熔断，调用全程透明计量。',
+      rqI18n.t('供给侧：把知识库、工单、图表等能力以统一规格提供给 Agent 调用。'),
+      rqI18n.t('供给链路：注册登记 → 安全审核 → 测试验证 → 灰度发布 → 运行监控。'),
+      rqI18n.t('平台托管：网关统一鉴权、限流熔断，调用全程透明计量。'),
     ],
   })
 
@@ -42,30 +42,30 @@ export async function renderMcp(content, params, ctx) {
     <div class="page-head">
       <div>
         <div class="micro-label">MCP SERVICES</div>
-        <div class="page-title">MCP 服务</div>
-        <div class="page-sub">工具的供给链路：注册登记 → 安全审核 → 测试验证 → 灰度发布 → 运行监控。网关统一鉴权、限流熔断。</div>
+        <div class="page-title">MCP ${rqI18n.t('服务')}</div>
+        <div class="page-sub">${rqI18n.t('工具的供给链路')}：${rqI18n.t('注册登记')} → ${rqI18n.t('安全审核')} → ${rqI18n.t('测试验证')} → ${rqI18n.t('灰度发布')} → ${rqI18n.t('运行监控')}。${rqI18n.t('网关统一鉴权')}、${rqI18n.t('限流熔断')}。</div>
       </div>
       <div class="page-actions">
         ${session.can('mcp.service.write') ? `<button class="btn btn-default" id="mcp-cred-migrate">${icon('key', 14)}${esc(rqI18n.t('凭证迁移'))}</button>` : ''}
-        ${session.can('mcp.permgroup.write') ? `<button class="btn btn-default" id="mcp-permgroups">${icon('shield', 14)}权限组管理</button>` : ''}
-        ${session.can('mcp.service.write') ? `<button class="btn btn-primary" id="mcp-deploy-wizard">${icon('plus', 14)}接入 MCP 服务</button>` : ''}
+        ${session.can('mcp.permgroup.write') ? `<button class="btn btn-default" id="mcp-permgroups">${icon('shield', 14)}${rqI18n.t('权限组管理')}</button>` : ''}
+        ${session.can('mcp.service.write') ? `<button class="btn btn-primary" id="mcp-deploy-wizard">${icon('plus', 14)}${rqI18n.t('接入')} MCP ${rqI18n.t('服务')}</button>` : ''}
       </div>
     </div>
 
     ${governanceBannerHtml(governance)}
 
     <div class="stat-grid mb-20">
-      ${miniStat('server', '服务总数', services.length)}
-      ${miniStat('wifi', '在线 / 灰度', services.filter((s) => ['online', 'gray'].includes(s.status)).length)}
-      ${miniStat('activity', '累计调用', fmtNum(data.overview.totalCalls))}
-      ${miniStat('zap', '成功率', fmtPct(data.overview.successRate))}
-      ${miniStat('clock', 'P95 延迟', data.overview.p95Latency + 'ms')}
+      ${miniStat('server', rqI18n.t('服务总数'), services.length)}
+      ${miniStat('wifi', rqI18n.t('在线 / 灰度'), services.filter((s) => ['online', 'gray'].includes(s.status)).length)}
+      ${miniStat('activity', rqI18n.t('累计调用'), fmtNum(data.overview.totalCalls))}
+      ${miniStat('zap', rqI18n.t('成功率'), fmtPct(data.overview.successRate))}
+      ${miniStat('clock', rqI18n.t('P95 延迟'), data.overview.p95Latency + 'ms')}
     </div>
 
     <div class="filter-bar">
-      <div class="search-input">${icon('search')}<input class="input" id="mcp-q" placeholder="搜索服务名称 / 描述" style="width:200px"></div>
+      <div class="search-input">${icon('search')}<input class="input" id="mcp-q" placeholder="${rqI18n.t('搜索服务名称 / 描述')}" style="width:200px"></div>
       <div class="chips" id="mcp-cats">
-        <span class="chip active" data-c="">全部</span>
+        <span class="chip active" data-c="">${rqI18n.t('全部')}</span>
         ${ASSET_CATEGORIES.map((cat) => `<span class="chip" data-c="${cat}">${esc(rqI18n.t(cat))}</span>`).join('')}
       </div>
       <span class="fs-12 text-3" style="margin-left:auto" id="mcp-count"></span>
@@ -85,7 +85,7 @@ export async function renderMcp(content, params, ctx) {
     if (!cards) return
     cards.innerHTML = ''
     if (!list.length) {
-      cards.appendChild(emptyState({ title: services.length ? rqI18n.t('没有匹配的 MCP 服务') : rqI18n.t('还没有 MCP 服务'), desc: services.length ? '换个分类或关键字试试' : '接入第一个 MCP 服务，为 Agent 提供工具能力', ...(session.can('mcp.service.write') && !services.length ? { actionText: '接入 MCP 服务', onAction: () => $('#mcp-deploy-wizard').click() } : {}) }))
+      cards.appendChild(emptyState({ title: services.length ? rqI18n.t('没有匹配的 MCP 服务') : rqI18n.t('还没有 MCP 服务'), desc: services.length ? rqI18n.t('换个分类或关键字试试') : rqI18n.t('接入第一个 MCP 服务，为 Agent 提供工具能力'), ...(session.can('mcp.service.write') && !services.length ? { actionText: rqI18n.t('接入 MCP 服务'), onAction: () => $('#mcp-deploy-wizard').click() } : {}) }))
     }
     for (const svc of list) {
     const [bg, color] = ICON_COLORS[svc.icon] ?? ICON_COLORS.mcp
@@ -95,18 +95,18 @@ export async function renderMcp(content, params, ctx) {
         <div class="res-card-top">
           <div class="res-icon" style="background:${bg};color:${color}">${svcIcon(svc.icon)}</div>
           <div class="grow">
-            <div class="res-name">${esc(svc.name)} ${statusBadge(svc.status)}${svc.bridgeFrom ? `<span class="badge badge-warning" title="M0 数据面桥接（open-connector）：仅服务级粗粒度权限组，无 action 级授权 / 连接级绑定 / oct_ 令牌镜像——生产纳管请走 #/connectors 原生链路">桥接过渡</span>` : ''}</div>
+            <div class="res-name">${esc(svc.name)} ${statusBadge(svc.status)}${svc.bridgeFrom ? `<span class="badge badge-warning" title="${rqI18n.t('M0 数据面桥接（open-connector）：仅服务级粗粒度权限组，无 action 级授权 / 连接级绑定 / oct_ 令牌镜像——生产纳管请走 #/connectors 原生链路')}">${rqI18n.t('桥接过渡')}</span>` : ''}</div>
             <div class="res-slug">${esc(svc.endpoint || svc.slug)}</div>
           </div>
           <span class="traffic ${trafficClass(health)}" title="${esc(rqI18n.t('健康状态：{status}', { status: health }))}"></span>
         </div>
-        <div class="res-desc">${esc(svc.description || '暂无描述')}</div>
+        <div class="res-desc">${esc(svc.description || rqI18n.t('暂无描述'))}</div>
         <div class="flex" style="gap:6px;flex-wrap:wrap">
           <span class="badge badge-brand no-dot">${esc(assetCategory(svc))}</span>
         </div>
         ${svc.status === 'gray' ? `
           <div>
-            <div class="flex-between fs-12 mb-8"><span class="text-3">灰度比例</span><span>${svc.grayPercent}%</span></div>
+            <div class="flex-between fs-12 mb-8"><span class="text-3">${rqI18n.t('灰度比例')}</span><span>${svc.grayPercent}%</span></div>
             <div class="progress"><div class="progress-bar" style="width:${svc.grayPercent}%"></div></div>
           </div>` : ''}
         <div class="res-foot">
@@ -179,27 +179,27 @@ async function openServiceDetail(id, ctx) {
 
       <div class="stat-grid mb-20" style="grid-template-columns:repeat(4,1fr)">
         ${miniStat('activity', rqI18n.t('调用量'), fmtNum(metrics.calls), true)}
-        ${miniStat('check', '成功率', fmtPct(metrics.successRate), true)}
-        ${miniStat('clock', 'P95 延迟', metrics.p95Latency + 'ms', true)}
-        ${miniStat('coins', 'Token 消耗', fmtNum(metrics.tokens), true)}
+        ${miniStat('check', rqI18n.t('成功率'), fmtPct(metrics.successRate), true)}
+        ${miniStat('clock', rqI18n.t('P95 延迟'), metrics.p95Latency + 'ms', true)}
+        ${miniStat('coins', rqI18n.t('Token 消耗'), fmtNum(metrics.tokens), true)}
       </div>
 
       <div class="tabs" id="svc-tabs">
-        <div class="tab active" data-tab="monitor">监控</div>
-        <div class="tab" data-tab="governance">${icon('shield', 13)} 治理</div>
+        <div class="tab active" data-tab="monitor">${rqI18n.t('监控')}</div>
+        <div class="tab" data-tab="governance">${icon('shield', 13)} ${rqI18n.t('治理')}</div>
         <div class="tab" data-tab="tools">${esc(rqI18n.t('工具 ({n})', { n: svcData.tools.length }))}</div>
-        <div class="tab" data-tab="versions">版本</div>
-        <div class="tab" data-tab="calls">调用明细</div>
-        <div class="tab" data-tab="grants">授权主体</div>
+        <div class="tab" data-tab="versions">${rqI18n.t('版本')}</div>
+        <div class="tab" data-tab="calls">${rqI18n.t('调用明细')}</div>
+        <div class="tab" data-tab="grants">${rqI18n.t('授权主体')}</div>
       </div>
       <div id="svc-tab-body"></div>`,
     foot: `
-      <button class="btn btn-default" id="svc-health">${icon('wifi', 14)}健康探测</button>
-      ${svcData.mode === 'external' && svcData.exec === 'real' ? `<button class="btn btn-default" id="svc-sync-tools">${icon('refresh', 14)}同步工具</button>` : ''}
-      ${svcData.status !== 'offline' ? `<button class="btn btn-default" id="svc-gray">${icon('trending', 14)}${svcData.status === 'gray' ? '调整灰度' : '灰度发布'}</button>` : ''}
-      ${svcData.status !== 'offline' ? `<button class="btn btn-danger-ghost" id="svc-offline">${icon('alert', 14)}下线服务</button>` : ''}
-      ${svcData.status === 'draft' ? `<button class="btn btn-primary" id="svc-verify">${icon('play', 14)}测试验证</button>` : ''}
-      ${svcData.status === 'offline' ? `<button class="btn btn-danger-ghost" id="svc-delete">${icon('trash', 14)}删除服务</button>` : ''}`,
+      <button class="btn btn-default" id="svc-health">${icon('wifi', 14)}${rqI18n.t('健康探测')}</button>
+      ${svcData.mode === 'external' && svcData.exec === 'real' ? `<button class="btn btn-default" id="svc-sync-tools">${icon('refresh', 14)}${rqI18n.t('同步工具')}</button>` : ''}
+      ${svcData.status !== 'offline' ? `<button class="btn btn-default" id="svc-gray">${icon('trending', 14)}${svcData.status === 'gray' ? rqI18n.t('调整灰度') : rqI18n.t('灰度发布')}</button>` : ''}
+      ${svcData.status !== 'offline' ? `<button class="btn btn-danger-ghost" id="svc-offline">${icon('alert', 14)}${rqI18n.t('下线服务')}</button>` : ''}
+      ${svcData.status === 'draft' ? `<button class="btn btn-primary" id="svc-verify">${icon('play', 14)}${rqI18n.t('测试验证')}</button>` : ''}
+      ${svcData.status === 'offline' ? `<button class="btn btn-danger-ghost" id="svc-delete">${icon('trash', 14)}${rqI18n.t('删除服务')}</button>` : ''}`,
   })
 
   const tabBody = drawer.body.querySelector('#svc-tab-body')
@@ -207,24 +207,24 @@ async function openServiceDetail(id, ctx) {
     if (tab === 'monitor') {
       tabBody.innerHTML = `
         <div class="card card-pad mb-14">
-          <div class="card-title mb-8">近 60 分钟调用（次/分钟）</div>
+          <div class="card-title mb-8">${rqI18n.t('近')} 60 ${rqI18n.t('分钟调用')}（${rqI18n.t('次')}/${rqI18n.t('分钟')}）</div>
           ${barChart(metrics.series.map((s) => ({ label: s.minute, value: s.calls })), { width: 640, height: 150 })}
         </div>
         <div class="grid-2">
           <div class="card card-pad">
-            <div class="card-title mb-8">平均延迟（ms）</div>
+            <div class="card-title mb-8">${rqI18n.t('平均延迟')}（ms）</div>
             ${lineChart([metrics.series.map((s) => s.avgLatency)], { width: 300, height: 130 })}
           </div>
           <div class="card card-pad">
-            <div class="card-title mb-8">错误数</div>
+            <div class="card-title mb-8">${rqI18n.t('错误数')}</div>
             ${barChart(metrics.series.map((s) => ({ label: s.minute, value: s.errors })), { width: 300, height: 130, color: '#ef4444' })}
           </div>
         </div>
         <div class="card card-pad mt-14">
-          <div class="card-title mb-8">按调用方统计</div>
+          <div class="card-title mb-8">${rqI18n.t('按调用方统计')}</div>
           ${metrics.callers.map((c) => `
             <div class="flex" style="padding:6px 0;border-bottom:1px solid var(--border)">
-              <span class="badge ${c.callerType === 'agent' ? 'badge-purple' : 'badge-brand'} no-dot">${c.callerType === 'agent' ? 'Agent' : '用户'}</span>
+              <span class="badge ${c.callerType === 'agent' ? 'badge-purple' : 'badge-brand'} no-dot">${c.callerType === 'agent' ? 'Agent' : rqI18n.t('用户')}</span>
               <span class="fs-13 grow">${esc(c.callerName)}</span>
               <span class="col-num">${esc(rqI18n.t('{n} 次', { n: fmtNum(c.calls) }))}</span>
             </div>`).join('') || `<span class="text-4 fs-12">${esc(rqI18n.t('暂无调用'))}</span>`}
@@ -287,7 +287,7 @@ async function openServiceDetail(id, ctx) {
             </div>
             <div class="fs-12 text-3 mt-8">${esc(tool.description)}</div>
           </div>
-          <button class="btn btn-default btn-sm stop" data-try="${esc(tool.name)}">${icon('play', 12)}试调用</button>
+          <button class="btn btn-default btn-sm stop" data-try="${esc(tool.name)}">${icon('play', 12)}${rqI18n.t('试调用')}</button>
         </div>`).join('')
       tabBody.querySelectorAll('[data-try]').forEach((btn) => {
         btn.onclick = () => openTryInvoke(svcData, btn.dataset.try, ctx)
@@ -308,7 +308,7 @@ async function openServiceDetail(id, ctx) {
         </div>`
       tabBody.querySelectorAll('[data-rollback]').forEach((btn) => {
         btn.onclick = async () => {
-          const result = await confirmDialog({ title: '版本回滚', message: rqI18n.t('将 <b>{name}</b> 回滚到 <b>v{version}</b>，调用方将在下一次请求生效。', { name: esc(svcData.name), version: esc(btn.dataset.rollback) }), confirmText: '回滚' })
+          const result = await confirmDialog({ title: rqI18n.t('版本回滚'), message: rqI18n.t('将 <b>{name}</b> 回滚到 <b>v{version}</b>，调用方将在下一次请求生效。', { name: esc(svcData.name), version: esc(btn.dataset.rollback) }), confirmText: rqI18n.t('回滚') })
           if (!result) return
           try {
             await api.post(`/api/mcp/services/${svcData.id}/rollback`, { targetVersion: btn.dataset.rollback })
@@ -321,12 +321,12 @@ async function openServiceDetail(id, ctx) {
       tabBody.innerHTML = ''
       const table = renderTable({
         columns: [
-          { title: '时间', width: 130, render: (c) => `<span class="fs-12 text-3">${timeAgo(c.at)}</span>` },
-          { title: '工具', render: (c) => `<span class="mono fs-12">${esc(c.tool)}</span>` },
-          { title: '调用方', render: (c) => esc(c.callerName) },
-          { title: '版本', render: (c) => `<span class="fs-12 text-3">v${esc(c.version)}</span>` },
-          { title: '状态', width: 100, render: (c) => statusBadge(c.status === 'ok' ? 'ok' : c.status) },
-          { title: '延迟', width: 80, render: (c) => `<span class="col-num">${c.latencyMs}ms</span>` },
+          { title: rqI18n.t('时间'), width: 130, render: (c) => `<span class="fs-12 text-3">${timeAgo(c.at)}</span>` },
+          { title: rqI18n.t('工具'), render: (c) => `<span class="mono fs-12">${esc(c.tool)}</span>` },
+          { title: rqI18n.t('调用方'), render: (c) => esc(c.callerName) },
+          { title: rqI18n.t('版本'), render: (c) => `<span class="fs-12 text-3">v${esc(c.version)}</span>` },
+          { title: rqI18n.t('状态'), width: 100, render: (c) => statusBadge(c.status === 'ok' ? 'ok' : c.status) },
+          { title: rqI18n.t('延迟'), width: 80, render: (c) => `<span class="col-num">${c.latencyMs}ms</span>` },
           { title: 'Token', width: 80, render: (c) => `<span class="col-num">${c.tokens || '—'}</span>` },
         ],
         rows: calls.items,
@@ -406,7 +406,7 @@ async function openServiceDetail(id, ctx) {
   const deleteBtn = drawer.el.querySelector('#svc-delete')
   if (deleteBtn) deleteBtn.onclick = async () => {
     const result = await confirmDialog({
-      title: rqI18n.t('删除 MCP 服务 · {name}', { name: svcData.name }), requireReason: true, danger: true, confirmText: '确认删除',
+      title: rqI18n.t('删除 MCP 服务 · {name}', { name: svcData.name }), requireReason: true, danger: true, confirmText: rqI18n.t('确认删除'),
       message: rqI18n.t('将永久删除 <b>{name}</b> 的服务登记（含工具清单与探活状态），操作不可恢复；调用明细与审计数据保留。', { name: esc(svcData.name) }),
     })
     if (!result) return
@@ -422,12 +422,12 @@ function openGrayDialog(svc, drawer, ctx) {
     title: rqI18n.t('灰度发布 · {name}', { name: svc.name }),
     body: `
       <div class="muted-box mb-14" style="display:flex;gap:8px">
-        ${icon('info', 15)}<span>灰度按调用方标签路由：未命中灰度比例的调用将继续走 <b>v${esc(svc.versions.find((v) => v.status === 'previous')?.version ?? svc.currentVersion)}</b> 稳定版本。</span>
+        ${icon('info', 15)}<span>${rqI18n.t('灰度按调用方标签路由')}：${rqI18n.t('未命中灰度比例的调用将继续走')} <b>v${esc(svc.versions.find((v) => v.status === 'previous')?.version ?? svc.currentVersion)}</b> ${rqI18n.t('稳定版本')}。</span>
       </div>
       ${field(rqI18n.t('灰度比例（%）'), `<input class="input" type="range" min="0" max="100" step="5" value="${svc.grayPercent || 10}" id="gray-range" oninput="this.nextElementSibling.textContent=this.value+'%'"><div style="font-weight:600;margin-top:4px">${svc.grayPercent || 10}%</div>`)}
       ${field(rqI18n.t('新版本号'), inputField('version', { value: bumpPatch(svc.currentVersion) }))}
       ${field(rqI18n.t('变更说明'), textareaField('changelog', { placeholder: rqI18n.t('本次发布内容…') }))}`,
-    foot: `<button class="btn btn-default" data-dryrun>预演影响面</button><button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>发布</button>`,
+    foot: `<button class="btn btn-default" data-dryrun>${rqI18n.t('预演影响面')}</button><button class="btn btn-default" data-cancel>${rqI18n.t('取消')}</button><button class="btn btn-primary" data-ok>${rqI18n.t('发布')}</button>`,
   })
   const body = modal.body
   modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
@@ -438,7 +438,7 @@ function openGrayDialog(svc, drawer, ctx) {
         ? result.impact.map((i) => `<li>${esc(rqI18n.t('{name}（{type}）', { name: i.name, type: rqI18n.t(typeLabel(i.type)) }))}</li>`).join('')
         : `<li>${esc(rqI18n.t('无直接依赖方，可安全发布'))}</li>`
       modal.close()
-      openModal({ title: '影响面预演（dry-run）', body: `<div class="form-hint">以下资源可能受到本次发布影响：</div><ul style="padding-left:18px;line-height:2">${impact}</ul><div class="muted-box mt-14">dry-run 未执行任何变更。</div>`, foot: `<button class="btn btn-primary" data-ok>${esc(rqI18n.t('知道了'))}</button>` })
+      openModal({ title: rqI18n.t('影响面预演（dry-run）'), body: `<div class="form-hint">${rqI18n.t('以下资源可能受到本次发布影响')}：</div><ul style="padding-left:18px;line-height:2">${impact}</ul><div class="muted-box mt-14">dry-run ${rqI18n.t('未执行任何变更')}。</div>`, foot: `<button class="btn btn-primary" data-ok>${esc(rqI18n.t('知道了'))}</button>` })
         .el.querySelector('[data-ok]').onclick = () => openGrayDialog(svc, drawer, ctx)
     } catch (error) { toast(error.message, 'error') }
   }
@@ -458,15 +458,15 @@ function openDeployWizard(ctx) {
   let step = 1
   const state = { transport: 'http' }
   const modal = openModal({
-    title: '接入 MCP 服务', wide: true,
+    title: rqI18n.t('接入 MCP 服务'), wide: true,
     body: `
       <div class="flex mb-20" style="gap:6px" id="wiz-steps">
-        ${wizardStep(1, '选择来源', true)}${wizardArrow()}${wizardStep(2, '配置', false)}${wizardArrow()}${wizardStep(3, '验证发布', false)}
+        ${wizardStep(1, rqI18n.t('选择来源'), true)}${wizardArrow()}${wizardStep(2, rqI18n.t('配置'), false)}${wizardArrow()}${wizardStep(3, rqI18n.t('验证发布'), false)}
       </div>
       <div id="wiz-body"></div>`,
     foot: `
-      <button class="btn btn-default" id="wiz-prev" style="visibility:hidden">上一步</button>
-      <button class="btn btn-primary" id="wiz-next">下一步</button>`,
+      <button class="btn btn-default" id="wiz-prev" style="visibility:hidden">${rqI18n.t('上一步')}</button>
+      <button class="btn btn-primary" id="wiz-next">${rqI18n.t('下一步')}</button>`,
   })
   const bodyEl = modal.body.querySelector('#wiz-body')
   const prevBtn = modal.el.querySelector('#wiz-prev')
@@ -478,14 +478,14 @@ function openDeployWizard(ctx) {
       el.classList.toggle('done', index + 1 < step)
     })
     prevBtn.style.visibility = step === 1 ? 'hidden' : ''
-    nextBtn.textContent = step === 3 ? (state.source === 'import' ? '导入并上线' : '验证并发布') : '下一步'
+    nextBtn.textContent = step === 3 ? (state.source === 'import' ? rqI18n.t('导入并上线') : rqI18n.t('验证并发布')) : rqI18n.t('下一步')
     if (step === 1) {
       bodyEl.innerHTML = `
         <div class="card-grid" style="grid-template-columns:1fr 1fr">
-          ${sourceCard('import', '配置导入（JSON）', '粘贴 Claude / Cursor 等工具的 mcpServers 配置，自动注册并发现工具', 'clipboard')}
-          ${sourceCard('endpoint', '外部服务注册', '手动登记 endpoint 与传输协议', 'globe')}
-          ${sourceCard('template', '平台模板', '容器化托管，提供运行时模板与镜像', 'box')}
-          ${sourceCard('image', '自有镜像', '指定容器镜像，由平台托管部署', 'server')}
+          ${sourceCard('import', rqI18n.t('配置导入（JSON）'), rqI18n.t('粘贴 Claude / Cursor 等工具的 mcpServers 配置，自动注册并发现工具'), 'clipboard')}
+          ${sourceCard('endpoint', rqI18n.t('外部服务注册'), rqI18n.t('手动登记 endpoint 与传输协议'), 'globe')}
+          ${sourceCard('template', rqI18n.t('平台模板'), rqI18n.t('容器化托管，提供运行时模板与镜像'), 'box')}
+          ${sourceCard('image', rqI18n.t('自有镜像'), rqI18n.t('指定容器镜像，由平台托管部署'), 'server')}
         </div>`
       bodyEl.querySelectorAll('[data-source]').forEach((card) => {
         card.onclick = () => {
@@ -499,9 +499,9 @@ function openDeployWizard(ctx) {
       bodyEl.innerHTML = `
         <div class="form-grid">
           <div class="form-item full">
-            <label class="form-label">MCP 配置 JSON<span class="req">*</span></label>
+            <label class="form-label">MCP ${rqI18n.t('配置')} JSON<span class="req">*</span></label>
             <textarea class="form-control" name="config" rows="10" style="font-family:var(--mono);font-size:12px" placeholder='${esc(JSON.stringify({ mcpServers: { 'teambition-mcp': { type: 'streamableHttp', url: `https://open.teambition.com/api/mcp?userToken=${esc(rqI18n.t('你的令牌'))}` } } }, null, 2))}'>${esc(state.config ?? '')}</textarea>
-            <div class="form-hint">支持 Claude Desktop / Cursor / Cherry Studio 等工具通行的 mcpServers 格式；http、streamableHttp、sse 类型均可导入，导入后自动拉取远端工具清单并上线。token 已含在 url 中的配置可直接粘贴。</div>
+            <div class="form-hint">${rqI18n.t('支持')} Claude Desktop / Cursor / Cherry Studio ${rqI18n.t('等工具通行的')} mcpServers ${rqI18n.t('格式')}；http、streamableHttp、sse ${rqI18n.t('类型均可导入')}，${rqI18n.t('导入后自动拉取远端工具清单并上线')}。token ${rqI18n.t('已含在')} url ${rqI18n.t('中的配置可直接粘贴')}。</div>
           </div>
         </div>`
       return
@@ -510,19 +510,19 @@ function openDeployWizard(ctx) {
       const isExternal = state.source === 'endpoint'
       bodyEl.innerHTML = `
         <div class="form-grid">
-          ${field('服务名称', inputField('name', { value: state.name }), { required: true })}
-          ${field('服务标识', inputField('slug', { value: state.slug, placeholder: '小写字母与中划线' }), { hint: '唯一标识，用于权限组与调用' })}
-          ${field('业务分类', selectField('category', ASSET_CATEGORIES.map((c) => ({ value: c, label: rqI18n.t(c) })), { value: state.category }), { hint: '各资产板块统一口径，市场/目录按此筛选' })}
-          ${field(isExternal ? '服务 Endpoint' : '运行地址', inputField('endpoint', { value: state.endpoint, placeholder: isExternal ? 'https://your-mcp.example.com/mcp' : '自动生成' }), { required: isExternal, full: true })}
+          ${field(rqI18n.t('服务名称'), inputField('name', { value: state.name }), { required: true })}
+          ${field(rqI18n.t('服务标识'), inputField('slug', { value: state.slug, placeholder: rqI18n.t('小写字母与中划线') }), { hint: rqI18n.t('唯一标识，用于权限组与调用') })}
+          ${field(rqI18n.t('业务分类'), selectField('category', ASSET_CATEGORIES.map((c) => ({ value: c, label: rqI18n.t(c) })), { value: state.category }), { hint: rqI18n.t('各资产板块统一口径，市场/目录按此筛选') })}
+          ${field(isExternal ? rqI18n.t('服务 Endpoint') : rqI18n.t('运行地址'), inputField('endpoint', { value: state.endpoint, placeholder: isExternal ? 'https://your-mcp.example.com/mcp' : rqI18n.t('自动生成') }), { required: isExternal, full: true })}
           <div class="form-item">
-            <label class="form-label">传输协议</label>
+            <label class="form-label">${rqI18n.t('传输协议')}</label>
             <div class="segmented">
               <span class="segmented-item ${state.transport === 'http' ? 'active' : ''}" data-t="http">HTTP</span>
               <span class="segmented-item ${state.transport === 'sse' ? 'active' : ''}" data-t="sse">SSE</span>
               <span class="segmented-item ${state.transport === 'stdio' ? 'active' : ''}" data-t="stdio">stdio</span>
             </div>
           </div>
-          ${field('服务描述', textareaField('description', { value: state.description, rows: 2 }), { full: true })}
+          ${field(rqI18n.t('服务描述'), textareaField('description', { value: state.description, rows: 2 }), { full: true })}
         </div>`
       bodyEl.querySelectorAll('.segmented-item').forEach((el) => {
         el.onclick = () => {
@@ -543,7 +543,7 @@ function openDeployWizard(ctx) {
       bodyEl.innerHTML = `
         <div class="grid-2">
           <div>
-            <div class="card-title mb-8">将导入以下服务</div>
+            <div class="card-title mb-8">${rqI18n.t('将导入以下服务')}</div>
             ${parseError
               ? `<div class="muted-box" style="color:var(--danger)">${esc(parseError)}</div>`
               : entries.map((entry) => `
@@ -552,40 +552,40 @@ function openDeployWizard(ctx) {
                     <span style="font-weight:600">${esc(entry.name)}</span>
                     <span class="badge badge-muted no-dot">${esc(entry.type)}</span>
                   </div>
-                  <div class="fs-12 text-3 mt-4 mono" style="word-break:break-all">${esc(entry.url || '（缺少 url，将被跳过）')}</div>
+                  <div class="fs-12 text-3 mt-4 mono" style="word-break:break-all">${esc(entry.url || rqI18n.t('（缺少 url，将被跳过）'))}</div>
                 </div>`).join('')}
-            ${checkItem(true, '导入后自动连接服务并发现工具清单')}
-            ${checkItem(true, '连接成功将自动测试验证并发布上线（草稿保留可回退）')}
+            ${checkItem(true, rqI18n.t('导入后自动连接服务并发现工具清单'))}
+            ${checkItem(true, rqI18n.t('连接成功将自动测试验证并发布上线（草稿保留可回退）'))}
           </div>
           <div>
-            <div class="card-title mb-8">导入说明</div>
+            <div class="card-title mb-8">${rqI18n.t('导入说明')}</div>
             <div class="code-block">POST /api/mcp/import
 mode: external
 exec: real
-tools: 远端自动发现（tools/list）</div>
-            <div class="form-hint mt-8">导入的服务与手动注册一致：经网关统一鉴权、限流熔断；在「权限组」为用户/Agent 授权后即可调用。</div>
+tools: ${rqI18n.t('远端自动发现')}（tools/list）</div>
+            <div class="form-hint mt-8">${rqI18n.t('导入的服务与手动注册一致')}：${rqI18n.t('经网关统一鉴权')}、${rqI18n.t('限流熔断')}；${rqI18n.t('在')}「${rqI18n.t('权限组')}」${rqI18n.t('为用户')}/Agent ${rqI18n.t('授权后即可调用')}。</div>
           </div>
         </div>`
       return
     }
     if (step === 3) {
-      const yaml = `# 配置预览（api.yaml 片段）
+      const yaml = `# ${rqI18n.t('配置预览')}（api.yaml ${rqI18n.t('片段')}）
 service: ${state.slug || 'my-service'}
 mode: ${state.source === 'endpoint' ? 'external' : 'hosted'}
 transport: ${state.transport || 'http'}
 endpoint: ${state.endpoint || `mcp+http://platform-hosted/${state.slug || 'my-service'}`}
-tools: []           # 部署后在「工具」页登记`
+tools: []           # ${rqI18n.t('部署后在')}「${rqI18n.t('工具')}」${rqI18n.t('页登记')}`
       bodyEl.innerHTML = `
         <div class="grid-2">
           <div>
-            <div class="card-title mb-8">检查清单</div>
-            ${checkItem(Boolean(state.name), '服务名称已填写')}
+            <div class="card-title mb-8">${rqI18n.t('检查清单')}</div>
+            ${checkItem(Boolean(state.name), rqI18n.t('服务名称已填写'))}
             ${checkItem(state.source !== 'endpoint' || Boolean(state.endpoint), state.source === 'endpoint' ? rqI18n.t('endpoint 已登记') : rqI18n.t('平台托管，自动分配地址'))}
-            ${checkItem(true, '安全审核：静态扫描通过（演示环境自动通过）')}
-            ${checkItem(true, '将进入「草稿」状态，需测试验证后发布')}
+            ${checkItem(true, rqI18n.t('安全审核：静态扫描通过（演示环境自动通过）'))}
+            ${checkItem(true, rqI18n.t('将进入「草稿」状态，需测试验证后发布'))}
           </div>
           <div>
-            <div class="card-title mb-8">配置预览</div>
+            <div class="card-title mb-8">${rqI18n.t('配置预览')}</div>
             <div class="code-block">${esc(yaml)}</div>
           </div>
         </div>`
@@ -665,11 +665,11 @@ async function openPermGroups(ctx) {
     api.get('/api/agents').catch(() => ({ agents: [] })),
   ])
   const drawer = openDrawer({
-    title: 'MCP 权限组',
-    sub: '权限组 = 一组 MCP 服务 + Tool 粒度访问策略，可绑定用户组 / Agent / 应用',
+    title: rqI18n.t('MCP 权限组'),
+    sub: rqI18n.t('权限组 = 一组 MCP 服务 + Tool 粒度访问策略，可绑定用户组 / Agent / 应用'),
     wide: true,
     body: `<div id="pg-list"></div>`,
-    foot: `<button class="btn btn-primary" id="pg-add">${icon('plus', 14)}新建权限组</button>`,
+    foot: `<button class="btn btn-primary" id="pg-add">${icon('plus', 14)}${rqI18n.t('新建权限组')}</button>`,
   })
   const list = drawer.body.querySelector('#pg-list')
   const renderList = () => {
@@ -697,7 +697,7 @@ async function openPermGroups(ctx) {
       </div>`).join('') || `<span class="text-4 fs-12">${esc(rqI18n.t('暂无权限组'))}</span>`
     list.querySelectorAll('[data-del]').forEach((btn) => {
       btn.onclick = async () => {
-        const result = await confirmDialog({ title: '删除权限组', message: '删除后相关主体的访问授权立即失效。', danger: true })
+        const result = await confirmDialog({ title: rqI18n.t('删除权限组'), message: rqI18n.t('删除后相关主体的访问授权立即失效。'), danger: true })
         if (!result) return
         await api.delete(`/api/mcp/perm-groups/${btn.dataset.del}`)
         toast(rqI18n.t('已删除')); drawer.close(); ctx.rerender()
@@ -751,28 +751,28 @@ async function openPermGroups(ctx) {
       // 主体候选：Agent / 用户组 / 应用 三类（与后端 subject 类型对齐）
       const subjectOptions = [
         ...(agentData.agents ?? []).map((a) => ({ value: `agent:${a.id}`, label: `${a.name}（${a.slug ?? a.id}）`, group: 'Agent' })),
-        ...(groupData.groups ?? []).map((g) => ({ value: `user_group:${g.id}`, label: g.name, group: '用户组' })),
-        ...(appData.apps ?? []).map((a) => ({ value: `app:${a.id}`, label: a.name, group: '应用' })),
+        ...(groupData.groups ?? []).map((g) => ({ value: `user_group:${g.id}`, label: g.name, group: rqI18n.t('用户组') })),
+        ...(appData.apps ?? []).map((a) => ({ value: `app:${a.id}`, label: a.name, group: rqI18n.t('应用') })),
       ]
       const modal = openModal({
         title: rqI18n.t('新建 MCP 权限组'), wide: true,
         body: `
           <div class="form-grid">
-            ${field('名称', inputField('name'), { required: true })}
-            ${field('描述', inputField('description'))}
+            ${field(rqI18n.t('名称'), inputField('name'), { required: true })}
+            ${field(rqI18n.t('描述'), inputField('description'))}
           </div>
-          <div class="card-title mb-8" style="margin-top:8px">服务与工具策略</div>
+          <div class="card-title mb-8" style="margin-top:8px">${rqI18n.t('服务与工具策略')}</div>
           ${services.services.map((s) => `
             <div class="card card-pad mb-8">
               <label class="flex mb-8"><input type="checkbox" data-service="${esc(s.id)}" style="accent-color:var(--brand-500)"><b>${esc(s.name)}</b></label>
               <div class="flex" style="gap:14px;padding-left:24px">
                 <label class="flex fs-12"><input type="checkbox" data-ro="${esc(s.id)}" style="accent-color:var(--brand-500)">${esc(rqI18n.t('只读模式（禁止 write/admin 工具）'))}</label>
-                <span class="fs-12 text-3">默认放开全部工具</span>
+                <span class="fs-12 text-3">${rqI18n.t('默认放开全部工具')}</span>
               </div>
             </div>`).join('')}
-          <div class="card-title mb-8">绑定主体</div>
-          <div class="fs-12 text-3 mb-8" style="margin-top:8px">绑定后主体立即获得对应工具访问权（用户组经 iam 圈人，Agent 按机器身份命中，应用按客户端身份命中）</div>
-          ${field('绑定主体（可多选）', multiSelectField('subjects', subjectOptions, { placeholder: '搜索并选择 Agent / 用户组 / 应用，可多选' }))}
+          <div class="card-title mb-8">${rqI18n.t('绑定主体')}</div>
+          <div class="fs-12 text-3 mb-8" style="margin-top:8px">${rqI18n.t('绑定后主体立即获得对应工具访问权')}（${rqI18n.t('用户组经')} iam ${rqI18n.t('圈人')}，Agent ${rqI18n.t('按机器身份命中')}，${rqI18n.t('应用按客户端身份命中')}）</div>
+          ${field(rqI18n.t('绑定主体（可多选）'), multiSelectField('subjects', subjectOptions, { placeholder: rqI18n.t('搜索并选择 Agent / 用户组 / 应用，可多选') }))}
           <div id="pg-impact" style="margin-top:8px"></div>`,
         foot: `<button class="btn btn-default" data-cancel>${esc(rqI18n.t('取消'))}</button><button class="btn btn-default" data-dryrun>${esc(rqI18n.t('预演影响面'))}</button><button class="btn btn-primary" data-ok>${esc(rqI18n.t('创建'))}</button>`,
       })
@@ -834,8 +834,8 @@ function openTryInvoke(svc, toolName, ctx) {
   const modal = openModal({
     title: rqI18n.t('试调用 · {name}', { name: toolName }),
     body: `
-      <div class="muted-box mb-14">通过统一网关调用（鉴权 / 限流 / 审计 / 指标全部生效）。参数以 JSON 输入。</div>
-      ${field('参数（JSON）', textareaField('args', { value: `{\n  "query": "${rqI18n.t('演示参数')}"\n}`, rows: 5 }))}`,
+      <div class="muted-box mb-14">${rqI18n.t('通过统一网关调用')}（${rqI18n.t('鉴权')} / ${rqI18n.t('限流')} / ${rqI18n.t('审计')} / ${rqI18n.t('指标全部生效')}）。${rqI18n.t('参数以')} JSON ${rqI18n.t('输入')}。</div>
+      ${field(rqI18n.t('参数（JSON）'), textareaField('args', { value: `{\n  "query": "${rqI18n.t('演示参数')}"\n}`, rows: 5 }))}`,
     foot: `<button class="btn btn-default" data-cancel>${esc(rqI18n.t('取消'))}</button><button class="btn btn-primary" data-ok>${esc(rqI18n.t('调用'))}</button>`,
   })
   modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
@@ -848,7 +848,7 @@ function openTryInvoke(svc, toolName, ctx) {
       const result = await api.post('/api/mcp/invoke', { serviceId: svc.id, tool: toolName, args })
       modal.close()
       openModal({
-        title: result.ok ? '调用成功' : rqI18n.t('调用失败（{status}）', { status: result.status }),
+        title: result.ok ? rqI18n.t('调用成功') : rqI18n.t('调用失败（{status}）', { status: result.status }),
         body: `<div class="code-block">${esc(JSON.stringify({ status: result.status, latencyMs: result.latencyMs, version: result.version, result: result.result ?? result.error }, null, 2))}</div>`,
         foot: `<button class="btn btn-primary" data-ok>${esc(rqI18n.t('关闭'))}</button>`,
       })
@@ -864,13 +864,13 @@ function openTryInvoke(svc, toolName, ctx) {
 
 /** 服务级数据面错误域码表（契约 §7：拒绝必带领域码，前端提示口径与 agent-onboarding §4.6 一致）。 */
 const DATAPLANE_ERRORS = [
-  ['-32003', 'AUDIENCE_MISMATCH', '令牌受众与本服务不符：用 audience=mcp:service:<slug> 重新换牌'],
-  ['-32003', 'TOOL_NOT_VISIBLE_OR_DENIED', '工具不在你的可见清单或被权限组拒绝（列表即边界，勿硬闯）'],
-  ['-32004', 'RATE_LIMITED', '触发限流：稍后重试，不要并发硬闯'],
-  ['-32003', 'BREAKER_OPEN', '上游连续失败已熔断：探活恢复后自动闭合'],
-  ['-32003', 'SERVICE_OFFLINE', '服务已下线'],
-  ['-32003', 'SERVICE_NOT_PUBLISHED', '服务未发布（草稿 / 验证中）'],
-  ['-32000', 'SERVICE_NOT_FOUND', '服务不存在（检查 slug）'],
+  ['-32003', 'AUDIENCE_MISMATCH', rqI18n.t('令牌受众与本服务不符：用 audience=mcp:service:<slug> 重新换牌')],
+  ['-32003', 'TOOL_NOT_VISIBLE_OR_DENIED', rqI18n.t('工具不在你的可见清单或被权限组拒绝（列表即边界，勿硬闯）')],
+  ['-32004', 'RATE_LIMITED', rqI18n.t('触发限流：稍后重试，不要并发硬闯')],
+  ['-32003', 'BREAKER_OPEN', rqI18n.t('上游连续失败已熔断：探活恢复后自动闭合')],
+  ['-32003', 'SERVICE_OFFLINE', rqI18n.t('服务已下线')],
+  ['-32003', 'SERVICE_NOT_PUBLISHED', rqI18n.t('服务未发布（草稿 / 验证中）')],
+  ['-32000', 'SERVICE_NOT_FOUND', rqI18n.t('服务不存在（检查 slug）')],
 ]
 
 /** 治理待办横幅（W1-T2 契约 §5）：unowned / 明文凭证 / 非 gateway 计数 + 可展开清单；空待办不渲染。 */
@@ -979,7 +979,7 @@ async function openCredentialMigrate(ctx) {
           <span class="mono fs-12 text-3">${esc((c.keys ?? []).join('、'))}</span>
         </div>`).join('')}`
       : `<div class="muted-box" style="display:flex;gap:8px">${icon('check', 15)}<span>${esc(rqI18n.t('未发现明文敏感头，无需迁移。'))}</span></div>`,
-    foot: `<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>${esc(candidates.length ? rqI18n.t('执行迁移') : rqI18n.t('关闭'))}</button>`,
+    foot: `<button class="btn btn-default" data-cancel>${rqI18n.t('取消')}</button><button class="btn btn-primary" data-ok>${esc(candidates.length ? rqI18n.t('执行迁移') : rqI18n.t('关闭'))}</button>`,
   })
   modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
   modal.el.querySelector('[data-ok]').onclick = async (e) => {
@@ -1049,21 +1049,21 @@ function dataplaneSnippet(svc) {
   const origin = location.origin
   const ep = `${origin}/mcp/services/${svc.slug}`
   return [
-    `# ① 机器令牌换服务级委托令牌（audience 绑定本服务，默认 900 秒）`,
+    `# ① ${rqI18n.t('机器令牌换服务级委托令牌')}（audience ${rqI18n.t('绑定本服务')}，${rqI18n.t('默认')} 900 ${rqI18n.t('秒')}）`,
     `curl -s -X POST ${origin}/api/authn/token/exchange \\`,
     `  -H "Authorization: Bearer <agent-token>" -H 'content-type: application/json' \\`,
     `  -d '{"audience":"mcp:service:${svc.slug}"}'`,
     ``,
-    `# ② initialize 握手（回 mcp-session-id，serverInfo.name=mcp:${svc.slug}）`,
+    `# ② initialize ${rqI18n.t('握手')}（${rqI18n.t('回')} mcp-session-id，serverInfo.name=mcp:${svc.slug}）`,
     `curl -s -X POST ${ep} \\`,
     `  -H "Authorization: Bearer <service-token>" -H 'content-type: application/json' \\`,
     `  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"my-client","version":"1.0"}}}'`,
     ``,
-    `# ③ tools/list（按身份过滤）与 ④ tools/call（统一网关链：鉴权/限流/熔断/审计/计量）`,
+    `# ③ tools/list（${rqI18n.t('按身份过滤')}）${rqI18n.t('与')} ④ tools/call（${rqI18n.t('统一网关链')}：${rqI18n.t('鉴权')}/${rqI18n.t('限流')}/${rqI18n.t('熔断')}/${rqI18n.t('审计')}/${rqI18n.t('计量')}）`,
     `curl -s -X POST ${ep} -H "Authorization: Bearer <service-token>" \\`,
     `  -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'`,
     `curl -s -X POST ${ep} -H "Authorization: Bearer <service-token>" \\`,
-    `  -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"<工具名>","arguments":{}}}'`,
+    `  -H 'content-type: application/json' -d rqI18n.t('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"<工具名>","arguments":{}}}')`,
   ].join('\n')
 }
 
@@ -1111,7 +1111,7 @@ function impactReportHtml(report) {
 }
 
 function subjectLabel(type) {
-  return { user_group: '用户组', agent: 'Agent', app: '应用' }[type] ?? (type ?? '—')
+  return { user_group: rqI18n.t('用户组'), agent: 'Agent', app: rqI18n.t('应用') }[type] ?? (type ?? '—')
 }
 
 // ---------- helpers ----------
@@ -1133,16 +1133,16 @@ function trafficClass(health) {
   return { healthy: 'traffic-green', degraded: 'traffic-yellow', down: 'traffic-red' }[health] ?? 'traffic-gray'
 }
 function healthLabel(health) {
-  return { healthy: '健康', degraded: '降级', down: '不可用' }[health] ?? '未知'
+  return { healthy: rqI18n.t('健康'), degraded: rqI18n.t('降级'), down: rqI18n.t('不可用') }[health] ?? rqI18n.t('未知')
 }
 function riskClass(level) {
   return { read: 'badge-ok', write: 'badge-warn', admin: 'badge-danger' }[level] ?? 'badge-muted'
 }
 function riskLabel(level) {
-  return { read: '只读', write: '可写', admin: '高危' }[level] ?? level
+  return { read: rqI18n.t('只读'), write: rqI18n.t('可写'), admin: rqI18n.t('高危') }[level] ?? level
 }
 function versionLabel(status) {
-  return { current: '当前版本', previous: '历史版本', 'rolled-back': '已回滚' }[status] ?? status
+  return { current: rqI18n.t('当前版本'), previous: rqI18n.t('历史版本'), 'rolled-back': rqI18n.t('已回滚') }[status] ?? status
 }
 function policyLabel(policy) {
   const tools = policy.allowedTools === '*' ? rqI18n.t('全部工具') : rqI18n.t('{n} 个工具', { n: policy.allowedTools.length })
@@ -1152,25 +1152,25 @@ function subjectClass(type) {
   return { user_group: 'badge-brand', agent: 'badge-purple', app: 'badge-info' }[type] ?? 'badge-muted'
 }
 function typeLabel(type) {
-  return { agent: 'Agent', app: '应用', skill: 'Skill', mcp_service: 'MCP' }[type] ?? type
+  return { agent: 'Agent', app: rqI18n.t('应用'), skill: 'Skill', mcp_service: 'MCP' }[type] ?? type
 }
 function dataClassLabel(cls) {
-  return { public: '公开', internal: '内部', confidential: '机密' }[cls] ?? (cls ?? '—')
+  return { public: rqI18n.t('公开'), internal: rqI18n.t('内部'), confidential: rqI18n.t('机密') }[cls] ?? (cls ?? '—')
 }
 function dataClassClass(cls) {
   return { public: 'badge-ok', internal: 'badge-info', confidential: 'badge-danger' }[cls] ?? 'badge-muted'
 }
 function exposureLabel(mode) {
-  return { gateway: '网关统一暴露', direct: '服务级直连', internal: '仅内部调用' }[mode] ?? (mode ?? '—')
+  return { gateway: rqI18n.t('网关统一暴露'), direct: rqI18n.t('服务级直连'), internal: rqI18n.t('仅内部调用') }[mode] ?? (mode ?? '—')
 }
 function visibilityLabel(visibility) {
-  return { org: '本组织', tenant: '同租户', 'cross-org': '跨组织（需审批）' }[visibility] ?? (visibility ?? '—')
+  return { org: rqI18n.t('本组织'), tenant: rqI18n.t('同租户'), 'cross-org': rqI18n.t('跨组织（需审批）') }[visibility] ?? (visibility ?? '—')
 }
 function envStageLabel(env) {
-  return { dev: '开发（dev）', staging: '预发（staging）', prod: '生产（prod）' }[env] ?? (env ?? '—')
+  return { dev: rqI18n.t('开发（dev）'), staging: rqI18n.t('预发（staging）'), prod: rqI18n.t('生产（prod）') }[env] ?? (env ?? '—')
 }
 function ownerEntityTypeLabel(type) {
-  return { platform: '平台', app: '应用', agent: 'Agent', connector: '连接器' }[type] ?? type
+  return { platform: rqI18n.t('平台'), app: rqI18n.t('应用'), agent: 'Agent', connector: rqI18n.t('连接器') }[type] ?? type
 }
 /** 敏感头判定（与后端 maskServiceHeaders / SecretBroker 注入同口径）：/authorization|token|secret|key/i。 */
 function sensitiveHeaderKeys(headers) {

@@ -32,9 +32,9 @@ export async function renderAgents(content, params, ctx) {
     title: rqI18n.t('Agent 是什么？'),
     subtitle: rqI18n.t('Agent = 能替人执行任务的智能助手，注册后即拥有平台身份。'),
     points: [
-      '注册即纳管：平台颁发唯一 ID 与机器凭证，权限边界清晰。',
-      '上线要审批：上线走审批流，下线自动吊销凭证并通知绑定用户。',
-      '全程可追溯：每个 Agent 的调用、成本、审计都能穿透到人。',
+      rqI18n.t('注册即纳管：平台颁发唯一 ID 与机器凭证，权限边界清晰。'),
+      rqI18n.t('上线要审批：上线走审批流，下线自动吊销凭证并通知绑定用户。'),
+      rqI18n.t('全程可追溯：每个 Agent 的调用、成本、审计都能穿透到人。'),
     ],
   })
 
@@ -42,31 +42,31 @@ export async function renderAgents(content, params, ctx) {
     <div class="page-head">
       <div>
         <div class="micro-label">AGENT FLEET</div>
-        <div class="page-title">Agent 本体</div>
-        <div class="page-sub">注册即纳管：颁发唯一 ID 与机器身份凭证；上线走审批，下线联动吊销凭证并通知绑定用户。</div>
+        <div class="page-title">Agent ${rqI18n.t('本体')}</div>
+        <div class="page-sub">${rqI18n.t('注册即纳管')}：${rqI18n.t('颁发唯一')} ID ${rqI18n.t('与机器身份凭证')}；${rqI18n.t('上线走审批')}，${rqI18n.t('下线联动吊销凭证并通知绑定用户')}。</div>
       </div>
       <div class="page-actions">
         <div class="segmented" id="agent-view">
-          <span class="segmented-item active" data-v="card">${icon('app', 14)}卡片</span>
-          <span class="segmented-item" data-v="table">${icon('scroll', 14)}表格</span>
+          <span class="segmented-item active" data-v="card">${icon('app', 14)}${rqI18n.t('卡片')}</span>
+          <span class="segmented-item" data-v="table">${icon('scroll', 14)}${rqI18n.t('表格')}</span>
         </div>
-        ${session.can('agent.write') ? `<button class="btn btn-primary" id="agent-add">${icon('plus', 14)}注册 Agent</button>` : ''}
+        ${session.can('agent.write') ? `<button class="btn btn-primary" id="agent-add">${icon('plus', 14)}${rqI18n.t('注册')} Agent</button>` : ''}
       </div>
     </div>
     <div class="filter-bar">
-      <div class="search-input">${icon('search')}<input class="input" id="agent-q" placeholder="搜索名称 / 标识"></div>
+      <div class="search-input">${icon('search')}<input class="input" id="agent-q" placeholder="${rqI18n.t('搜索名称 / 标识')}"></div>
       <div class="chips" id="agent-status">
-        <span class="chip active" data-s="">全部</span>
-        <span class="chip" data-s="online">已上线</span>
-        <span class="chip" data-s="trial">试运行</span>
-        <span class="chip" data-s="draft">开发中</span>
-        <span class="chip" data-s="offline">已下线</span>
+        <span class="chip active" data-s="">${rqI18n.t('全部')}</span>
+        <span class="chip" data-s="online">${rqI18n.t('已上线')}</span>
+        <span class="chip" data-s="trial">${rqI18n.t('试运行')}</span>
+        <span class="chip" data-s="draft">${rqI18n.t('开发中')}</span>
+        <span class="chip" data-s="offline">${rqI18n.t('已下线')}</span>
       </div>
       <span class="fs-12 text-3" style="margin-left:auto" id="agent-count"></span>
     </div>
     <div class="filter-bar" style="margin-top:-10px">
       <div class="chips" id="agent-cats">
-        <span class="chip active" data-c="">全部</span>
+        <span class="chip active" data-c="">${rqI18n.t('全部')}</span>
         ${ASSET_CATEGORIES.map((cat) => `<span class="chip" data-c="${cat}">${cat}</span>`).join('')}
       </div>
     </div>
@@ -86,7 +86,7 @@ export async function renderAgents(content, params, ctx) {
     const holder = $('#agent-list')
     holder.innerHTML = ''
     if (!list.length) {
-      holder.appendChild(emptyState({ title: '没有匹配的 Agent', desc: '调整筛选条件，或注册你的第一个 Agent', ...(session.can('agent.write') ? { actionText: '注册 Agent', onAction: () => $('#agent-add').click() } : {}), icon: 'bot' }))
+      holder.appendChild(emptyState({ title: rqI18n.t('没有匹配的 Agent'), desc: rqI18n.t('调整筛选条件，或注册你的第一个 Agent'), ...(session.can('agent.write') ? { actionText: rqI18n.t('注册 Agent'), onAction: () => $('#agent-add').click() } : {}), icon: 'bot' }))
       return
     }
     if (view === 'card') {
@@ -111,7 +111,7 @@ export async function renderAgents(content, params, ctx) {
             <div class="res-foot">
               <span class="metric">${icon('activity', 13)}${esc(rqI18n.t('{n} 调用', { n: fmtNum(agent.metrics.calls) }))}</span>
               <span class="metric">${icon('check', 13)}${fmtPct(agent.metrics.successRate)}</span>
-              ${agent.attrs['entryUrl'] ? `<a class="btn btn-ghost btn-sm" data-entry href="javascript:void(0)">${icon('external', 13)}交互界面</a>` : ''}
+              ${agent.attrs['entryUrl'] ? `<a class="btn btn-ghost btn-sm" data-entry href="javascript:void(0)">${icon('external', 13)}${rqI18n.t('交互界面')}</a>` : ''}
               <span style="margin-left:auto" class="text-4">${esc(agent.attrs['ownerName'] ?? '')}</span>
             </div>
           </div>`)
@@ -128,14 +128,14 @@ export async function renderAgents(content, params, ctx) {
             title: 'Agent', width: '24%',
             render: (a) => `<div class="flex" style="gap:10px"><span style="font-size:18px">${esc(a.attrs['avatar'] ?? '🤖')}</span><div><div class="col-strong">${esc(a.name)}</div><div class="col-sub mono">${esc(a.slug)}</div></div></div>`,
           },
-          { title: '状态', width: 90, render: (a) => statusBadge(a.status) },
+          { title: rqI18n.t('状态'), width: 90, render: (a) => statusBadge(a.status) },
           { title: rqI18n.t('业务分类'), width: 80, render: (a) => `<span class="fs-12">${esc(rqI18n.t(assetCategory(a.attrs)))}</span>` },
-          { title: '模型', render: (a) => `<span class="mono fs-12">${esc(a.attrs['model'] ?? '—')}</span>` },
-          { title: '负责人', render: (a) => esc(a.attrs['ownerName'] ?? '—') },
-          { title: '调用', width: 90, render: (a) => `<span class="col-num">${fmtNum(a.metrics.calls)}</span>` },
-          { title: '成功率', width: 90, render: (a) => `<span class="col-num">${fmtPct(a.metrics.successRate)}</span>` },
+          { title: rqI18n.t('模型'), render: (a) => `<span class="mono fs-12">${esc(a.attrs['model'] ?? '—')}</span>` },
+          { title: rqI18n.t('负责人'), render: (a) => esc(a.attrs['ownerName'] ?? '—') },
+          { title: rqI18n.t('调用'), width: 90, render: (a) => `<span class="col-num">${fmtNum(a.metrics.calls)}</span>` },
+          { title: rqI18n.t('成功率'), width: 90, render: (a) => `<span class="col-num">${fmtPct(a.metrics.successRate)}</span>` },
           { title: 'Token', width: 90, render: (a) => `<span class="col-num">${fmtNum(a.metrics.tokens)}</span>` },
-          { title: '数据密级', width: 90, render: (a) => `<span class="fs-12">${dataClassLabel(a.attrs['dataClass'])}</span>` },
+          { title: rqI18n.t('数据密级'), width: 90, render: (a) => `<span class="fs-12">${dataClassLabel(a.attrs['dataClass'])}</span>` },
         ],
         rows: list,
         onRowClick: (id) => openAgentDetail(id, ctx),
@@ -191,22 +191,22 @@ async function openAgentDetail(id, ctx) {
       </div>
 
       <div class="stat-grid mb-20" style="grid-template-columns:repeat(4,1fr)">
-        ${miniStat('activity', '累计调用', fmtNum(agent.metrics.calls))}
-        ${miniStat('check', '成功率', fmtPct(agent.metrics.successRate))}
-        ${miniStat('coins', 'Token 消耗', fmtNum(agent.metrics.tokens))}
-        ${miniStat('clock', '平均响应', agent.metrics.avgLatencyMs + 'ms')}
+        ${miniStat('activity', rqI18n.t('累计调用'), fmtNum(agent.metrics.calls))}
+        ${miniStat('check', rqI18n.t('成功率'), fmtPct(agent.metrics.successRate))}
+        ${miniStat('coins', rqI18n.t('Token 消耗'), fmtNum(agent.metrics.tokens))}
+        ${miniStat('clock', rqI18n.t('平均响应'), agent.metrics.avgLatencyMs + 'ms')}
       </div>
 
       <div class="tabs" id="ag-tabs">
-        <div class="tab active" data-tab="overview">概览</div>
-        <div class="tab" data-tab="monitor">监控</div>
-        <div class="tab" data-tab="access">权限与绑定</div>
-        <div class="tab" data-tab="resources">资源授权</div>
-        <div class="tab" data-tab="mcp-cap">${icon('plug', 13)} 可调用 MCP 能力</div>
-        <div class="tab" data-tab="sso">${icon('key', 13)} SSO 配置</div>
-        <div class="tab" data-tab="deps">依赖拓扑</div>
-        <div class="tab" data-tab="audit">审计</div>
-        <div class="tab" data-tab="lifecycle">生命周期</div>
+        <div class="tab active" data-tab="overview">${rqI18n.t('概览')}</div>
+        <div class="tab" data-tab="monitor">${rqI18n.t('监控')}</div>
+        <div class="tab" data-tab="access">${rqI18n.t('权限与绑定')}</div>
+        <div class="tab" data-tab="resources">${rqI18n.t('资源授权')}</div>
+        <div class="tab" data-tab="mcp-cap">${icon('plug', 13)} ${rqI18n.t('可调用')} MCP ${rqI18n.t('能力')}</div>
+        <div class="tab" data-tab="sso">${icon('key', 13)} SSO ${rqI18n.t('配置')}</div>
+        <div class="tab" data-tab="deps">${rqI18n.t('依赖拓扑')}</div>
+        <div class="tab" data-tab="audit">${rqI18n.t('审计')}</div>
+        <div class="tab" data-tab="lifecycle">${rqI18n.t('生命周期')}</div>
       </div>
       <div id="ag-tab-body"></div>`,
     foot: footForStatus(agent, ctx),
@@ -219,37 +219,37 @@ async function openAgentDetail(id, ctx) {
         <div class="muted-box mb-14">${esc(agent.attrs['description'] ?? '')}</div>
         <div class="desc-grid">
           <div class="desc-item"><span class="k">Agent ID</span><span class="v mono">${esc(agent.id)}</span></div>
-          <div class="desc-item"><span class="k">底层模型</span><span class="v">${esc(agent.attrs['model'] ?? '—')}</span></div>
-          <div class="desc-item"><span class="k">交互界面</span><span class="v">${agent.attrs['entryUrl']
-            ? `<button class="btn btn-default btn-sm" id="ag-open-entry">${icon('external', 13)}带平台身份打开</button>`
+          <div class="desc-item"><span class="k">${rqI18n.t('底层模型')}</span><span class="v">${esc(agent.attrs['model'] ?? '—')}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('交互界面')}</span><span class="v">${agent.attrs['entryUrl']
+            ? `<button class="btn btn-default btn-sm" id="ag-open-entry">${icon('external', 13)}${rqI18n.t('带平台身份打开')}</button>`
             : agent.attrs['headless'] === true
-              ? '<span class="text-4">纯后台执行（headless 已声明，无交互界面）</span>'
+              ? rqI18n.t('<span class="text-4">纯后台执行（headless 已声明，无交互界面）</span>')
               : `<span class="text-4">${esc(rqI18n.t('未提报（接入后由 Agent 凭自身凭证 PATCH attrs.entryUrl）'))}</span>`}</span></div>
-          <div class="desc-item"><span class="k">机器凭证</span><span class="v">${agent.credential ? `<span class="badge badge-ok no-dot">${esc(rqI18n.t('已颁发'))}</span> <span class="mono fs-12">${esc(agent.credential.clientId)}</span>` : `<span class="text-4">${esc(rqI18n.t('未颁发'))}</span>`}</span></div>
-          <div class="desc-item"><span class="k">创建时间</span><span class="v">${timeAgo(agent.createdAt)}</span></div>
-          <div class="desc-item"><span class="k">最近活跃</span><span class="v">${agent.metrics.lastActiveAt ? timeAgo(agent.metrics.lastActiveAt) : '—'}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('机器凭证')}</span><span class="v">${agent.credential ? `<span class="badge badge-ok no-dot">${esc(rqI18n.t('已颁发'))}</span> <span class="mono fs-12">${esc(agent.credential.clientId)}</span>` : `<span class="text-4">${esc(rqI18n.t('未颁发'))}</span>`}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('创建时间')}</span><span class="v">${timeAgo(agent.createdAt)}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('最近活跃')}</span><span class="v">${agent.metrics.lastActiveAt ? timeAgo(agent.metrics.lastActiveAt) : '—'}</span></div>
         </div>
         ${agent.credential ? `
-          <div class="card-title mt-14 mb-8">凭证状态</div>
+          <div class="card-title mt-14 mb-8">${rqI18n.t('凭证状态')}</div>
           <div class="desc-grid">
-            <div class="desc-item"><span class="k">状态</span><span class="v">${agent.credential.status === 'active' ? '正常' : '已禁用'}</span></div>
-            <div class="desc-item"><span class="k">活跃令牌</span><span class="v">${esc(rqI18n.t('{n} 个', { n: agent.credential.activeTokens }))}</span></div>
+            <div class="desc-item"><span class="k">${rqI18n.t('状态')}</span><span class="v">${agent.credential.status === 'active' ? rqI18n.t('正常') : rqI18n.t('已禁用')}</span></div>
+            <div class="desc-item"><span class="k">${rqI18n.t('活跃令牌')}</span><span class="v">${esc(rqI18n.t('{n} 个', { n: agent.credential.activeTokens }))}</span></div>
           </div>
           <div class="flex mt-14">
-            <button class="btn btn-default btn-sm" id="ag-obo">${icon('fingerprint', 13)}签发 on-behalf-of 令牌</button>
+            <button class="btn btn-default btn-sm" id="ag-obo">${icon('fingerprint', 13)}${rqI18n.t('签发')} on-behalf-of ${rqI18n.t('令牌')}</button>
           </div>` : ''}`
       const oboBtn = tabBody.querySelector('#ag-obo')
       if (oboBtn) oboBtn.onclick = async () => {
         try {
           const result = await api.post(`/api/agents/${agent.id}/obo-token`)
           const modal = openModal({
-            title: '身份透传令牌（on-behalf-of）',
+            title: rqI18n.t('身份透传令牌（on-behalf-of）'),
             body: `
-              <div class="form-hint" style="margin-bottom:10px">该令牌携带完整 act 链：用户 → Agent。下游 MCP 可识别真实操作人，审计可还原完整链路。令牌仅本次完整展示，请立即复制保存。</div>
+              <div class="form-hint" style="margin-bottom:10px">${rqI18n.t('该令牌携带完整')} act ${rqI18n.t('链')}：${rqI18n.t('用户')} → Agent。${rqI18n.t('下游')} MCP ${rqI18n.t('可识别真实操作人')}，${rqI18n.t('审计可还原完整')}${rqI18n.t('链')}${rqI18n.t('路')}。${rqI18n.t('令牌仅本次完整展示')}，${rqI18n.t('请立即复制保存')}。</div>
               <div class="code-block" style="white-space:pre-wrap;word-break:break-all">${esc(rqI18n.t('act 链: {chain}', { chain: result.actChain.map((a) => `${a.name}(${a.type})`).join(' → ') }))}
 
 token:    ${esc(result.token)}</div>`,
-            foot: `<button class="btn btn-default" id="obo-copy">${icon('copy', 13)}复制完整令牌</button><button class="btn btn-primary" data-ok>关闭</button>`,
+            foot: `<button class="btn btn-default" id="obo-copy">${icon('copy', 13)}${rqI18n.t('复制完整令牌')}</button><button class="btn btn-primary" data-ok>${rqI18n.t('关闭')}</button>`,
           })
           modal.el.querySelector('#obo-copy').onclick = () => void copyText(result.token)
         } catch (error) { toast(error.message, 'error') }
@@ -260,20 +260,20 @@ token:    ${esc(result.token)}</div>`,
     if (tab === 'monitor') {
       tabBody.innerHTML = `
         <div class="card card-pad mb-14">
-          <div class="card-title mb-8">运营数据（Agent 提报口径 · 接入义务）</div>
+          <div class="card-title mb-8">${rqI18n.t('运营数据')}（Agent ${rqI18n.t('提报口径')} · ${rqI18n.t('接入义务')}）</div>
           <div class="stat-grid mb-8" style="grid-template-columns:repeat(3,1fr)">
-            ${miniStat('users', '今日 DAU', fmtNum(agent.metrics.dau ?? 0))}
-            ${miniStat('users', '今日对话用户（去重）', fmtNum(agent.metrics.uniqueUsers ?? 0))}
-            ${miniStat('activity', '累计对话会话', fmtNum(agent.metrics.sessions))}
+            ${miniStat('users', rqI18n.t('今日 DAU'), fmtNum(agent.metrics.dau ?? 0))}
+            ${miniStat('users', rqI18n.t('今日对话用户（去重）'), fmtNum(agent.metrics.uniqueUsers ?? 0))}
+            ${miniStat('activity', rqI18n.t('累计对话会话'), fmtNum(agent.metrics.sessions))}
           </div>
-          <div class="form-hint">由 Agent 每日主动提报（POST /api/agents/:id/metrics-report）；未提报即为本页空缺，可在审计中按 agent.metrics.report 追溯提报记录。</div>
+          <div class="form-hint">${rqI18n.t('由')} Agent ${rqI18n.t('每日主动提报')}（POST /api/agents/:id/metrics-report）；${rqI18n.t('未提报即为本页空缺')}，${rqI18n.t('可在审计中按')} agent.metrics.report ${rqI18n.t('追溯提报记录')}。</div>
         </div>
         <div class="card card-pad mb-14">
-          <div class="card-title mb-8">近 14 天调用量（网关自动归集口径）</div>
+          <div class="card-title mb-8">${rqI18n.t('近')} 14 ${rqI18n.t('天调用量')}（${rqI18n.t('网关自动归集口径')}）</div>
           ${lineChart([agent.metrics.series.map((s) => s.calls)], { width: 640, height: 150 })}
         </div>
         <div class="card card-pad">
-          <div class="card-title mb-8">近 14 天 Token 消耗</div>
+          <div class="card-title mb-8">${rqI18n.t('近')} 14 ${rqI18n.t('天')} Token ${rqI18n.t('消耗')}</div>
           ${barChartSafe(agent.metrics.series.map((s) => ({ label: s.date, value: s.tokens })), 640, 150)}
         </div>`
     }
@@ -287,7 +287,7 @@ token:    ${esc(result.token)}</div>`,
         const svcName = new Map((svcData.services ?? []).map((s) => [s.id, s.name]))
         const granted = (pgData.groups ?? []).filter((g) => (g.subjects ?? []).some((s) => s.type === 'agent' && s.id === agent.id))
         tabBody.innerHTML = granted.length ? `
-          <div class="card-title mb-8">MCP 资源授权（Agent 视角反查）</div>
+          <div class="card-title mb-8">MCP ${rqI18n.t('资源授权')}（Agent ${rqI18n.t('视角反查')}）</div>
           ${granted.map((g) => `
             <div class="card card-pad mb-10">
               <div class="flex"><b class="fs-13">${esc(g.name)}</b><span class="fs-12 text-4" style="margin-left:auto">${esc(g.description ?? '')}</span></div>
@@ -295,20 +295,20 @@ token:    ${esc(result.token)}</div>`,
                 <div class="flex fs-12" style="padding:6px 0;border-bottom:1px solid var(--border)">
                   <span class="mono">${esc(svcName.get(sid) ?? sid)}</span>
                   <span class="badge badge-muted no-dot" style="margin-left:auto">${p.allowedTools === '*' ? esc(rqI18n.t('全部工具')) : esc(rqI18n.t('{n} 个工具', { n: (p.allowedTools ?? []).length }))}</span>
-                  ${p.constraints?.readOnly ? '<span class="badge badge-info no-dot">只读</span>' : ''}
+                  ${p.constraints?.readOnly ? rqI18n.t('<span class="badge badge-info no-dot">只读</span>') : ''}
                 </div>`).join('')}
             </div>`).join('')}
-          <div class="form-hint mt-8">授权关系在「MCP 服务 → 权限组 → 绑定主体」中维护；MCP 网关强制校验，未授权服务的调用直接拒绝并在审计留痕。</div>
+          <div class="form-hint mt-8">${rqI18n.t('授权关系在')}「MCP ${rqI18n.t('服务')} → ${rqI18n.t('权限组')} → ${rqI18n.t('绑定主体')}」${rqI18n.t('中维护')}；MCP ${rqI18n.t('网关强制校验')}，${rqI18n.t('未授权')}${rqI18n.t('服务')}${rqI18n.t('的调用直接拒绝并在审计留痕')}。</div>
         ` : `
-          <div class="muted-box mb-14" style="display:flex;gap:8px">${icon('info', 15)}<span>该 Agent 尚未被任何 MCP 权限组授权——网关将拒绝其全部 MCP 调用。</span></div>
-          <div class="form-hint">前往「MCP 服务 → 权限组 → 绑定主体」勾选本 Agent，即可按服务/工具粒度授予访问范围（支持只读约束）。</div>
+          <div class="muted-box mb-14" style="display:flex;gap:8px">${icon('info', 15)}<span>${rqI18n.t('该')} Agent ${rqI18n.t('尚未被任何')} MCP ${rqI18n.t('权限组授权')}——${rqI18n.t('网关将拒绝其全部')} MCP ${rqI18n.t('调用')}。</span></div>
+          <div class="form-hint">${rqI18n.t('前往')}「MCP ${rqI18n.t('服务')} → ${rqI18n.t('权限组')} → ${rqI18n.t('绑定主体')}」${rqI18n.t('勾选本')} Agent，${rqI18n.t('即可按')}${rqI18n.t('服务')}/${rqI18n.t('工具粒度授予访问范围')}（${rqI18n.t('支持只读约束')}）。</div>
         `
       })()
     }
     if (tab === 'mcp-cap') renderMcpCapabilityTab(tabBody, agent)
     if (tab === 'access') {
       tabBody.innerHTML = `
-        <div class="card-title mb-8">${esc(rqI18n.t('绑定用户（{n}）', { n: agent.boundUsers.length }))}<span class="fs-12 text-3" style="font-weight:400;margin-left:8px">记录"哪些用户可使用该 Agent"，使用即授权留痕</span></div>
+        <div class="card-title mb-8">${esc(rqI18n.t('绑定用户（{n}）', { n: agent.boundUsers.length }))}<span class="fs-12 text-3" style="font-weight:400;margin-left:8px">${rqI18n.t('记录')}${rqI18n.t('哪些用户可使用该 Agent')}，${rqI18n.t('使用即授权留痕')}</span></div>
         <div class="mb-14">
           ${agent.boundUsers.map((b) => `
             <div class="flex" style="padding:8px 0;border-bottom:1px solid var(--border)">
@@ -316,9 +316,9 @@ token:    ${esc(result.token)}</div>`,
               <span class="fs-13 grow">${esc(b.userName)}</span>
               <span class="fs-11 text-4">${esc(rqI18n.t('{time} 由 {name} 绑定', { time: timeAgo(b.boundAt), name: b.boundBy }))}</span>
               <button class="btn btn-ghost btn-sm stop" data-unbind="${esc(b.userId)}" style="color:var(--danger)">${icon('x', 12)}</button>
-            </div>`).join('') || '<span class="text-4 fs-12">暂无绑定用户</span>'}
+            </div>`).join('') || rqI18n.t('<span class="text-4 fs-12">暂无绑定用户</span>')}
         </div>
-        <button class="btn btn-default btn-sm" id="ag-bind">${icon('plus', 13)}绑定用户</button>`
+        <button class="btn btn-default btn-sm" id="ag-bind">${icon('plus', 13)}${rqI18n.t('绑定用户')}</button>`
       tabBody.querySelectorAll('[data-unbind]').forEach((btn) => {
         btn.onclick = async () => {
           await api.delete(`/api/agents/${agent.id}/bindings/${btn.dataset.unbind}`)
@@ -329,8 +329,8 @@ token:    ${esc(result.token)}</div>`,
         const users = await api.get('/api/iam/users')
         const activeUsers = users.users.filter((u) => u.status === 'active')
         const modal = openModal({
-          title: '绑定用户',
-          body: field('选择用户', searchableSelectField('userId', activeUsers.map((u) => ({ value: u.id, label: rqI18n.t('{name}（{org}）', { name: u.displayName, org: u.orgName ?? '—' }) })), { placeholder: '点击选择，支持搜索姓名/组织' }), { required: true }),
+          title: rqI18n.t('绑定用户'),
+          body: field(rqI18n.t('选择用户'), searchableSelectField('userId', activeUsers.map((u) => ({ value: u.id, label: rqI18n.t('{name}（{org}）', { name: u.displayName, org: u.orgName ?? '—' }) })), { placeholder: rqI18n.t('点击选择，支持搜索姓名/组织') }), { required: true }),
           foot: `<button class="btn btn-default" data-cancel>${esc(rqI18n.t('取消'))}</button><button class="btn btn-primary" data-ok>${esc(rqI18n.t('绑定'))}</button>`,
         })
         mountSearchableSelects(modal.el)
@@ -348,13 +348,13 @@ token:    ${esc(result.token)}</div>`,
       const topo = agent.topology
       tabBody.innerHTML = `
         <div class="card card-pad">
-          <div class="card-title mb-8">${icon('gitBranch', 14)} 依赖拓扑（Agent → Skill）</div>
+          <div class="card-title mb-8">${icon('gitBranch', 14)} ${rqI18n.t('依赖拓扑')}（Agent → Skill）</div>
           ${renderTopologyList(topo)}
-          <div class="form-hint mt-8">异常节点标红；由资源依赖图实时计算</div>
+          <div class="form-hint mt-8">${rqI18n.t('异常节点标红')}；${rqI18n.t('由资源依赖图实时计算')}</div>
         </div>
         ${agent.impact.length ? `
           <div class="card card-pad mt-14" style="border-color:var(--warn-border);background:var(--warn-bg)">
-            <div class="card-title mb-8">${icon('alert', 14)} 影响面（若下线）</div>
+            <div class="card-title mb-8">${icon('alert', 14)} ${rqI18n.t('影响面')}（${rqI18n.t('若下线')}）</div>
             ${agent.impact.map((i) => `<div class="fs-13" style="padding:3px 0">${esc(rqI18n.t('· {name}（{type}）', { name: i.name, type: rqI18n.t(typeLabel(i.type)) }))}</div>`).join('')}
           </div>` : ''}`
     }
@@ -382,7 +382,7 @@ token:    ${esc(result.token)}</div>`,
             </div>`).join('')}
         </div>
         <div class="muted-box mt-14" style="display:flex;gap:8px">
-          ${icon('info', 15)}<span>状态机：开发 → 试运行（限定用户组）→ 上线 → 下线 → 归档。上线/下线为 L4 高危操作，强制审批。</span>
+          ${icon('info', 15)}<span>${rqI18n.t('状态机')}：${rqI18n.t('开发')} → ${rqI18n.t('试运行')}（${rqI18n.t('限定用户组')}）→ ${rqI18n.t('上线')} → ${rqI18n.t('下线')} → ${rqI18n.t('归档')}。${rqI18n.t('上线')}/${rqI18n.t('下线')}${rqI18n.t('为')} L4 ${rqI18n.t('高危操作')}，${rqI18n.t('强制审批')}。</span>
         </div>`
     }
   }
@@ -403,10 +403,10 @@ token:    ${esc(result.token)}</div>`,
       if (transition.action === 'online' || transition.action === 'offline') {
         const isOnline = transition.action === 'online'
         const result = await confirmDialog({
-          title: isOnline ? 'Agent 上线（L4）' : 'Agent 下线（L4）',
+          title: isOnline ? rqI18n.t('Agent 上线（L4）') : rqI18n.t('Agent 下线（L4）'),
           requireReason: !isOnline,
           danger: !isOnline,
-          confirmText: '提交审批',
+          confirmText: rqI18n.t('提交审批'),
           message: isOnline
             ? rqI18n.t('上线 <b>{name}</b> 将生成审批单，有审批权限的管理员通过后自动执行。', { name: esc(agent.name) })
             : rqI18n.t('下线 <b>{name}</b> 后：机器凭证立即吊销、{n} 名绑定用户收到通知、审计数据保留。', { name: esc(agent.name), n: agent.boundUsers.length }),
@@ -427,10 +427,10 @@ token:    ${esc(result.token)}</div>`,
             const groupOptions = [...new Map((groupsData.groups ?? []).map((g) => [g.name, g])).values()]
               .map((g) => ({ value: g.name, label: g.name }))
             const modal = openModal({
-              title: '进入试运行',
-              body: field('试运行用户组', groupOptions.length
-                ? searchableSelectField('groups', groupOptions, { placeholder: '点击选择用户组，支持搜索' })
-                : inputField('groups', { placeholder: '用户组名称（当前无可选用户组，可手填）' }), { required: true, hint: '试运行期间仅该用户组成员可用' }),
+              title: rqI18n.t('进入试运行'),
+              body: field(rqI18n.t('试运行用户组'), groupOptions.length
+                ? searchableSelectField('groups', groupOptions, { placeholder: rqI18n.t('点击选择用户组，支持搜索') })
+                : inputField('groups', { placeholder: rqI18n.t('用户组名称（当前无可选用户组，可手填）') }), { required: true, hint: rqI18n.t('试运行期间仅该用户组成员可用') }),
               foot: `<button class="btn btn-default" data-cancel>${esc(rqI18n.t('取消'))}</button><button class="btn btn-primary" data-ok>${esc(rqI18n.t('确认'))}</button>`,
             })
             mountSearchableSelects(modal.el)
@@ -458,7 +458,7 @@ token:    ${esc(result.token)}</div>`,
   const deleteBtn = drawer.el.querySelector('#ag-delete')
   if (deleteBtn) deleteBtn.onclick = async () => {
     const result = await confirmDialog({
-      title: rqI18n.t('删除 Agent · {name}', { name: agent.name }), requireReason: true, danger: true, confirmText: '确认删除',
+      title: rqI18n.t('删除 Agent · {name}', { name: agent.name }), requireReason: true, danger: true, confirmText: rqI18n.t('确认删除'),
       message: rqI18n.t('将永久删除 <b>{name}</b>：解绑全部绑定用户、吊销机器凭证、清理依赖关系，操作不可恢复；用量与审计数据保留。', { name: esc(agent.name) }),
     })
     if (!result) return
@@ -475,8 +475,8 @@ function footForStatus(agent, ctx) {
     return `<button class="btn ${isL4 ? 'btn-primary' : 'btn-default'}" data-action="${esc(t.action)}">${icon(t.action === 'online' ? 'play' : t.action === 'offline' ? 'alert' : 'chevronRight', 14)}${esc(t.label)}</button>`
   }).join('')
   const deleteBtn = ['draft', 'archived'].includes(agent.status)
-    ? `<button class="btn btn-danger-ghost" id="ag-delete">${icon('trash', 14)}删除</button>` : ''
-  const onboardBtn = `<button class="btn btn-default" id="ag-onboard">${icon('book', 14)}生成接入提示词</button>`
+    ? `<button class="btn btn-danger-ghost" id="ag-delete">${icon('trash', 14)}${rqI18n.t('删除')}</button>` : ''
+  const onboardBtn = `<button class="btn btn-default" id="ag-onboard">${icon('book', 14)}${rqI18n.t('生成接入提示词')}</button>`
   return buttons + onboardBtn + deleteBtn || `<button class="btn btn-default" disabled>${esc(rqI18n.t('终态（已归档）'))}</button>`
 }
 
@@ -486,12 +486,12 @@ function openAgentOnboardPrompt(agent) {
     title: rqI18n.t('生成接入提示词 · {name}', { name: agent.name }),
     body: `
       <div class="muted-box mb-14" style="display:flex;gap:8px;line-height:1.8">${icon('info', 15)}<span>${esc(rqI18n.t('按'))}<b>${esc(rqI18n.t('注册同款模板'))}</b>${esc(rqI18n.t('生成全文（换牌 → 运营数据提报 → 计量 → NAS 数据权限 → 服务级 MCP 数据面）。'))}<br>
-      <b>重新生成密钥并生成</b>：提示词携带完整 client_secret，<b>旧 secret 立即失效</b>——首次接入或密钥丢失时选这个；<br>
-      <b>仅生成（不轮换）</b>：仅含 client_id，secret 部分为占位。</span></div>`,
+      <b>${rqI18n.t('重新生成密钥并生成')}</b>：${rqI18n.t('提示词携带完整')} client_secret，<b>${rqI18n.t('旧')} secret ${rqI18n.t('立即失效')}</b>——${rqI18n.t('首次接入或密钥丢失时选这个')}；<br>
+      <b>${rqI18n.t('仅生成')}（${rqI18n.t('不轮换')}）</b>：${rqI18n.t('仅含')} client_id，secret ${rqI18n.t('部分为占位')}。</span></div>`,
     foot: `
-      <button class="btn btn-default" data-cancel>取消</button>
-      <button class="btn btn-default" data-plain>仅生成（不轮换）</button>
-      <button class="btn btn-primary" data-rotate>重新生成密钥并生成</button>`,
+      <button class="btn btn-default" data-cancel>${rqI18n.t('取消')}</button>
+      <button class="btn btn-default" data-plain>${rqI18n.t('仅生成')}（${rqI18n.t('不轮换')}）</button>
+      <button class="btn btn-primary" data-rotate>${rqI18n.t('重新生成密钥并生成')}</button>`,
   })
   const generate = async (rotate) => {
     try {
@@ -541,12 +541,12 @@ async function openAgentCreate(schema, ctx) {
   }
   const groupLabels = Object.fromEntries(schema.groups.map((g) => [g.key, g.label]))
   const modal = openModal({
-    title: '注册 Agent', wide: true,
+    title: rqI18n.t('注册 Agent'), wide: true,
     body: `
-      <div class="form-hint" style="margin-bottom:12px">渐进式表单：必填最小集即可创建草稿，其余可后续补全（上线前完成登记即可）。</div>
+      <div class="form-hint" style="margin-bottom:12px">${rqI18n.t('渐进式表单')}：${rqI18n.t('必填最小集即可创建草稿')}，${rqI18n.t('其余可后续补全')}（${rqI18n.t('上线前完成登记即可')}）。</div>
       <div class="form-grid">
-        ${field('Agent 名称', inputField('name', { placeholder: '如：智能客服助手' }), { required: true })}
-        ${field('唯一标识', inputField('slug', { placeholder: '小写字母与中划线，留空自动生成' }))}
+        ${field(rqI18n.t('Agent 名称'), inputField('name', { placeholder: rqI18n.t('如：智能客服助手') }), { required: true })}
+        ${field(rqI18n.t('唯一标识'), inputField('slug', { placeholder: rqI18n.t('小写字母与中划线，留空自动生成') }))}
       </div>
       ${[...groupsByField.entries()].map(([group, fields]) => `
         <div class="card-title mb-8" style="margin-top:6px">${esc(groupLabels[group] ?? group)}</div>
@@ -570,13 +570,13 @@ async function openAgentCreate(schema, ctx) {
       modal.close()
       if (result.credential) {
         openOnboardingModal({
-          title: '注册成功 · 接入指引与机器凭证（仅此一次展示）',
+          title: rqI18n.t('注册成功 · 接入指引与机器凭证（仅此一次展示）'),
           resourceLabel: 'Agent',
           resource: result.agent,
           credential: result.credential,
           metaRows: [
             ['Agent ID', result.agent.id],
-            ['标识', result.agent.slug],
+            [rqI18n.t('标识'), result.agent.slug],
             ['client_id', result.credential.clientId],
             ['client_secret', result.credential.clientSecret],
           ],
@@ -615,9 +615,9 @@ async function openAgentCreate(schema, ctx) {
       if (options) {
         return field(f.label, options.length
           ? multiSelectField(tagsName, options, { placeholder: rqI18n.t('搜索并选择{label}，可多选', { label: f.label }) })
-          : inputField(tagsName, { placeholder: '逗号分隔（平台暂无可选项，可手填）' }), { hint: f.hint, full: false })
+          : inputField(tagsName, { placeholder: rqI18n.t('逗号分隔（平台暂无可选项，可手填）') }), { hint: f.hint, full: false })
       }
-      return field(f.label, inputField(tagsName, { placeholder: '逗号分隔' }), { hint: f.hint, full: false })
+      return field(f.label, inputField(tagsName, { placeholder: rqI18n.t('逗号分隔') }), { hint: f.hint, full: false })
     }
     const input = inputField(name, { placeholder: f.placeholder, value: String(f.defaultValue ?? '') })
     return field(f.label, input, { required: f.required, hint: f.hint })
@@ -626,25 +626,25 @@ async function openAgentCreate(schema, ctx) {
 
 // ---------- shared helpers ----------
 export function dataClassLabel(cls) {
-  return { public: '公开', internal: '内部', confidential: '机密', secret: '绝密' }[cls] ?? (cls ?? '—')
+  return { public: rqI18n.t('公开'), internal: rqI18n.t('内部'), confidential: rqI18n.t('机密'), secret: rqI18n.t('绝密') }[cls] ?? (cls ?? '—')
 }
 export function riskClass(level) {
   return { low: 'badge-ok', medium: 'badge-warn', high: 'badge-danger' }[level] ?? 'badge-muted'
 }
 export function riskLabel(level) {
-  return { low: '低', medium: '中', high: '高' }[level] ?? (level ?? '—')
+  return { low: rqI18n.t('低'), medium: rqI18n.t('中'), high: rqI18n.t('高') }[level] ?? (level ?? '—')
 }
 export function envLabel(env) {
-  return { sandbox: '平台沙箱', shared: '共享运行时', dedicated: '独占实例' }[env] ?? (env ?? '—')
+  return { sandbox: rqI18n.t('平台沙箱'), shared: rqI18n.t('共享运行时'), dedicated: rqI18n.t('独占实例') }[env] ?? (env ?? '—')
 }
 export function typeLabel(type) {
-  return { agent: 'Agent', app: '应用', skill: 'Skill', mcp_service: 'MCP' }[type] ?? type
+  return { agent: 'Agent', app: rqI18n.t('应用'), skill: 'Skill', mcp_service: 'MCP' }[type] ?? type
 }
 export function stateLabel(state) {
-  return { draft: '开发中', trial: '试运行', online: '已上线', offline: '已下线', archived: '已归档' }[state] ?? state
+  return { draft: rqI18n.t('开发中'), trial: rqI18n.t('试运行'), online: rqI18n.t('已上线'), offline: rqI18n.t('已下线'), archived: rqI18n.t('已归档') }[state] ?? state
 }
 export function actionLabel(action) {
-  return { submit_trial: '进入试运行', online: '上线', offline: '下线', retrial: '恢复试运行', archive: '归档' }[action] ?? action
+  return { submit_trial: rqI18n.t('进入试运行'), online: rqI18n.t('上线'), offline: rqI18n.t('下线'), retrial: rqI18n.t('恢复试运行'), archive: rqI18n.t('归档') }[action] ?? action
 }
 export function miniStat(ic, label, value) {
   return `
@@ -683,7 +683,7 @@ function debounce(fn, ms) {
 /** 「可调用 MCP 能力」tab（W3-T6 契约 §16 能力视图）：权限组反查 → 按服务聚合可调用工具面 + 最近拒绝原因。
  *  与「资源授权」tab 的差异：那边按权限组逐张卡片看授权关系；这边按服务聚合运行视角的可调用边界。 */
 function renderMcpCapabilityTab(holder, agent) {
-  holder.innerHTML = '<div class="text-4 fs-12">加载中…</div>'
+  holder.innerHTML = rqI18n.t('<div class="text-4 fs-12">加载中…</div>')
   void (async () => {
     const [pgData, svcData, denied] = await Promise.all([
       api.get('/api/mcp/perm-groups').catch(() => ({ groups: [] })),
@@ -794,26 +794,26 @@ function renderAgentSsoTab(holder, agent, ctx, refresh) {
   const entryCard = `
     <div class="card card-pad mt-14">
       <div class="flex-between mb-8">
-        <div class="card-title">${icon('external', 14)} 平台授权直达（entry-ticket，零改造）</div>
+        <div class="card-title">${icon('external', 14)} ${rqI18n.t('平台授权直达')}（entry-ticket，${rqI18n.t('零改造')}）</div>
         ${entryUrl ? `<span class="badge badge-ok no-dot">${esc(rqI18n.t('已启用'))}</span>` : `<span class="badge badge-muted no-dot">${esc(rqI18n.t('未提报交互界面'))}</span>`}
       </div>
       ${entryUrl ? `
         <div class="desc-grid mb-14">
-          <div class="desc-item"><span class="k">交互界面</span><span class="v mono">${esc(entryUrl)}</span></div>
-          <div class="desc-item"><span class="k">兑换端点</span><span class="v mono">POST /api/authn/entry-tickets/redeem</span></div>
-          <div class="desc-item"><span class="k">票据时效</span><span class="v">一次性 · 短时（默认 120s，ENTRY_TICKET_TTL_SECONDS 可调）</span></div>
-          <div class="desc-item"><span class="k">使用授权</span><span class="v">负责人 / 绑定用户 / 管理员（使用即授权留痕）</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('交互界面')}</span><span class="v mono">${esc(entryUrl)}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('兑换端点')}</span><span class="v mono">POST /api/authn/entry-tickets/redeem</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('票据时效')}</span><span class="v">${rqI18n.t('一次性')} · ${rqI18n.t('短时')}（${rqI18n.t('默认')} 120s，ENTRY_TICKET_TTL_SECONDS ${rqI18n.t('可调')}）</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('使用授权')}</span><span class="v">${rqI18n.t('负责人')} / ${rqI18n.t('绑定用户')} / ${rqI18n.t('管理员')}（${rqI18n.t('使用即授权留痕')}）</span></div>
         </div>
         <div class="flex" style="gap:8px">
-          <button class="btn btn-primary" id="ag-sso-open">${icon('external', 14)}带平台身份打开交互界面</button>
+          <button class="btn btn-primary" id="ag-sso-open">${icon('external', 14)}${rqI18n.t('带平台身份打开交互界面')}</button>
         </div>
-        <div class="form-hint mt-8">交互界面接入（前端三步）：① 控制台「带平台身份打开」→ 一次性票据以 <code class="mono">#entry_ticket=&lt;ticket&gt;</code> 片段跳转；② 界面读 URL fragment 调兑换端点；③ 响应返回平台身份 identity（sub / org / roles / tenant）。票据重放被拒、过期即焚、兑换实时校验账号状态（agent.entry.ticket.* 全程审计）。</div>`
+        <div class="form-hint mt-8">${rqI18n.t('交互界面接入')}（${rqI18n.t('前端三步')}）：① ${rqI18n.t('控制台')}「${rqI18n.t('带平台身份打开')}」→ ${rqI18n.t('一次性票据以')} <code class="mono">#entry_ticket=&lt;ticket&gt;</code> ${rqI18n.t('片段跳转')}；② ${rqI18n.t('界面读')} URL fragment ${rqI18n.t('调兑换端点')}；③ ${rqI18n.t('响应返回平台身份')} identity（sub / org / roles / tenant）。${rqI18n.t('票据重放被拒')}、${rqI18n.t('过期即焚')}、${rqI18n.t('兑换实时校验账号状态')}（agent.entry.ticket.* ${rqI18n.t('全程审计')}）。</div>`
         : canWrite ? `
         <div class="form-item">
-          <label class="form-label">负责人直接登记（https:// 或内网 http:// 地址；登记后即满足上线门禁的免登通道）</label>
+          <label class="form-label">${rqI18n.t('负责人直接登记')}（https:// ${rqI18n.t('或内网')} http:// ${rqI18n.t('地址')}；${rqI18n.t('登记后即满足上线门禁的免登通道')}）</label>
           <div class="flex" style="gap:8px">
             <input class="input" id="ag-entry-input" style="flex:1" placeholder="https://app.example.com/chat ${esc(rqI18n.t('或'))} http://192.168.0.7:3080/">
-            <button class="btn btn-primary" id="ag-entry-save">${icon('check', 14)}登记</button>
+            <button class="btn btn-primary" id="ag-entry-save">${icon('check', 14)}${rqI18n.t('登记')}</button>
           </div>
           <div class="form-hint mt-8">${esc(rqI18n.t('也可由 Agent 凭自身凭证提报：PATCH /api/agents/:id {"attrs":{"entryUrl":"https://…"}}'))}${esc(rqI18n.t('。登记后控制台即可带平台身份直达。'))}</div>
         </div>`
@@ -823,24 +823,24 @@ function renderAgentSsoTab(holder, agent, ctx, refresh) {
   const headlessCard = `
     <div class="card card-pad mt-14">
       <div class="flex-between mb-8">
-        <div class="card-title">${icon('bot', 14)} 无交互界面声明（headless · 纯后台）</div>
+        <div class="card-title">${icon('bot', 14)} ${rqI18n.t('无交互界面声明')}（headless · ${rqI18n.t('纯后台')}）</div>
         ${headless ? `<span class="badge badge-ok no-dot">${esc(rqI18n.t('已声明'))}</span>` : `<span class="badge badge-muted no-dot">${esc(rqI18n.t('未声明'))}</span>`}
       </div>
-      <div class="fs-13 text-2 mb-8" style="line-height:1.8">适合没有任何面向用户的交互界面、仅凭机器身份被平台调度与调用的执行体（Work Body、定时任务型等）：声明后上线门禁凭已颁发的机器凭证放行，无需签发 OIDC 客户端，也无需登记 entryUrl。</div>
+      <div class="fs-13 text-2 mb-8" style="line-height:1.8">${rqI18n.t('适合没有任何面向用户的交互界面')}、${rqI18n.t('仅凭机器身份被平台调度与调用的执行体')}（Work Body、${rqI18n.t('定时任务型等')}）：${rqI18n.t('声明后上线门禁凭已颁发的机器凭证放行')}，${rqI18n.t('无需签发')} OIDC ${rqI18n.t('客户端')}，${rqI18n.t('也无需登记')} entryUrl。</div>
       ${mode === 'oidc' ? `<div class="muted-box mb-8" style="font-size:12.5px">${icon('info', 14)} ${esc(rqI18n.t('当前门禁为 AGENT_SSO_ENFORCE=oidc 严格模式：headless 声明不作为放行依据，仍须签发 OIDC 客户端。'))}</div>` : ''}
       ${!headless && !agent.credential ? `<div class="muted-box mb-8" style="font-size:12.5px;border-color:var(--warn-border);background:var(--warn-bg)">${icon('alert', 14)} ${esc(rqI18n.t('该 Agent 尚未颁发机器凭证：headless 声明放行前须先颁发凭证（无凭证放行等于无主体上线）。'))}</div>` : ''}
       <div class="flex" style="gap:8px">
         ${headless
-          ? `<button class="btn btn-default" id="ag-headless-revoke">${icon('x', 14)}撤销 headless 声明</button>`
-          : `<button class="btn btn-default" id="ag-headless-declare">${icon('check', 14)}声明无交互界面（headless）</button>`}
+          ? `<button class="btn btn-default" id="ag-headless-revoke">${icon('x', 14)}${rqI18n.t('撤销')} headless ${rqI18n.t('声明')}</button>`
+          : `<button class="btn btn-default" id="ag-headless-declare">${icon('check', 14)}${rqI18n.t('声明无交互界面')}（headless）</button>`}
       </div>
-      <div class="form-hint mt-8">声明即写入 Agent 属性 attrs.headless，全程审计；上线审批（L4）照常执行，审批期间撤销声明将被执行期复核拦截。</div>
+      <div class="form-hint mt-8">${rqI18n.t('声明即写入')} Agent ${rqI18n.t('属性')} attrs.headless，${rqI18n.t('全程审计')}；${rqI18n.t('上线审批')}（L4）${rqI18n.t('照常执行')}，${rqI18n.t('审批期间撤销声明将被执行期复核拦截')}。</div>
     </div>`
   if (!sso) {
     holder.innerHTML = `
       <div class="card card-pad">
         <div class="flex-between mb-8">
-          <div class="card-title">${icon('key', 14)} Agent 身份纳管（SSO）</div>
+          <div class="card-title">${icon('key', 14)} Agent ${rqI18n.t('身份纳管')}（SSO）</div>
           ${modeBadge}
         </div>
         <div class="fs-13 text-2 mb-8" style="line-height:1.9">
@@ -852,8 +852,8 @@ function renderAgentSsoTab(holder, agent, ctx, refresh) {
           </div>
         </div>
         ${enforced ? `<div class="muted-box mb-14" style="display:flex;gap:8px;border-color:var(--warn-border);background:var(--warn-bg)">${icon('alert', 15)}<span><b>${esc(rqI18n.t('Agent 上线门禁'))}</b>${mode === 'oidc' ? esc(rqI18n.t('：未完成 SSO 签发前，上线审批将被拒绝。')) : esc(rqI18n.t('：既无 SSO 客户端、也未登记 entryUrl 或声明 headless 时，上线审批将被拒绝。'))}</span></div>` : ''}
-        <button class="btn btn-primary" id="ag-sso-issue">${icon('key', 14)}签发 SSO 客户端</button>
-        <div class="form-hint mt-8">本机联调免控制台：回调地址为环回（127.0.0.1 / localhost / 0.0.0.0）时，Agent 机器凭证可直接 <code class="mono">POST /api/agents/${esc(agent.id)}/sso-client</code> 自助签发（改回调 PATCH 同路径）。</div>
+        <button class="btn btn-primary" id="ag-sso-issue">${icon('key', 14)}${rqI18n.t('签发')} SSO ${rqI18n.t('客户端')}</button>
+        <div class="form-hint mt-8">${rqI18n.t('本机联调免控制台')}：${rqI18n.t('回调地址为环回')}（127.0.0.1 / localhost / 0.0.0.0）${rqI18n.t('时')}，Agent ${rqI18n.t('机器凭证可直接')} <code class="mono">POST /api/agents/${esc(agent.id)}/sso-client</code> ${rqI18n.t('自助签发')}（${rqI18n.t('改回调')} PATCH ${rqI18n.t('同路径')}）。</div>
       </div>
       ${entryCard}
       ${headlessCard}`
@@ -865,23 +865,23 @@ function renderAgentSsoTab(holder, agent, ctx, refresh) {
   holder.innerHTML = `
     <div class="card card-pad mb-14">
       <div class="flex-between mb-8">
-        <div class="card-title">${icon('key', 14)} 已签发客户端 ${statusBadge(active ? 'active' : 'frozen', active ? '使用中' : '已禁用')}</div>
+        <div class="card-title">${icon('key', 14)} ${rqI18n.t('已签发客户端')} ${statusBadge(active ? 'active' : 'frozen', active ? rqI18n.t('使用中') : rqI18n.t('已禁用'))}</div>
         <div class="flex" style="gap:8px;align-items:center">
           ${modeBadge}
-          <span class="badge ${sso.clientType === 'public' ? 'badge-purple' : 'badge-info'} no-dot">${sso.clientType === 'public' ? 'public（免 secret · 强制 PKCE）' : 'confidential（带密钥）'}</span>
+          <span class="badge ${sso.clientType === 'public' ? 'badge-purple' : 'badge-info'} no-dot">${sso.clientType === 'public' ? rqI18n.t('public（免 secret · 强制 PKCE）') : rqI18n.t('confidential（带密钥）')}</span>
         </div>
       </div>
       <div class="desc-grid mb-14">
-        <div class="desc-item"><span class="k">client_id</span><span class="v mono">${esc(sso.clientId)} <button class="btn btn-ghost btn-sm" id="ag-sso-copy-id">复制</button></span></div>
-        <div class="desc-item"><span class="k">关联 Agent</span><span class="v">${esc(sso.refAgentName ?? agent.name)}</span></div>
-        <div class="desc-item"><span class="k">签发时间</span><span class="v">${fmtTime(sso.createdAt)}</span></div>
+        <div class="desc-item"><span class="k">client_id</span><span class="v mono">${esc(sso.clientId)} <button class="btn btn-ghost btn-sm" id="ag-sso-copy-id">${rqI18n.t('复制')}</button></span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('关联')} Agent</span><span class="v">${esc(sso.refAgentName ?? agent.name)}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('签发时间')}</span><span class="v">${fmtTime(sso.createdAt)}</span></div>
       </div>
       <div class="form-item">
-        <label class="form-label">回调地址（redirect_uris，每行一个；https://，或 http:// 内网/本机地址）</label>
+        <label class="form-label">${rqI18n.t('回调地址')}（redirect_uris，${rqI18n.t('每行一个')}；https://，${rqI18n.t('或')} http:// ${rqI18n.t('内网')}/${rqI18n.t('本机地址')}）</label>
         <textarea class="form-control mono" id="ag-sso-redirects" rows="2">${esc(sso.redirectUris.join('\n'))}</textarea>
       </div>
       <div class="form-item">
-        <label class="form-label">登出回跳白名单（post_logout_redirect_uris，每行一个，可空）</label>
+        <label class="form-label">${rqI18n.t('登出回跳白名单')}（post_logout_redirect_uris，${rqI18n.t('每行一个')}，${rqI18n.t('可空')}）</label>
         <textarea class="form-control mono" id="ag-sso-postlogouts" rows="2">${esc((sso.postLogoutUris ?? []).join('\n'))}</textarea>
       </div>
       <label class="flex" style="gap:8px;font-size:13px;margin:6px 0 12px;cursor:pointer">
@@ -889,26 +889,26 @@ function renderAgentSsoTab(holder, agent, ctx, refresh) {
         <span>${esc(rqI18n.t('授权页要求用户显式勾选同意（对外部界面建议开启）'))}</span>
       </label>
       <div class="flex" style="gap:8px;flex-wrap:wrap">
-        <button class="btn btn-primary" id="ag-sso-save">${icon('check', 14)}保存配置</button>
+        <button class="btn btn-primary" id="ag-sso-save">${icon('check', 14)}${rqI18n.t('保存配置')}</button>
         ${sso.clientType !== 'public' ? `<button class="btn btn-default" id="ag-sso-rotate">${esc(rqI18n.t('轮换 secret'))}</button>` : ''}
         ${active
           ? `<button class="btn btn-danger-ghost" id="ag-sso-disable">${esc(rqI18n.t('禁用客户端'))}</button>`
           : `<button class="btn btn-primary" id="ag-sso-enable">${esc(rqI18n.t('启用客户端'))}</button>`}
       </div>
-      ${!active && mode === 'oidc' ? `<div class="muted-box mt-8" style="display:flex;gap:8px;border-color:var(--warn-border);background:var(--warn-bg)">${icon('alert', 15)}<span>客户端处于禁用状态：AGENT_SSO_ENFORCE=oidc 门禁将阻断上线审批。</span></div>` : ''}
+      ${!active && mode === 'oidc' ? `<div class="muted-box mt-8" style="display:flex;gap:8px;border-color:var(--warn-border);background:var(--warn-bg)">${icon('alert', 15)}<span>${rqI18n.t('客户端处于禁用状态')}：AGENT_SSO_ENFORCE=oidc ${rqI18n.t('门禁将阻断上线审批')}。</span></div>` : ''}
     </div>
     <div class="card card-pad mb-14">
-      <div class="card-title mb-8">${icon('plug', 14)} 接入端点（discovery）</div>
+      <div class="card-title mb-8">${icon('plug', 14)} ${rqI18n.t('接入端点')}（discovery）</div>
       <div class="desc-grid">
-        <div class="desc-item"><span class="k">issuer（签发方）</span><span class="v mono">${esc(sso.discovery.issuer)}</span></div>
-        <div class="desc-item"><span class="k">authorize（授权端点）</span><span class="v mono">${esc(sso.discovery.authorization_endpoint)}</span></div>
-        <div class="desc-item"><span class="k">token（令牌端点）</span><span class="v mono">${esc(sso.discovery.token_endpoint)}</span></div>
-        <div class="desc-item"><span class="k">userinfo（用户信息端点）</span><span class="v mono">${esc(sso.discovery.userinfo_endpoint)}</span></div>
+        <div class="desc-item"><span class="k">issuer（${rqI18n.t('签发方')}）</span><span class="v mono">${esc(sso.discovery.issuer)}</span></div>
+        <div class="desc-item"><span class="k">authorize（${rqI18n.t('授权端点')}）</span><span class="v mono">${esc(sso.discovery.authorization_endpoint)}</span></div>
+        <div class="desc-item"><span class="k">token（${rqI18n.t('令牌端点')}）</span><span class="v mono">${esc(sso.discovery.token_endpoint)}</span></div>
+        <div class="desc-item"><span class="k">userinfo（${rqI18n.t('用户信息端点')}）</span><span class="v mono">${esc(sso.discovery.userinfo_endpoint)}</span></div>
       </div>
       <div class="flex mt-8" style="gap:8px">
-        <button class="btn btn-default btn-sm" id="ag-sso-copy-discovery">复制 discovery 地址</button>
+        <button class="btn btn-default btn-sm" id="ag-sso-copy-discovery">${rqI18n.t('复制')} discovery ${rqI18n.t('地址')}</button>
       </div>
-      <div class="form-hint mt-8">id_token 验签公钥见 JWKS：<code class="mono">${esc(sso.discovery.issuer)}/.well-known/jwks.json</code></div>
+      <div class="form-hint mt-8">id_token ${rqI18n.t('验签公钥见')} JWKS：<code class="mono">${esc(sso.discovery.issuer)}/.well-known/jwks.json</code></div>
     </div>
     ${entryCard}`
   holder.querySelector('#ag-sso-copy-id').onclick = () => void copyText(sso.clientId)
@@ -937,8 +937,8 @@ function renderAgentSsoTab(holder, agent, ctx, refresh) {
   const disableBtn = holder.querySelector('#ag-sso-disable')
   if (disableBtn) disableBtn.onclick = async () => {
     const result = await confirmDialog({
-      title: '禁用 SSO 客户端', requireReason: true, danger: true, confirmText: '立即禁用',
-      message: '禁用后该 Agent 的登录跳转与令牌刷新立即失败（refresh 链一并吊销）。',
+      title: rqI18n.t('禁用 SSO 客户端'), requireReason: true, danger: true, confirmText: rqI18n.t('立即禁用'),
+      message: rqI18n.t('禁用后该 Agent 的登录跳转与令牌刷新立即失败（refresh 链一并吊销）。'),
     })
     if (!result) return
     try {
@@ -961,15 +961,15 @@ function openAgentIssueSsoModal(agent, refresh) {
     title: rqI18n.t('签发 SSO 客户端：{name}', { name: agent.name }),
     body: `
       <div class="form-item">
-        <label class="form-label">回调地址（redirect_uris，每行一个；https://，或 http:// 内网/本机地址）</label>
+        <label class="form-label">${rqI18n.t('回调地址')}（redirect_uris，${rqI18n.t('每行一个')}；https://，${rqI18n.t('或')} http:// ${rqI18n.t('内网')}/${rqI18n.t('本机地址')}）</label>
         <textarea class="form-control mono" id="ag-sso-new-redirects" rows="3" placeholder="http://192.168.0.7:3080/auth/oidc/callback"></textarea>
       </div>
       <label class="flex" style="gap:8px;font-size:13px;margin:8px 0;cursor:pointer">
         <input type="checkbox" id="ag-sso-new-public" style="accent-color:var(--brand-500)">
-        <span>public 客户端（纯前端界面：免 secret、强制 PKCE、不发 refresh token）</span>
+        <span>public ${rqI18n.t('客户端')}（${rqI18n.t('纯前端界面')}：${rqI18n.t('免')} secret、${rqI18n.t('强制')} PKCE、${rqI18n.t('不发')} refresh token）</span>
       </label>
-      <div class="form-hint">clientSecret 仅签发时展示一次；丢失走「轮换 secret」，不要重复签发。</div>`,
-    foot: `<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" id="ag-sso-new-ok">${icon('key', 13)}签发</button>`,
+      <div class="form-hint">clientSecret ${rqI18n.t('仅签发时展示一次')}；${rqI18n.t('丢失走')}「${rqI18n.t('轮换')} secret」，${rqI18n.t('不要重复签发')}。</div>`,
+    foot: `<button class="btn btn-default" data-cancel>${rqI18n.t('取消')}</button><button class="btn btn-primary" id="ag-sso-new-ok">${icon('key', 13)}${rqI18n.t('签发')}</button>`,
   })
   modal.el.querySelector('#ag-sso-new-ok').onclick = async () => {
     const redirectUris = modal.el.querySelector('#ag-sso-new-redirects').value.split('\n').map((x) => x.trim()).filter(Boolean)
@@ -989,12 +989,12 @@ function openAgentIssueSsoModal(agent, refresh) {
 /** secret 一次性展示弹窗。 */
 function showAgentSsoSecret(created) {
   const modal = openModal({
-    title: '客户端凭证（仅本次展示）',
+    title: rqI18n.t('客户端凭证（仅本次展示）'),
     body: `
-      <div class="form-hint" style="margin-bottom:10px">请立即复制保存；关闭后不再展示，丢失请走「轮换 secret」。</div>
+      <div class="form-hint" style="margin-bottom:10px">${rqI18n.t('请立即复制保存')}；${rqI18n.t('关闭后不再展示')}，${rqI18n.t('丢失请走')}「${rqI18n.t('轮换')} secret」。</div>
       <div class="code-block" style="white-space:pre-wrap;word-break:break-all">client_id:     ${esc(created.clientId)}
-client_secret: ${esc(created.clientSecret ?? '（public 客户端无 secret）')}</div>`,
-    foot: `<button class="btn btn-default" id="ag-sso-secret-copy">${icon('copy', 13)}复制</button><button class="btn btn-primary" data-ok>我已保存</button>`,
+client_secret: ${esc(created.clientSecret ?? rqI18n.t('（public 客户端无 secret）'))}</div>`,
+    foot: `<button class="btn btn-default" id="ag-sso-secret-copy">${icon('copy', 13)}${rqI18n.t('复制')}</button><button class="btn btn-primary" data-ok>${rqI18n.t('我已保存')}</button>`,
   })
   modal.el.querySelector('#ag-sso-secret-copy').onclick = () => void copyText(`client_id: ${created.clientId}\nclient_secret: ${created.clientSecret ?? ''}`)
 }

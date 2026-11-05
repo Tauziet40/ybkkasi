@@ -10,14 +10,16 @@
 
 /**
  * 文案翻译（零依赖纪律：本模块被 Node 纯函数单测直载，禁止 import i18n.js——
- * 浏览器经 window.rqI18n（i18n.js 注入），Node/无 i18n 环境回退原文。与 errors.js 同法。 */
-function tr(text) {
+ * 浏览器经 window.rqI18n（i18n.js 注入），Node/无 i18n 环境回退原文并就地插值 {name}。与 errors.js 同法。 */
+function tr(text, params) {
+  let out = text
   try {
     if (typeof window !== 'undefined' && window.rqI18n && typeof window.rqI18n.t === 'function') {
-      return window.rqI18n.t(text)
+      return window.rqI18n.t(text, params)
     }
   } catch { /* 忽略 */ }
-  return text
+  if (params) out = out.replace(/\{(\w+)\}/g, (whole, name) => (Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : whole))
+  return out
 }
 
 
@@ -31,11 +33,11 @@ export const LOCAL_ID = 'local'
 /** 地址规范化：http(s) URL、去尾斜杠、拒绝 query/hash。合法返回 { ok, base }，否则 { ok: false, error }。 */
 export function normalizeBase(raw) {
   const value = String(raw ?? '').trim()
-  if (!value) return { ok: false, error: '请填写宿主服务地址' }
-  if (!/^https?:\/\//i.test(value)) return { ok: false, error: '地址需以 http:// 或 https:// 开头' }
+  if (!value) return { ok: false, error: tr('请填写宿主服务地址') }
+  if (!/^https?:\/\//i.test(value)) return { ok: false, error: tr('地址需以 http:// 或 https:// 开头') }
   let url
-  try { url = new URL(value) } catch { return { ok: false, error: '地址格式不合法' } }
-  if (url.search || url.hash) return { ok: false, error: '地址不带查询参数与 # 锚点' }
+  try { url = new URL(value) } catch { return { ok: false, error: tr('地址格式不合法') } }
+  if (url.search || url.hash) return { ok: false, error: tr('地址不带查询参数与 # 锚点') }
   const path = url.pathname.replace(/\/+$/, '')
   return { ok: true, base: url.origin + path }
 }
@@ -74,7 +76,7 @@ export function activeConnection(storage, mountBase = '') {
     const found = loadConnections(storage).find((item) => item.id === id)
     if (found) return found
   }
-  return { id: LOCAL_ID, name: '本机宿主服务', base: mountBase }
+  return { id: LOCAL_ID, name: tr('本机宿主服务'), base: mountBase }
 }
 
 /** 新增/更新连接：base 规范化失败返回 { ok:false, error }；同名远处自动去重更新。 */
@@ -152,12 +154,12 @@ export function upsertPanel(storage, { id, name, connectionId, dept, mountBase =
   }
   const hostId = connectionId || LOCAL_ID
   const host = hostId === LOCAL_ID
-    ? { id: LOCAL_ID, name: '本机宿主服务', base: mountBase }
+    ? { id: LOCAL_ID, name: tr('本机宿主服务'), base: mountBase }
     : loadConnections(storage).find((item) => item.id === hostId)
   if (!host) return { ok: false, error: tr('目标宿主连接不存在，请先在连接清单中新增') }
   const list = loadPanels(storage)
   const duplicate = list.find((item) => item.connectionId === hostId && item.dept === deptId && item.id !== id)
-  if (duplicate) return { ok: false, error: `该宿主的「${deptId}」部门已登记为「${duplicate.name}」` }
+  if (duplicate) return { ok: false, error: tr('该宿主的「{id}」部门已登记为「{name}」', { id: deptId, name: duplicate.name }) }
   const target = {
     id: id || `pnl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     name: String(name ?? '').trim() || `${deptId} @ ${host.name}`,

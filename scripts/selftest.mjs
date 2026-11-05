@@ -1689,14 +1689,14 @@ try {
     const nav = appSrc.slice(appSrc.indexOf('const NAV = ['), appSrc.indexOf('const app = $('))
     const registerGone = !cmdkSrc.includes(`hash: '#/register'`) && !nav.includes(`'#/register'`)
     check('前端 IA：资产登记（#/register）已从导航与命令面板下线', registerGone)
-    const collabGroup = nav.slice(nav.indexOf("section: '协作与执行'"), nav.indexOf("section: '治理'"))
+    const collabGroup = nav.slice(nav.indexOf("section: rqI18n.t('协作与执行')"), nav.indexOf("section: rqI18n.t('治理')"))
     check('前端 IA：「协作与执行」独立一级分类承载 执行中枢 / A2A 协作 / UHP 执行',
-      nav.includes("section: '协作与执行'")
+      nav.includes("section: rqI18n.t('协作与执行')")
       && collabGroup.includes("'#/exec'") && collabGroup.includes("'#/a2a'") && collabGroup.includes("'#/a2a?tab=uhp'"))
-    const resourceGroup = nav.slice(nav.indexOf("section: '资源'"), nav.indexOf("section: '协作与执行'"))
+    const resourceGroup = nav.slice(nav.indexOf("section: rqI18n.t('资源')"), nav.indexOf("section: rqI18n.t('协作与执行')"))
     check('前端 IA：A2A 与数据权限已不在资源组（A2A 迁协作与执行、数据权限迁治理）',
       !resourceGroup.includes("'#/a2a") && !resourceGroup.includes("'#/nas-authz'"))
-    const governGroup = nav.slice(nav.indexOf("section: '治理'"), nav.indexOf("section: '企业'"))
+    const governGroup = nav.slice(nav.indexOf("section: rqI18n.t('治理')"), nav.indexOf("section: rqI18n.t('企业')"))
     check('前端 IA：数据权限（#/nas-authz）归入治理分类', governGroup.includes("'#/nas-authz'"))
   }
 
@@ -6418,7 +6418,7 @@ try {
   const dashSrc = readFileSync(join(process.cwd(), 'packages', 'plugin-console', 'public', 'js', 'pages', 'dashboard.js'), 'utf8')
   check('QA-02 回归：工作台 CTA 按权限渲染（处理审批/查看 Agent/用量明细不再对无权角色裸露）',
     dashSrc.includes("session.can('approval.read')") && dashSrc.includes("session.can('agent.read')")
-    && /\$\{isManager \? `<a href="#\/assets"/.test(dashSrc))
+    && /\$\{isManager \? rqI18n\.t\('<a href="#\/assets"/.test(dashSrc))
   check('QA-02 回归：页面 builder 全局错误兜底（首请求 403/网络失败渲染可重试错误卡而非留白）',
     appConnSrc.includes('.catch((error) => {') && appConnSrc.includes('page-retry'))
 

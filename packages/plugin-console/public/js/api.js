@@ -40,7 +40,7 @@ export const session = {
   saveRefresh(token) { localStorage.setItem(REFRESH_KEY, token) },
   get user() {
     // 演示会话是合成身份：token 优先——一旦存在真令牌（含演示实例上真实登录），演示态即失效
-    if (this.isDemo) return { displayName: demoProfile.name, roles: ['演示访客'], demo: true }
+    if (this.isDemo) return { displayName: demoProfile.name, roles: [rqI18n.t('演示访客')], demo: true }
     try { return JSON.parse(localStorage.getItem(USER_KEY) ?? 'null') } catch { return null }
   },
   save(token, user) {
@@ -143,7 +143,7 @@ async function request(method, path, body, retried = false) {
         location.hash = '#/login'
       }
     }
-    throw new ApiError(err.code ?? 'HTTP_' + response.status, err.message ?? `请求失败（${response.status}）`, response.status, err)
+    throw new ApiError(err.code ?? 'HTTP_' + response.status, err.message ?? `${rqI18n.t('请求失败')}（${response.status}）`, response.status, err)
   }
   return payload?.data
 }
@@ -164,7 +164,7 @@ export async function entryTicketSession(ticket) {
   try { payload = await response.json() } catch { /* non-json */ }
   if (!response.ok || payload?.ok === false) {
     const err = payload?.error ?? {}
-    throw new ApiError(err.code ?? 'HTTP_' + response.status, err.message ?? `票据兑换失败（${response.status}）`, response.status, err)
+    throw new ApiError(err.code ?? 'HTTP_' + response.status, err.message ?? `${rqI18n.t('票据兑换失败')}（${response.status}）`, response.status, err)
   }
   const result = payload.data
   session.clear()
@@ -216,7 +216,7 @@ export async function downloadBlob(path) {
   const headers = {}
   if (session.token) headers.authorization = `Bearer ${session.token}`
   const response = await fetch(`${BASE}${path}`, { headers })
-  if (!response.ok) throw new ApiError('HTTP_' + response.status, `下载失败（${response.status}）`, response.status)
+  if (!response.ok) throw new ApiError('HTTP_' + response.status, `${rqI18n.t('下载失败')}（${response.status}）`, response.status)
   return response.blob()
 }
 

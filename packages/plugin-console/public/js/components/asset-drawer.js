@@ -16,10 +16,10 @@ import rqI18n from '../i18n.js'
 
 // ============ 设计组件兼容层（签名与 ui.js §3 契约一致） ============
 
-export const TYPE_LABEL = { mcp: 'MCP 服务', agent: 'Agent', app: 'AI 应用', skill: 'Skill', model: '模型路由', nas: 'NAS 存储' }
-const HEALTH_CN = { healthy: '健康', warning: '关注', critical: '熔断', offline: '离线' }
+export const TYPE_LABEL = { mcp: rqI18n.t('MCP 服务'), agent: 'Agent', app: rqI18n.t('AI 应用'), skill: 'Skill', model: rqI18n.t('模型路由'), nas: rqI18n.t('NAS 存储') }
+const HEALTH_CN = { healthy: rqI18n.t('健康'), warning: rqI18n.t('关注'), critical: rqI18n.t('熔断'), offline: rqI18n.t('离线') }
 const HEALTH_CLS = { healthy: 'dot-ok', warning: 'dot-warn', critical: 'dot-crit', offline: 'dot-off' }
-const LIFECYCLE_CN = { draft: '草稿', online: '已上线', offline: '已下线', archived: '已归档', deprecated: '已弃用' }
+const LIFECYCLE_CN = { draft: rqI18n.t('草稿'), online: rqI18n.t('已上线'), offline: rqI18n.t('已下线'), archived: rqI18n.t('已归档'), deprecated: rqI18n.t('已弃用') }
 
 function sectionHeadFallback({ label, title, extra, actions } = {}) {
   return `
@@ -44,12 +44,12 @@ function statCardFallback({ label, value, sub, tone = '' } = {}) {
 
 function healthDotFallback(health, { pulse = false } = {}) {
   const cls = HEALTH_CLS[health] ?? 'dot-off'
-  return `<span class="flex" style="gap:6px;align-items:center;white-space:nowrap"><span class="dot ${cls}${pulse && health === 'critical' ? ' pulse' : ''}"></span><span class="fs-12 text-3">${esc(HEALTH_CN[health] ?? '未知')}</span></span>`
+  return `<span class="flex" style="gap:6px;align-items:center;white-space:nowrap"><span class="dot ${cls}${pulse && health === 'critical' ? ' pulse' : ''}"></span><span class="fs-12 text-3">${esc(HEALTH_CN[health] ?? rqI18n.t('未知'))}</span></span>`
 }
 
 function lifecycleBadgeFallback(s) {
   const cn = LIFECYCLE_CN[s]
-  return `<span class="pill${cn ? ` pill-${s}` : ''}">${esc(cn ?? s ?? '未知')}</span>`
+  return `<span class="pill${cn ? ` pill-${s}` : ''}">${esc(cn ?? s ?? rqI18n.t('未知'))}</span>`
 }
 
 function typeBadgeFallback(type) {
@@ -183,9 +183,9 @@ async function probeAssetHealth(asset) {
 }
 
 const AUTONOMY_CN = {
-  A0: '仅人工触发',
-  A1: '点名直调，人机协同',
-  A2: '模板内自主，超模板转人工',
+  A0: rqI18n.t('仅人工触发'),
+  A1: rqI18n.t('点名直调，人机协同'),
+  A2: rqI18n.t('模板内自主，超模板转人工'),
 }
 
 function kvRow(k, v) {
@@ -233,21 +233,21 @@ export function openAssetDrawer(asset) {
   function renderOverview() {
     const autonomy = asset.autonomy
     tabBody.innerHTML = `
-      <div class="muted-box mb-14">${esc(asset.desc || '暂无描述（在各域资产页补全治理属性后展示）')}</div>
+      <div class="muted-box mb-14">${esc(asset.desc || rqI18n.t('暂无描述（在各域资产页补全治理属性后展示）'))}</div>
       <div class="desc-grid">
-        ${kvRow('归属组织', esc(asset.org || '—'))}
-        ${kvRow('负责人', esc(asset.owner || '—'))}
-        ${kvRow('资源键', `<span class="mono">${esc(asset.key)}</span>`)}
-        ${asset.version ? kvRow('当前版本', `<span class="mono">${esc(asset.version)}</span>`) : ''}
-        ${autonomy ? kvRow('自治级别', `<span class="mono">${esc(autonomy)}</span>（${esc(rqI18n.t(AUTONOMY_CN[autonomy] ?? '未登记口径'))}）`) : ''}
-        ${kvRow('近 30 天调用', `<span class="tnum mono">${num(asset.calls30d)}</span>`)}
-        ${kvRow('近 30 天消耗', `<span class="tnum mono">${fmtNum(asset.tokens30d)} tokens</span>`)}
-        ${kvRow('成本参考', `<span class="tnum mono">${fmtCost((Number(asset.cost30d) || 0) / 100)}</span>${esc(rqI18n.t('（零价快照 · 内部采购成本参考）'))}`)}
+        ${kvRow(rqI18n.t('归属组织'), esc(asset.org || '—'))}
+        ${kvRow(rqI18n.t('负责人'), esc(asset.owner || '—'))}
+        ${kvRow(rqI18n.t('资源键'), `<span class="mono">${esc(asset.key)}</span>`)}
+        ${asset.version ? kvRow(rqI18n.t('当前版本'), `<span class="mono">${esc(asset.version)}</span>`) : ''}
+        ${autonomy ? kvRow(rqI18n.t('自治级别'), `<span class="mono">${esc(autonomy)}</span>（${esc(rqI18n.t(AUTONOMY_CN[autonomy] ?? rqI18n.t('未登记口径')))}）`) : ''}
+        ${kvRow(rqI18n.t('近 30 天调用'), `<span class="tnum mono">${num(asset.calls30d)}</span>`)}
+        ${kvRow(rqI18n.t('近 30 天消耗'), `<span class="tnum mono">${fmtNum(asset.tokens30d)} tokens</span>`)}
+        ${kvRow(rqI18n.t('成本参考'), `<span class="tnum mono">${fmtCost((Number(asset.cost30d) || 0) / 100)}</span>${esc(rqI18n.t('（零价快照 · 内部采购成本参考）'))}`)}
         ${asset.dau !== undefined && asset.dau !== null ? kvRow('DAU', `<span class="tnum mono">${num(asset.dau)}</span>`) : ''}
       </div>
       <div class="flex mt-14" style="gap:8px;border-top:1px solid var(--border);padding-top:14px">
         <button class="btn btn-default btn-sm" id="ad-probe">${icon('wifi', 13)} ${esc(rqI18n.t('健康巡检'))}</button>
-        <a class="btn btn-ghost btn-sm" href="${domainPath(asset)}">${icon('external', 13)} ${esc(rqI18n.t('前往{type}页管理', { type: rqI18n.t(TYPE_LABEL[asset.type] ?? '资产') }))}</a>
+        <a class="btn btn-ghost btn-sm" href="${domainPath(asset)}">${icon('external', 13)} ${esc(rqI18n.t('前往{type}页管理', { type: rqI18n.t(TYPE_LABEL[asset.type] ?? rqI18n.t('资产')) }))}</a>
       </div>`
     tabBody.querySelector('#ad-probe').onclick = async (e) => {
       const btn = e.currentTarget
@@ -267,13 +267,13 @@ export function openAssetDrawer(asset) {
     const trend = Array.isArray(asset.trend) ? asset.trend : []
     tabBody.innerHTML = `
       <div class="grid-cards g3 mb-14">
-        ${statCard({ label: '近 30 天调用', value: `<span class="tnum">${num(asset.calls30d)}</span>`, sub: '网关与计量事件聚合' })}
-        ${statCard({ label: '近 30 天消耗', value: `<span class="tnum">${fmtNum(asset.tokens30d)}</span>`, sub: 'tokens · 计量口径' })}
-        ${statCard({ label: '成本参考', value: `<span class="tnum">${fmtCost((Number(asset.cost30d) || 0) / 100)}</span>`, sub: '零价快照 · 内部口径' })}
+        ${statCard({ label: rqI18n.t('近 30 天调用'), value: `<span class="tnum">${num(asset.calls30d)}</span>`, sub: rqI18n.t('网关与计量事件聚合') })}
+        ${statCard({ label: rqI18n.t('近 30 天消耗'), value: `<span class="tnum">${fmtNum(asset.tokens30d)}</span>`, sub: rqI18n.t('tokens · 计量口径') })}
+        ${statCard({ label: rqI18n.t('成本参考'), value: `<span class="tnum">${fmtCost((Number(asset.cost30d) || 0) / 100)}</span>`, sub: rqI18n.t('零价快照 · 内部口径') })}
       </div>
-      ${asset.dau !== undefined && asset.dau !== null ? `<div class="mb-14">${statCard({ label: 'DAU', value: `<span class="tnum">${num(asset.dau)}</span>`, sub: '日活跃用户（资产提报口径）' })}</div>` : ''}
-      <div class="micro-label mb-8">近 14 天调用趋势</div>
-      ${trend.length ? sparkline(trend, { width: 560, height: 110 }) : emptyHint('暂无计量数据（趋势随调用累积，接入后自动生成）')}`
+      ${asset.dau !== undefined && asset.dau !== null ? `<div class="mb-14">${statCard({ label: 'DAU', value: `<span class="tnum">${num(asset.dau)}</span>`, sub: rqI18n.t('日活跃用户（资产提报口径）') })}</div>` : ''}
+      <div class="micro-label mb-8">${rqI18n.t('近')} 14 ${rqI18n.t('天调用趋势')}</div>
+      ${trend.length ? sparkline(trend, { width: 560, height: 110 }) : emptyHint(rqI18n.t('暂无计量数据（趋势随调用累积，接入后自动生成）'))}`
   }
 
   // —— 权限（各域详情 API） ——
@@ -287,20 +287,20 @@ export function openAssetDrawer(asset) {
       return
     }
     if (!detail) {
-      tabBody.innerHTML = emptyHint(rqI18n.t('台账中的该{type}在对应域内已不存在或不可见', { type: rqI18n.t(TYPE_LABEL[asset.type] ?? '资产') }))
+      tabBody.innerHTML = emptyHint(rqI18n.t('台账中的该{type}在对应域内已不存在或不可见', { type: rqI18n.t(TYPE_LABEL[asset.type] ?? rqI18n.t('资产')) }))
       return
     }
     let html = ''
     if (asset.type === 'agent') {
       html += `
-        <div class="card-title mb-8">机器凭证</div>
+        <div class="card-title mb-8">${rqI18n.t('机器凭证')}</div>
         ${detail.credential ? `
           <div class="desc-grid mb-14">
             ${kvRow('Client ID', `<span class="mono">${esc(detail.credential.clientId)}</span>`)}
-            ${kvRow('状态', detail.credential.status === 'active' ? '正常' : '已禁用')}
-            ${kvRow('活跃令牌', rqI18n.t('{n} 个', { n: detail.credential.activeTokens }))}
+            ${kvRow(rqI18n.t('状态'), detail.credential.status === 'active' ? rqI18n.t('正常') : rqI18n.t('已禁用'))}
+            ${kvRow(rqI18n.t('活跃令牌'), rqI18n.t('{n} 个', { n: detail.credential.activeTokens }))}
           </div>` : `<div class="muted-box mb-14">${esc(rqI18n.t('未颁发机器凭证'))}</div>`}
-        <div class="card-title mb-8">绑定用户（使用即授权留痕）</div>
+        <div class="card-title mb-8">${rqI18n.t('绑定用户')}（${rqI18n.t('使用即授权留痕')}）</div>
         <div class="mb-14">
           ${(detail.boundUsers ?? []).length ? detail.boundUsers.map((b) => `
             <div class="flex fs-13" style="padding:7px 0;border-bottom:1px solid var(--border);gap:8px;align-items:center">
@@ -312,46 +312,46 @@ export function openAssetDrawer(asset) {
     } else if (asset.type === 'app') {
       html += `
         <div class="desc-grid mb-14">
-          ${kvRow('开发者', esc(detail.attrs?.developerName || '—'))}
-          ${kvRow('访问地址', detail.attrs?.url ? `<span class="mono">${esc(detail.attrs.url)}</span>` : '未登记')}
-          ${kvRow('投放渠道', (detail.attrs?.channels ?? []).length ? detail.attrs.channels.map((c) => `<span class="badge badge-muted no-dot">${esc(c)}</span>`).join(' ') : '—')}
-          ${kvRow('SSO 接入', detail.sso ? (detail.sso.status === 'active' ? '已启用' : '已配置（未激活）') : '未配置')}
+          ${kvRow(rqI18n.t('开发者'), esc(detail.attrs?.developerName || '—'))}
+          ${kvRow(rqI18n.t('访问地址'), detail.attrs?.url ? `<span class="mono">${esc(detail.attrs.url)}</span>` : rqI18n.t('未登记'))}
+          ${kvRow(rqI18n.t('投放渠道'), (detail.attrs?.channels ?? []).length ? detail.attrs.channels.map((c) => `<span class="badge badge-muted no-dot">${esc(c)}</span>`).join(' ') : '—')}
+          ${kvRow(rqI18n.t('SSO 接入'), detail.sso ? (detail.sso.status === 'active' ? rqI18n.t('已启用') : rqI18n.t('已配置（未激活）')) : rqI18n.t('未配置'))}
         </div>`
     } else if (asset.type === 'mcp') {
       html += `
         <div class="desc-grid mb-14">
-          ${kvRow('接入方式', detail.mode === 'external' ? '外部注册' : '平台托管')}
-          ${kvRow('传输协议', `<span class="mono">${esc(String(detail.transport ?? 'stdio').toUpperCase())}</span>`)}
-          ${kvRow('熔断状态', detail.health?.breakerOpen ? '熔断开启（调用被拒绝）' : '熔断关闭')}
+          ${kvRow(rqI18n.t('接入方式'), detail.mode === 'external' ? rqI18n.t('外部注册') : rqI18n.t('平台托管'))}
+          ${kvRow(rqI18n.t('传输协议'), `<span class="mono">${esc(String(detail.transport ?? 'stdio').toUpperCase())}</span>`)}
+          ${kvRow(rqI18n.t('熔断状态'), detail.health?.breakerOpen ? rqI18n.t('熔断开启（调用被拒绝）') : rqI18n.t('熔断关闭'))}
         </div>
-        <div class="card-title mb-8">授权主体（MCP 权限组反查）</div>
-        <div id="ad-mcp-grants" class="mb-8"><span class="text-4 fs-12">加载中…</span></div>`
+        <div class="card-title mb-8">${rqI18n.t('授权主体')}（MCP ${rqI18n.t('权限组反查')}）</div>
+        <div id="ad-mcp-grants" class="mb-8"><span class="text-4 fs-12">${rqI18n.t('加载中')}…</span></div>`
     } else if (asset.type === 'nas') {
       html += `
         <div class="desc-grid mb-14">
-          ${kvRow('文件网关', detail.attrs?.gatewayUrl ? `<span class="mono">${esc(detail.attrs.gatewayUrl)}</span>` : '未配置')}
-          ${kvRow('密级', esc(detail.attrs?.dataClass || '—'))}
-          ${kvRow('容量', esc(detail.attrs?.capacity || '—'))}
-          ${kvRow('标签', (detail.attrs?.tags ?? []).length ? detail.attrs.tags.map((t) => `<span class="badge badge-muted no-dot">${esc(t)}</span>`).join(' ') : '—')}
+          ${kvRow(rqI18n.t('文件网关'), detail.attrs?.gatewayUrl ? `<span class="mono">${esc(detail.attrs.gatewayUrl)}</span>` : rqI18n.t('未配置'))}
+          ${kvRow(rqI18n.t('密级'), esc(detail.attrs?.dataClass || '—'))}
+          ${kvRow(rqI18n.t('容量'), esc(detail.attrs?.capacity || '—'))}
+          ${kvRow(rqI18n.t('标签'), (detail.attrs?.tags ?? []).length ? detail.attrs.tags.map((t) => `<span class="badge badge-muted no-dot">${esc(t)}</span>`).join(' ') : '—')}
         </div>`
     } else if (asset.type === 'skill') {
       html += `
         <div class="desc-grid mb-14">
-          ${kvRow('可见性', detail.visibility === 'orgs' ? rqI18n.t('指定组织（{n} 个）', { n: (detail.targetOrgs ?? []).length }) : '全员可见')}
-          ${detail.visibility === 'orgs' && (detail.targetOrgs ?? []).length ? kvRow('目标组织', detail.targetOrgs.map((o) => `<span class="mono fs-12">${esc(o)}</span>`).join(' ')) : ''}
-          ${kvRow('适用模型', (detail.applicableModels ?? []).length ? detail.applicableModels.map(esc).join('、') : '不限')}
-          ${kvRow('前置依赖', (detail.deps ?? []).length ? detail.deps.map((d) => `<span class="mono fs-12">${esc(d)}</span>`).join(' ') : '无')}
+          ${kvRow(rqI18n.t('可见性'), detail.visibility === 'orgs' ? rqI18n.t('指定组织（{n} 个）', { n: (detail.targetOrgs ?? []).length }) : rqI18n.t('全员可见'))}
+          ${detail.visibility === 'orgs' && (detail.targetOrgs ?? []).length ? kvRow(rqI18n.t('目标组织'), detail.targetOrgs.map((o) => `<span class="mono fs-12">${esc(o)}</span>`).join(' ')) : ''}
+          ${kvRow(rqI18n.t('适用模型'), (detail.applicableModels ?? []).length ? detail.applicableModels.map(esc).join('、') : rqI18n.t('不限'))}
+          ${kvRow(rqI18n.t('前置依赖'), (detail.deps ?? []).length ? detail.deps.map((d) => `<span class="mono fs-12">${esc(d)}</span>`).join(' ') : rqI18n.t('无'))}
         </div>`
     } else if (asset.type === 'model') {
       html += `
         <div class="desc-grid mb-14">
-          ${kvRow('供应商', esc(detail.provider ?? '—'))}
-          ${kvRow('路由状态', detail.status === 'online' ? '在线' : '下线')}
-          ${kvRow('分级上限', esc(detail.dataClassLimit ?? 'internal'))}
+          ${kvRow(rqI18n.t('供应商'), esc(detail.provider ?? '—'))}
+          ${kvRow(rqI18n.t('路由状态'), detail.status === 'online' ? rqI18n.t('在线') : rqI18n.t('下线'))}
+          ${kvRow(rqI18n.t('分级上限'), esc(detail.dataClassLimit ?? 'internal'))}
           ${kvRow(rqI18n.t('内部单价'), detail.costCentsPerKTokens !== undefined ? `${fmtCost(detail.costCentsPerKTokens)} / K tokens` : '—')}
         </div>`
     }
-    tabBody.innerHTML = html || emptyHint('该资产类型暂无权限视图')
+    tabBody.innerHTML = html || emptyHint(rqI18n.t('该资产类型暂无权限视图'))
 
     if (asset.type === 'mcp') {
       // MCP 授权主体：权限组反查（复用 agents.js 同源数据口径）
@@ -392,7 +392,7 @@ export function openAssetDrawer(asset) {
       return
     }
     if (!detail) {
-      tabBody.innerHTML = emptyHint(rqI18n.t('台账中的该{type}在对应域内已不存在或不可见', { type: rqI18n.t(TYPE_LABEL[asset.type] ?? '资产') }))
+      tabBody.innerHTML = emptyHint(rqI18n.t('台账中的该{type}在对应域内已不存在或不可见', { type: rqI18n.t(TYPE_LABEL[asset.type] ?? rqI18n.t('资产')) }))
       return
     }
     let html = `<div class="micro-label mb-8">${esc(rqI18n.t('编排拓扑 · 依赖一图穿透'))}</div>`
@@ -401,7 +401,7 @@ export function openAssetDrawer(asset) {
         <div class="card card-pad mb-10">${renderTopologyList(detail.topology)}</div>
         ${(detail.impact ?? []).length ? `
           <div class="card card-pad" style="border-color:var(--warn-border);background:var(--warn-bg)">
-            <div class="card-title mb-8">${icon('alert', 14)} 影响面（若下线）</div>
+            <div class="card-title mb-8">${icon('alert', 14)} ${rqI18n.t('影响面')}（${rqI18n.t('若下线')}）</div>
             ${detail.impact.map((i) => `<div class="fs-13" style="padding:3px 0">· ${esc(i.name)}${esc(rqI18n.t('（{type}）', { type: rqI18n.t(TYPE_LABEL[i.type] ?? i.type) }))}</div>`).join('')}
           </div>` : ''}`
     } else if (asset.type === 'mcp' && Array.isArray(detail.tools)) {
@@ -411,7 +411,7 @@ export function openAssetDrawer(asset) {
           <div class="flex fs-13" style="padding:7px 0;border-bottom:1px solid var(--border);gap:8px;align-items:center">
             <span class="mono" style="font-weight:600">${esc(tool.name)}</span>
             <span class="fs-12 text-3 grow ellipsis">${esc(tool.description ?? '')}</span>
-          </div>`).join('')}` : emptyHint('该服务尚未发现工具（上线后自动发现）')
+          </div>`).join('')}` : emptyHint(rqI18n.t('该服务尚未发现工具（上线后自动发现）'))
     } else if (asset.type === 'nas') {
       const tools = detail.gatewayTools ?? []
       html += tools.length ? `
@@ -420,16 +420,16 @@ export function openAssetDrawer(asset) {
           <div class="flex fs-13" style="padding:7px 0;border-bottom:1px solid var(--border);gap:8px;align-items:center">
             <span class="mono" style="font-weight:600">${esc(tool.name)}</span>
             <span class="fs-12 text-3 grow ellipsis">${esc(tool.description ?? '')}</span>
-          </div>`).join('')}` : emptyHint('尚未发现网关工具（上线后自动发现）')
+          </div>`).join('')}` : emptyHint(rqI18n.t('尚未发现网关工具（上线后自动发现）'))
     } else if (asset.type === 'skill') {
       const deps = detail.deps ?? []
       html += deps.length ? `
-        <div class="fs-12 text-3 mb-8">安装该 Skill 时建议一并安装的前置依赖</div>
-        ${deps.map((d) => `<div class="flex fs-13" style="padding:7px 0;border-bottom:1px solid var(--border);gap:8px"><span class="mono">${esc(d)}</span></div>`).join('')}` : emptyHint('该 Skill 无前置依赖')
+        <div class="fs-12 text-3 mb-8">${rqI18n.t('安装该')} Skill ${rqI18n.t('时建议一并安装的前置依赖')}</div>
+        ${deps.map((d) => `<div class="flex fs-13" style="padding:7px 0;border-bottom:1px solid var(--border);gap:8px"><span class="mono">${esc(d)}</span></div>`).join('')}` : emptyHint(rqI18n.t('该 Skill 无前置依赖'))
     } else if (asset.type === 'model') {
       html += `<div id="ad-model-chains"><span class="text-4 fs-12">${esc(rqI18n.t('加载中…'))}</span></div>`
     } else {
-      html += emptyHint('该资产类型暂无拓扑视图')
+      html += emptyHint(rqI18n.t('该资产类型暂无拓扑视图'))
     }
     tabBody.innerHTML = html
 
@@ -444,9 +444,9 @@ export function openAssetDrawer(asset) {
             <div class="fs-12 text-3 mb-8">${esc(rqI18n.t('引用该模型的渠道路由（主用 / 降级链）'))}</div>
             ${groups.map((g) => `
               <div class="card card-pad mb-8">
-                <div class="flex"><b class="fs-13">${esc(g.name)}</b><span class="badge ${g.enabled ? 'badge-ok' : 'badge-muted'} no-dot" style="margin-left:auto">${g.enabled ? '启用' : '停用'}</span></div>
+                <div class="flex"><b class="fs-13">${esc(g.name)}</b><span class="badge ${g.enabled ? 'badge-ok' : 'badge-muted'} no-dot" style="margin-left:auto">${g.enabled ? rqI18n.t('启用') : rqI18n.t('停用')}</span></div>
                 <div class="fs-12 text-3 mt-8">${esc(rqI18n.t('链路：'))}<span class="mono">${(g.chain ?? []).map(esc).join(' → ')}</span></div>
-              </div>`).join('')}` : emptyHint('暂无渠道路由引用该模型')
+              </div>`).join('')}` : emptyHint(rqI18n.t('暂无渠道路由引用该模型'))
         } catch (error) {
           holder.innerHTML = emptyHint(rqI18n.t('渠道路由信息不可见（{msg}）', { msg: error.message }))
         }
@@ -459,7 +459,7 @@ export function openAssetDrawer(asset) {
     tabBody.innerHTML = `<div class="text-4 fs-12">${esc(rqI18n.t('加载中…'))}</div>`
     const logs = await fetchAssetAudit(asset)
     if (!logs.length) {
-      tabBody.innerHTML = emptyHint('窗口内与该资产相关的审计事件为 0（读操作不计入，噪音控制）')
+      tabBody.innerHTML = emptyHint(rqI18n.t('窗口内与该资产相关的审计事件为 0（读操作不计入，噪音控制）'))
       return
     }
     tabBody.innerHTML = logs.map((l) => `
@@ -468,7 +468,7 @@ export function openAssetDrawer(asset) {
           <span class="mono fs-12" style="font-weight:600">${esc(l.action)}</span>
           <span class="badge ${l.result === 'ok' ? 'badge-ok' : l.result === 'denied' ? 'badge-danger' : 'badge-warn'} no-dot" style="margin-left:auto">${esc(String(l.result ?? '').toUpperCase())}</span>
         </div>
-        <div class="fs-12 text-3" style="margin-top:6px">${esc(l.actorName || '系统')} · ${esc(l.resourceName || l.resourceType || '')}</div>
+        <div class="fs-12 text-3" style="margin-top:6px">${esc(l.actorName || rqI18n.t('系统'))} · ${esc(l.resourceName || l.resourceType || '')}</div>
         ${l.detail ? `<div class="fs-11 text-4" style="margin-top:4px">${esc(String(l.detail).slice(0, 120))}</div>` : ''}
         <div class="fs-11 text-4 tnum" style="margin-top:4px">${timeAgo(l.createdAt)}</div>
       </div>`).join('')
@@ -486,7 +486,7 @@ export function openAssetDrawer(asset) {
     const currentIdx = order.indexOf(normalized)
     const deprecated = asset.lifecycle === 'deprecated'
     tabBody.innerHTML = `
-      <div class="micro-label mb-8">生命周期状态机 · 高危变更强制 L4 审批</div>
+      <div class="micro-label mb-8">${rqI18n.t('生命周期状态机')} · ${rqI18n.t('高危变更强制')} L4 ${rqI18n.t('审批')}</div>
       <div class="timeline mb-14">
         ${order.map((s, i) => `
           <div class="tl-item">
@@ -498,24 +498,24 @@ export function openAssetDrawer(asset) {
           </div>`).join('')}
       </div>
       ${detail && (detail.availableTransitions ?? []).length ? `
-        <div class="card-title mb-8">${esc(rqI18n.t('可执行动作（需在{type}页执行）', { type: rqI18n.t(TYPE_LABEL[asset.type] ?? '资产') }))}</div>
+        <div class="card-title mb-8">${esc(rqI18n.t('可执行动作（需在{type}页执行）', { type: rqI18n.t(TYPE_LABEL[asset.type] ?? rqI18n.t('资产')) }))}</div>
         <div class="flex mb-14" style="gap:8px;flex-wrap:wrap">
           ${detail.availableTransitions.map((t) => `<span class="badge badge-muted no-dot">${esc(t.label)}</span>`).join('')}
         </div>` : ''}
       <div class="muted-box mb-14" style="display:flex;gap:8px">
         ${icon('info', 15)}<span>${esc(rqI18n.t('上线 / 下线 / 归档等状态变更由各域生命周期端点执行，高危操作强制 L4 审批单（原因必填、全程留痕、执行结果回写）。'))}</span>
       </div>
-      <a class="btn btn-default" style="width:100%" href="${domainPath(asset)}">${icon('external', 13)} ${esc(rqI18n.t('前往{type}页执行生命周期动作', { type: rqI18n.t(TYPE_LABEL[asset.type] ?? '资产') }))}</a>`
+      <a class="btn btn-default" style="width:100%" href="${domainPath(asset)}">${icon('external', 13)} ${esc(rqI18n.t('前往{type}页执行生命周期动作', { type: rqI18n.t(TYPE_LABEL[asset.type] ?? rqI18n.t('资产')) }))}</a>`
   }
 
   tabsEl.appendChild(tabRow(
     [
-      { key: 'overview', label: '概览' },
-      { key: 'monitor', label: '监控' },
-      { key: 'perm', label: '权限' },
-      { key: 'topology', label: '拓扑' },
-      { key: 'audit', label: '审计' },
-      { key: 'lifecycle', label: '生命周期' },
+      { key: 'overview', label: rqI18n.t('概览') },
+      { key: 'monitor', label: rqI18n.t('监控') },
+      { key: 'perm', label: rqI18n.t('权限') },
+      { key: 'topology', label: rqI18n.t('拓扑') },
+      { key: 'audit', label: rqI18n.t('审计') },
+      { key: 'lifecycle', label: rqI18n.t('生命周期') },
     ],
     'overview',
     (key) => renderTab(key),

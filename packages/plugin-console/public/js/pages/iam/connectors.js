@@ -26,13 +26,13 @@ export async function renderConnectors(params2, ctx2) {
   // 回调地址按当前访问地址自动生成（与后端发起授权时按 Host 头拼接的 redirect_uri 一致），
   // 直接复制到钉钉开发者后台的登录重定向地址即可，无需手填。全部主体共用同一回调地址。
   const callbackUrl = `${location.origin.replace(/\/+$/, '')}/api/auth/sso`
-  $('#iam-actions').innerHTML = `<button class="btn btn-primary" id="conn-add">${icon('plus', 14)}新增接入</button>`
+  $('#iam-actions').innerHTML = `<button class="btn btn-primary" id="conn-add">${icon('plus', 14)}${rqI18n.t('新增接入')}</button>`
   $('#conn-add').onclick = () => openConnectorEditor(null)
 
   const body = $('#iam-body')
   if (!configs.length) {
     body.innerHTML = ''
-    body.appendChild(emptyState({ title: '还没有三方接入', desc: '接入钉钉等企业主体后，可按主体独立同步通讯录、开启扫码登录', actionText: '新增接入', onAction: () => $('#conn-add').click() }))
+    body.appendChild(emptyState({ title: rqI18n.t('还没有三方接入'), desc: rqI18n.t('接入钉钉等企业主体后，可按主体独立同步通讯录、开启扫码登录'), actionText: rqI18n.t('新增接入'), onAction: () => $('#conn-add').click() }))
   } else {
     body.innerHTML = ''
     for (const config of configs) body.appendChild(connectorCard(config))
@@ -45,31 +45,31 @@ export async function renderConnectors(params2, ctx2) {
         <div class="card-head">
           <span class="card-title">${icon('link', 15)} ${esc(config.name || providerName(config.provider))}</span>
           <span class="badge ${config.mode === 'real' ? 'badge-brand' : 'badge-muted'} no-dot">${config.mode === 'real' ? 'real' : 'mock'}</span>
-          ${config.enabled ? '<span class="badge badge-ok">已启用</span>' : '<span class="badge badge-muted">未启用</span>'}
+          ${config.enabled ? rqI18n.t('<span class="badge badge-ok">已启用</span>') : rqI18n.t('<span class="badge badge-muted">未启用</span>')}
           <div class="card-head-actions">
-            <button class="btn btn-default btn-sm" data-test>${icon('wifi', 13)}连通性自检</button>
-            <button class="btn btn-primary btn-sm" data-sync>${icon('refresh', 13)}立即同步</button>
+            <button class="btn btn-default btn-sm" data-test>${icon('wifi', 13)}${rqI18n.t('连通性自检')}</button>
+            <button class="btn btn-primary btn-sm" data-sync>${icon('refresh', 13)}${rqI18n.t('立即同步')}</button>
           </div>
         </div>
         <div class="card-body">
           <div class="grid-3 mb-14">
-            ${syncStatCard('最近同步', config.lastSyncAt ? timeAgo(config.lastSyncAt) : '从未同步', config.lastSyncResult?.ok ? 'var(--ok)' : 'var(--text-3)')}
-            ${syncStatCard('同步结果', config.lastSyncResult ? config.lastSyncResult.message : '—', 'var(--text-1)')}
-            ${syncStatCard('同步频率', (config.intervalMinutes ?? 60) > 0 ? rqI18n.t('每 {n} 分钟（自动）', { n: config.intervalMinutes ?? 60 }) : '仅手动', 'var(--text-1)')}
+            ${syncStatCard(rqI18n.t('最近同步'), config.lastSyncAt ? timeAgo(config.lastSyncAt) : rqI18n.t('从未同步'), config.lastSyncResult?.ok ? 'var(--ok)' : 'var(--text-3)')}
+            ${syncStatCard(rqI18n.t('同步结果'), config.lastSyncResult ? config.lastSyncResult.message : '—', 'var(--text-1)')}
+            ${syncStatCard(rqI18n.t('同步频率'), (config.intervalMinutes ?? 60) > 0 ? rqI18n.t('每 {n} 分钟（自动）', { n: config.intervalMinutes ?? 60 }) : rqI18n.t('仅手动'), 'var(--text-1)')}
           </div>
           <div class="desc-grid">
-            <div class="desc-item"><span class="k">平台</span><span class="v">${esc(providerName(config.provider))}</span></div>
-            <div class="desc-item"><span class="k">CorpID</span><span class="v mono">${esc(config.corpId ?? '未配置')}</span></div>
-            <div class="desc-item"><span class="k">AppKey</span><span class="v mono">${esc(config.appKey ?? '未配置')}</span></div>
-            <div class="desc-item"><span class="k">AppSecret</span><span class="v mono">${esc(config.secretMasked ?? '—')} <span class="text-4">（KMS 加密存储）</span></span></div>
-            <div class="desc-item"><span class="k">目标组织</span><span class="v">${esc(config.targetOrgId ? (orgNameOf(config.targetOrgId) ?? config.targetOrgId) : '平台根')}</span></div>
-            <div class="desc-item"><span class="k">扫码登录</span><span class="v">${config.loginEnabled ? '已开启' : '未开启'}</span></div>
-            <div class="desc-item"><span class="k">回调地址</span><span class="v mono">${esc(callbackUrl)}</span></div>
-            <div class="desc-item"><span class="k">冲突策略</span><span class="v">${esc(strategyName(config.conflictStrategy))}</span></div>
+            <div class="desc-item"><span class="k">${rqI18n.t('平台')}</span><span class="v">${esc(providerName(config.provider))}</span></div>
+            <div class="desc-item"><span class="k">CorpID</span><span class="v mono">${esc(config.corpId ?? rqI18n.t('未配置'))}</span></div>
+            <div class="desc-item"><span class="k">AppKey</span><span class="v mono">${esc(config.appKey ?? rqI18n.t('未配置'))}</span></div>
+            <div class="desc-item"><span class="k">AppSecret</span><span class="v mono">${esc(config.secretMasked ?? '—')} <span class="text-4">（KMS ${rqI18n.t('加密存储')}）</span></span></div>
+            <div class="desc-item"><span class="k">${rqI18n.t('目标组织')}</span><span class="v">${esc(config.targetOrgId ? (orgNameOf(config.targetOrgId) ?? config.targetOrgId) : rqI18n.t('平台根'))}</span></div>
+            <div class="desc-item"><span class="k">${rqI18n.t('扫码登录')}</span><span class="v">${config.loginEnabled ? rqI18n.t('已开启') : rqI18n.t('未开启')}</span></div>
+            <div class="desc-item"><span class="k">${rqI18n.t('回调地址')}</span><span class="v mono">${esc(callbackUrl)}</span></div>
+            <div class="desc-item"><span class="k">${rqI18n.t('冲突策略')}</span><span class="v">${esc(strategyName(config.conflictStrategy))}</span></div>
           </div>
           <div class="flex mt-14">
-            <button class="btn btn-default btn-sm" data-edit>${icon('settings', 13)}接入配置</button>
-            <button class="btn btn-ghost btn-sm" style="color:var(--danger)" data-del>${icon('trash', 13)}删除</button>
+            <button class="btn btn-default btn-sm" data-edit>${icon('settings', 13)}${rqI18n.t('接入配置')}</button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--danger)" data-del>${icon('trash', 13)}${rqI18n.t('删除')}</button>
           </div>
         </div>
       </div>`)
@@ -93,7 +93,7 @@ export async function renderConnectors(params2, ctx2) {
     card.querySelector('[data-edit]').onclick = () => openConnectorEditor(config)
     card.querySelector('[data-del]').onclick = async () => {
       const result = await confirmDialog({
-        title: '删除接入', danger: true,
+        title: rqI18n.t('删除接入'), danger: true,
         message: esc(rqI18n.t('确定删除主体「{name}」的接入配置？将同时注销其运行时连接器与登录身份源（已同步的组织与账号保留）。', { name: config.name || config.corpId })),
       })
       if (!result) return
@@ -109,29 +109,29 @@ export async function renderConnectors(params2, ctx2) {
   function openConnectorEditor(config) {
     const isEdit = !!config
     const modal = openModal({
-      title: isEdit ? esc(rqI18n.t('接入配置（{name}）', { name: config.name || providerName(config.provider) })) : '新增接入', wide: true,
+      title: isEdit ? esc(rqI18n.t('接入配置（{name}）', { name: config.name || providerName(config.provider) })) : rqI18n.t('新增接入'), wide: true,
       body: `
         <div class="form-grid">
-          ${field('三方平台', '<code class="mono" style="line-height:32px">钉钉（dingtalk）</code>', { hint: '当前仅支持钉钉，更多平台陆续接入' })}
-          ${field('主体名称', inputField('name', { value: config?.name, placeholder: '如：集团总部 / 华南子公司' }), { required: true })}
+          ${field(rqI18n.t('三方平台'), rqI18n.t('<code class="mono" style="line-height:32px">钉钉（dingtalk）</code>'), { hint: rqI18n.t('当前仅支持钉钉，更多平台陆续接入') })}
+          ${field(rqI18n.t('主体名称'), inputField('name', { value: config?.name, placeholder: rqI18n.t('如：集团总部 / 华南子公司') }), { required: true })}
           ${field('CorpID', inputField('corpId', { value: config?.corpId }), { required: true })}
           ${field('AppKey', inputField('appKey', { value: config?.appKey }), { required: true })}
-          ${field('AppSecret', inputField('appSecret', { value: '', placeholder: isEdit ? '留空保持不变（加密存储）' : '必填（加密存储）' }), { required: !isEdit, hint: '通过 KMS 托管加密，禁止明文落库' })}
-          ${field('同步频率（分钟）', inputField('intervalMinutes', { value: config?.intervalMinutes ?? 60 }), { hint: '按此间隔自动同步通讯录（下限 5 分钟）；填 0 表示仅手动同步' })}
-          ${field('回调地址（自动生成）', `
+          ${field('AppSecret', inputField('appSecret', { value: '', placeholder: isEdit ? rqI18n.t('留空保持不变（加密存储）') : rqI18n.t('必填（加密存储）') }), { required: !isEdit, hint: rqI18n.t('通过 KMS 托管加密，禁止明文落库') })}
+          ${field(rqI18n.t('同步频率（分钟）'), inputField('intervalMinutes', { value: config?.intervalMinutes ?? 60 }), { hint: rqI18n.t('按此间隔自动同步通讯录（下限 5 分钟）；填 0 表示仅手动同步') })}
+          ${field(rqI18n.t('回调地址（自动生成）'), `
             <div class="flex" style="gap:8px">
               <input class="input" name="callbackUrl" readonly value="${esc(callbackUrl)}" style="flex:1">
-              <button class="btn btn-default" id="conn-copy-callback">${icon('copy', 13)}复制</button>
-            </div>`, { full: true, hint: '按当前访问地址生成，请将其配置到钉钉开发者后台对应应用的登录重定向地址（redirect URI）' })}
-          ${field('冲突处理策略', selectField('conflictStrategy', [
-            { value: 'manual', label: '人工确认（推荐）' },
-            { value: 'third_party_wins', label: '以三方为准' },
-            { value: 'platform_wins', label: '以平台为准' },
+              <button class="btn btn-default" id="conn-copy-callback">${icon('copy', 13)}${rqI18n.t('复制')}</button>
+            </div>`, { full: true, hint: rqI18n.t('按当前访问地址生成，请将其配置到钉钉开发者后台对应应用的登录重定向地址（redirect URI）') })}
+          ${field(rqI18n.t('冲突处理策略'), selectField('conflictStrategy', [
+            { value: 'manual', label: rqI18n.t('人工确认（推荐）') },
+            { value: 'third_party_wins', label: rqI18n.t('以三方为准') },
+            { value: 'platform_wins', label: rqI18n.t('以平台为准') },
           ], { value: config?.conflictStrategy ?? 'manual' }))}
-          ${field('目标组织', searchableSelectField('targetOrgId', orgPathOptions, { value: config?.targetOrgId ?? '', emptyLabel: '（平台根）', placeholder: '点击选择目标组织' }), { hint: '同步下来的三方部门与人员挂到该组织下，空值为平台根' })}
-          ${field(' ', `<label class="flex"><input type="checkbox" name="loginEnabled" ${config?.loginEnabled ? 'checked' : ''} style="accent-color:var(--brand-500)"> 允许钉钉扫码登录控制台</label>`)}
+          ${field(rqI18n.t('目标组织'), searchableSelectField('targetOrgId', orgPathOptions, { value: config?.targetOrgId ?? '', emptyLabel: rqI18n.t('（平台根）'), placeholder: rqI18n.t('点击选择目标组织') }), { hint: rqI18n.t('同步下来的三方部门与人员挂到该组织下，空值为平台根') })}
+          ${field(' ', `<label class="flex"><input type="checkbox" name="loginEnabled" ${config?.loginEnabled ? 'checked' : ''} style="accent-color:var(--brand-500)"> ${rqI18n.t('允许钉钉扫码登录控制台')}</label>`)}
         </div>`,
-      foot: `<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>${isEdit ? '保存' : '创建'}</button>`,
+      foot: `<button class="btn btn-default" data-cancel>${rqI18n.t('取消')}</button><button class="btn btn-primary" data-ok>${isEdit ? rqI18n.t('保存') : rqI18n.t('创建')}</button>`,
     })
     mountSearchableSelects(modal.body)
     modal.el.querySelector('[data-cancel]').onclick = () => modal.close()

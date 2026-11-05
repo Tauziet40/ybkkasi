@@ -35,7 +35,7 @@ export async function loadPanelDepts() {
 /** 宿主候选：本机恒在列，其余来自连接清单。 */
 export function panelHostOptions(storage = localStorage) {
   return [
-    { id: LOCAL_ID, name: '本机宿主服务' },
+    { id: LOCAL_ID, name: rqI18n.t('本机宿主服务') },
     ...loadConnections(storage).map((item) => ({ id: item.id, name: item.name })),
   ]
 }
@@ -123,7 +123,7 @@ export function renderPanelRegistry(container, { depts = [], filterHostId, onCha
 export function openPanelEditor({ panel, connectionId, depts = [], onSaved } = {}) {
   const isEdit = !!panel
   const hosts = panelHostOptions()
-  const hostOptions = hosts.map((host) => ({ value: host.id, label: host.id === LOCAL_ID ? `${host.name}（内置）` : host.name }))
+  const hostOptions = hosts.map((host) => ({ value: host.id, label: host.id === LOCAL_ID ? `${host.name}${rqI18n.t('（内置）')}` : host.name }))
   const deptOptions = depts.map((dept) => ({ value: dept.id, label: `${dept.label}（${dept.id}）` }))
   const selectedHost = panel?.connectionId ?? connectionId ?? LOCAL_ID
   const selectedDept = panel?.dept ?? deptOptions[0]?.value ?? ''

@@ -14,34 +14,34 @@ import { $, $$, esc } from '../ui.js'
 
 /** 生态树数据：平台 → 三域 → 资源叶（与控制台导航同源的 12 个能力面） */
 const TREE = {
-  label: '元冰可平台',
+  label: rqI18n.t('元冰可平台'),
   children: [
-    { label: 'AI 资源域', children: ['Skill 市场', 'Agent 本体', 'AI 应用', 'MCP 服务', 'NAS 存储'] },
-    { label: '治理与运营', children: ['组织账号', '审批中心', '审计告警', '财务视图'] },
-    { label: '接入与协同', children: ['连接器', '平台接入', '部门面板'] },
+    { label: rqI18n.t('AI 资源域'), children: [rqI18n.t('Skill 市场'), rqI18n.t('Agent 本体'), rqI18n.t('AI 应用'), rqI18n.t('MCP 服务'), rqI18n.t('NAS 存储')] },
+    { label: rqI18n.t('治理与运营'), children: [rqI18n.t('组织账号'), rqI18n.t('审批中心'), rqI18n.t('审计告警'), rqI18n.t('财务视图')] },
+    { label: rqI18n.t('接入与协同'), children: [rqI18n.t('连接器'), rqI18n.t('平台接入'), rqI18n.t('部门面板')] },
   ],
 }
 
 const FEATURES = [
-  { icon: 'zap', title: '资产登记', desc: '六类资源一个入口登记建档：元数据、归属、计量口径一步到位。' },
-  { icon: 'sparkles', title: 'Skill 市场', desc: '企业级技能市场：上架审批、热度洞察、活跃日历一目了然。' },
-  { icon: 'bot', title: 'Agent 本体', desc: 'Agent 身份与运行档案统一纳管，能力、依赖、健康度全程可见。' },
-  { icon: 'app', title: 'AI 应用', desc: '应用注册即接入单点登录与计量，流量、活跃与成本一屏读懂。', green: true },
-  { icon: 'plug', title: 'MCP 服务', desc: 'MCP 端点目录与调用治理：工具边界清晰、每一次调用可审计。' },
-  { icon: 'server', title: 'NAS 存储', desc: '文件资产纳管与授权：数据不动、权限先行，跨域共享有据可查。', green: true },
-  { icon: 'checkSquare', title: '审批中心', desc: '上架、授权、变更统一审批流：待办聚合、随时处理、留痕完整。' },
-  { icon: 'scroll', title: '审计与告警', desc: '全链路操作审计与告警订阅，合规检查永远有据可依。', green: true },
-  { icon: 'coins', title: '财务视图', desc: '用量与成本穿透到资源与团队：口径透明、内部结算可解释。' },
-  { icon: 'users', title: '组织与账号', desc: '双轨身份 + 角色权限 + 三方集成：一套组织树管住所有入口。' },
-  { icon: 'link', title: '连接器', desc: '钉钉等三方身份与消息通道开箱即接，组织协同不断档。', green: true },
-  { icon: 'building', title: '部门面板', desc: '业务同学零门槛工作台：打开即用，无需理解控制台全貌。' },
+  { icon: 'zap', title: rqI18n.t('资产登记'), desc: rqI18n.t('六类资源一个入口登记建档：元数据、归属、计量口径一步到位。') },
+  { icon: 'sparkles', title: rqI18n.t('Skill 市场'), desc: rqI18n.t('企业级技能市场：上架审批、热度洞察、活跃日历一目了然。') },
+  { icon: 'bot', title: rqI18n.t('Agent 本体'), desc: rqI18n.t('Agent 身份与运行档案统一纳管，能力、依赖、健康度全程可见。') },
+  { icon: 'app', title: rqI18n.t('AI 应用'), desc: rqI18n.t('应用注册即接入单点登录与计量，流量、活跃与成本一屏读懂。'), green: true },
+  { icon: 'plug', title: rqI18n.t('MCP 服务'), desc: rqI18n.t('MCP 端点目录与调用治理：工具边界清晰、每一次调用可审计。') },
+  { icon: 'server', title: rqI18n.t('NAS 存储'), desc: rqI18n.t('文件资产纳管与授权：数据不动、权限先行，跨域共享有据可查。'), green: true },
+  { icon: 'checkSquare', title: rqI18n.t('审批中心'), desc: rqI18n.t('上架、授权、变更统一审批流：待办聚合、随时处理、留痕完整。') },
+  { icon: 'scroll', title: rqI18n.t('审计与告警'), desc: rqI18n.t('全链路操作审计与告警订阅，合规检查永远有据可依。'), green: true },
+  { icon: 'coins', title: rqI18n.t('财务视图'), desc: rqI18n.t('用量与成本穿透到资源与团队：口径透明、内部结算可解释。') },
+  { icon: 'users', title: rqI18n.t('组织与账号'), desc: rqI18n.t('双轨身份 + 角色权限 + 三方集成：一套组织树管住所有入口。') },
+  { icon: 'link', title: rqI18n.t('连接器'), desc: rqI18n.t('钉钉等三方身份与消息通道开箱即接，组织协同不断档。'), green: true },
+  { icon: 'building', title: rqI18n.t('部门面板'), desc: rqI18n.t('业务同学零门槛工作台：打开即用，无需理解控制台全貌。') },
 ]
 
 const STATS = [
-  { n: 9, unit: '大', lab: '业务域即插即用' },
-  { n: 5, unit: '类', lab: 'AI 资源统一纳管' },
-  { n: 29, unit: '个', lab: '平台插件并行运转' },
-  { n: 1795, unit: '条', lab: '自检断言每次启动全绿' },
+  { n: 9, unit: rqI18n.t('大'), lab: rqI18n.t('业务域即插即用') },
+  { n: 5, unit: rqI18n.t('类'), lab: rqI18n.t('AI 资源统一纳管') },
+  { n: 29, unit: rqI18n.t('个'), lab: rqI18n.t('平台插件并行运转') },
+  { n: 1795, unit: rqI18n.t('条'), lab: rqI18n.t('自检断言每次启动全绿') },
 ]
 
 export function renderHome(app) {
@@ -62,33 +62,33 @@ export function renderHome(app) {
         <div><div class="cn">${esc(rqI18n.t('元冰可'))}</div><div class="en">${esc(rqI18n.t('YUANBINGKE'))}</div></div>
       </a>
       <div class="home-nav-links">
-        <a href="#sec-features">产品能力</a>
-        <a href="#sec-arch">架构理念</a>
-        <a href="#sec-start">快速开始</a>
+        <a href="#sec-features">${rqI18n.t('产品能力')}</a>
+        <a href="#sec-arch">${rqI18n.t('架构理念')}</a>
+        <a href="#sec-start">${rqI18n.t('快速开始')}</a>
       </div>
       <div class="home-nav-cta">
-        <a class="home-btn home-btn-ghost" href="#/panels" style="height:38px;padding:0 16px;font-size:13.5px">部门面板</a>
+        <a class="home-btn home-btn-ghost" href="#/panels" style="height:38px;padding:0 16px;font-size:13.5px">${rqI18n.t('部门面板')}</a>
         <a class="home-btn home-btn-primary" href="#/login" id="home-login-btn" style="height:38px;padding:0 18px;font-size:13.5px">${loginLabel}</a>
       </div>
-      <button class="home-nav-toggle" id="home-nav-toggle" aria-label="打开菜单" aria-expanded="false">${icon('menu', 20)}</button>
+      <button class="home-nav-toggle" id="home-nav-toggle" aria-label="${rqI18n.t('打开菜单')}" aria-expanded="false">${icon('menu', 20)}</button>
     </nav>
 
     <header class="home-hero">
       <div class="home-hero-bg"><canvas id="home-stars"></canvas></div>
       <div class="home-hero-copy">
-        <div class="home-hero-eyebrow"><span class="dot"></span>企业级 AI 资源管理平台</div>
-        <h1>让团队一起用 AI，<br>把<span class="grad">每一份资源</span>都管起来</h1>
+        <div class="home-hero-eyebrow"><span class="dot"></span>${rqI18n.t('企业级 AI 资源管理平台')}</div>
+        <h1>${rqI18n.t('让团队一起用 AI，')}<br>${rqI18n.t('把')}<span class="grad">${rqI18n.t('每一份资源')}</span>${rqI18n.t('都管起来')}</h1>
         <p class="home-hero-sub">${esc(rqI18n.t('Skill 市场、Agent 本体、AI 应用、MCP 服务、模型网关、NAS 存储——六类资源一套身份、一套权限、一套审计。基于 DeepSeek Harness「一切皆插件」架构，九大业务域即插即用，按团队需要随用随上。'))}</p>
         <div class="home-hero-actions">
           <a class="home-btn home-btn-primary" href="#/login">${icon('arrowUp')}${loginLabel}</a>
-          <a class="home-btn home-btn-ghost" href="#sec-start">了解架构</a>
+          <a class="home-btn home-btn-ghost" href="#sec-start">${rqI18n.t('了解架构')}</a>
         </div>
         <div class="home-hero-hint">${icon('shieldCheck')}${esc(rqI18n.t('支持钉钉扫码 · 账号密码 · 一次性票据免登'))}</div>
       </div>
       <div class="home-hero-visual">
         <div class="home-tree-wrap">
           <canvas id="home-tree"></canvas>
-          <div class="home-tree-caption"><i></i>资源生态树 · 悬停查看依赖链路</div>
+          <div class="home-tree-caption"><i></i>${rqI18n.t('资源生态树 · 悬停查看依赖链路')}</div>
         </div>
       </div>
     </header>
@@ -104,9 +104,9 @@ export function renderHome(app) {
 
     <section class="home-section" id="sec-features">
       <div class="home-sec-head home-reveal">
-        <div class="home-sec-kicker">产品能力</div>
-        <h2>一个平台，管住企业的全部 AI 资产</h2>
-        <p>从资源登记到用量计量、从权限治理到审计告警，九大业务域以插件形态按需启用——能力齐全，但从不为用不到的功能付费。</p>
+        <div class="home-sec-kicker">${rqI18n.t('产品能力')}</div>
+        <h2>${rqI18n.t('一个平台，管住企业的全部 AI 资产')}</h2>
+        <p>${rqI18n.t('从资源登记到用量计量、从权限治理到审计告警，九大业务域以插件形态按需启用——能力齐全，但从不为用不到的功能付费。')}</p>
       </div>
       <div class="home-grid">
         ${FEATURES.map((f, i) => `
@@ -120,23 +120,23 @@ export function renderHome(app) {
 
     <section class="home-section" id="sec-arch">
       <div class="home-sec-head home-reveal">
-        <div class="home-sec-kicker">架构理念</div>
-        <h2>一切皆插件，治理与生俱来</h2>
-        <p>平台自身由 30 个插件组成：业务域即插即用、按需生长；资源从注册那一刻起就进入身份、权限与审计的治理轨道。</p>
+        <div class="home-sec-kicker">${rqI18n.t('架构理念')}</div>
+        <h2>${rqI18n.t('一切皆插件，治理与生俱来')}</h2>
+        <p>${rqI18n.t('平台自身由 30 个插件组成：业务域即插即用、按需生长；资源从注册那一刻起就进入身份、权限与审计的治理轨道。')}</p>
       </div>
       <div class="home-arch home-reveal">
         <div class="home-points">
           <div class="home-point">
             <div class="home-point-ic">${icon('puzzle')}</div>
-            <div><b>一切皆插件</b><span>基于 DeepSeek Harness 插件架构，九大业务域即插即用：按团队需要随用随上，不绑架整体升级。</span></div>
+            <div><b>${rqI18n.t('一切皆插件')}</b><span>${rqI18n.t('基于 DeepSeek Harness 插件架构，九大业务域即插即用：按团队需要随用随上，不绑架整体升级。')}</span></div>
           </div>
           <div class="home-point">
             <div class="home-point-ic">${icon('shieldCheck')}</div>
-            <div><b>注册即治理</b><span>双轨身份 + 角色权限 + 令牌网关：从接入到调用全链路留痕，企业合规一次到位。</span></div>
+            <div><b>${rqI18n.t('注册即治理')}</b><span>${rqI18n.t('双轨身份 + 角色权限 + 令牌网关：从接入到调用全链路留痕，企业合规一次到位。')}</span></div>
           </div>
           <div class="home-point">
             <div class="home-point-ic">${icon('gitBranch')}</div>
-            <div><b>依赖可穿透</b><span>应用 → Agent → MCP/Skill 拓扑一图可视：谁依赖谁、影响多大，改动之前先知道。</span></div>
+            <div><b>${rqI18n.t('依赖可穿透')}</b><span>${rqI18n.t('应用 → Agent → MCP/Skill 拓扑一图可视：谁依赖谁、影响多大，改动之前先知道。')}</span></div>
           </div>
         </div>
         <div>
@@ -194,7 +194,7 @@ export function renderHome(app) {
                 <text x="410" y="30">${esc(rqI18n.t('能力底座（MCP / Skill）'))}</text>
               </g>
             </svg>
-            <div class="home-topo-cap">依赖穿透示例：营销助手 → 数据 Agent → MCP · 报表（绿色链路）</div>
+            <div class="home-topo-cap">${rqI18n.t('依赖穿透示例：营销助手 → 数据 Agent → MCP · 报表（绿色链路）')}</div>
           </div>
         </div>
       </div>
@@ -202,58 +202,58 @@ export function renderHome(app) {
 
     <section class="home-section" id="sec-start">
       <div class="home-sec-head home-reveal" style="text-align:center;margin-left:auto;margin-right:auto">
-        <div class="home-sec-kicker" style="justify-content:center">快速开始</div>
-        <h2>从第一份资产登记开始</h2>
-        <p style="margin-left:auto;margin-right:auto">三步进入运转状态，治理能力随资源一起就位。</p>
+        <div class="home-sec-kicker" style="justify-content:center">${rqI18n.t('快速开始')}</div>
+        <h2>${rqI18n.t('从第一份资产登记开始')}</h2>
+        <p style="margin-left:auto;margin-right:auto">${rqI18n.t('三步进入运转状态，治理能力随资源一起就位。')}</p>
       </div>
       <div class="home-cta-band">
         <div class="home-steps">
           <div class="home-step home-reveal">
             <div class="home-step-no">1</div>
-            <b>登记第一份资源</b>
-            <span>登录控制台，把第一个 MCP 服务或 Skill 登记建档——归属、口径、权限一次配齐。</span>
+            <b>${rqI18n.t('登记第一份资源')}</b>
+            <span>${rqI18n.t('登录控制台，把第一个 MCP 服务或 Skill 登记建档——归属、口径、权限一次配齐。')}</span>
           </div>
           <div class="home-step home-reveal" style="--d:0.1s">
             <div class="home-step-no">2</div>
-            <b>邀请团队按角色入岗</b>
-            <span>组织账号开箱即建：管理员、开发者、审计员各就其位，权限随角色自动流转。</span>
+            <b>${rqI18n.t('邀请团队按角色入岗')}</b>
+            <span>${rqI18n.t('组织账号开箱即建：管理员、开发者、审计员各就其位，权限随角色自动流转。')}</span>
           </div>
           <div class="home-step home-reveal" style="--d:0.2s">
             <div class="home-step-no">3</div>
-            <b>部门面板开箱即用</b>
-            <span>业务同学从钉钉或门户一键进入部门面板：打开即工作台，资源共享从第一天开始。</span>
+            <b>${rqI18n.t('部门面板开箱即用')}</b>
+            <span>${rqI18n.t('业务同学从钉钉或门户一键进入部门面板：打开即工作台，资源共享从第一天开始。')}</span>
           </div>
         </div>
         <div class="home-cta-actions home-reveal" id="home-cta-actions">
           <a class="home-btn home-btn-green" href="#/login">${loginLabel}</a>
-          <a class="home-btn home-btn-light" href="#/panels">进入部门面板</a>
+          <a class="home-btn home-btn-light" href="#/panels">${rqI18n.t('进入部门面板')}</a>
         </div>
-        <div class="home-cta-note home-reveal">首次部署：平台管理员初始口令见服务器 data/admin-initial-password.txt，登录后请立即修改。</div>
+        <div class="home-cta-note home-reveal">${rqI18n.t('首次部署：平台管理员初始口令见服务器 data/admin-initial-password.txt，登录后请立即修改。')}</div>
       </div>
     </section>
 
     <footer class="home-footer">
       <div class="home-footer-inner">
         <div class="home-footer-brand">
-          <img src="ybk-mark.png" alt="元冰可">
+          <img src="ybk-mark.png" alt="${rqI18n.t('元冰可')}">
           <div>
             <div class="cn">${esc(rqI18n.t('元冰可'))} <span style="font-size:11px;letter-spacing:2px;color:#7E9AD2;font-weight:500">${esc(rqI18n.t('YUANBINGKE'))}</span></div>
-            <div class="en">让企业的每一份 AI 资产，安全、可见、可协作</div>
-            <div class="tag">企业AI资源管理平台 · 一切皆插件</div>
+            <div class="en">${rqI18n.t('让企业的每一份 AI 资产，安全、可见、可协作')}</div>
+            <div class="tag">${rqI18n.t('企业AI资源管理平台 · 一切皆插件')}</div>
           </div>
         </div>
         <div class="home-footer-links">
-          <a href="#sec-features">产品能力</a>
-          <a href="#sec-arch">架构理念</a>
-          <a href="#sec-start">快速开始</a>
-          <a href="#/panels">部门面板</a>
+          <a href="#sec-features">${rqI18n.t('产品能力')}</a>
+          <a href="#sec-arch">${rqI18n.t('架构理念')}</a>
+          <a href="#sec-start">${rqI18n.t('快速开始')}</a>
+          <a href="#/panels">${rqI18n.t('部门面板')}</a>
           <a href="/blog/">${esc(rqI18n.t('技术笔记'))}</a>
           <a href="https://github.com/01men/ybkkasi" target="_blank" rel="noopener" id="home-footer-github">${esc(rqI18n.t('GitHub 源码 · MIT'))}</a>
         </div>
       </div>
       <div class="home-footer-meta">
-        <span>© 2026 杭州元冰可科技有限公司 · 基于 DeepSeek Harness 构建</span>
-        <span class="grow-dot"><i></i>系统运行中 · 自检断言全绿</span>
+        <span>${rqI18n.t('© 2026 杭州元冰可科技有限公司 · 基于 DeepSeek Harness 构建')}</span>
+        <span class="grow-dot"><i></i>${rqI18n.t('系统运行中 · 自检断言全绿')}</span>
       </div>
     </footer>
   </div>`
@@ -372,17 +372,17 @@ function mountTree(canvas, tree = TREE) {
 
     nodes = []
     edges = []
-    const root = { id: '根', label: tree.label, x: w / 2, y: 46, r: 15, depth: 0, parent: null, appearAt: 0 }
+    const root = { id: rqI18n.t('根'), label: tree.label, x: w / 2, y: 46, r: 15, depth: 0, parent: null, appearAt: 0 }
     nodes.push(root)
     tree.children.forEach((domain, di) => {
       const dx = w * (0.5 + (di - 1) * 0.32)
-      const dn = { id: `域${di}`, label: domain.label, x: dx, y: 128, r: 10.5, depth: 1, parent: root, appearAt: 0.16 + di * 0.1 }
+      const dn = { id: `${rqI18n.t('域')}${di}`, label: domain.label, x: dx, y: 128, r: 10.5, depth: 1, parent: root, appearAt: 0.16 + di * 0.1 }
       nodes.push(dn)
       edges.push({ from: root, to: dn, start: 0.05 + di * 0.09, end: 0.16 + di * 0.09 })
       const step = Math.min(42, (hgt - 210) / domain.children.length)
       domain.children.forEach((leaf, ci) => {
         const ln = {
-          id: `域${di}叶${ci}`, label: leaf, x: dx, y: 196 + ci * step + 14,
+          id: `${rqI18n.t('域')}${di}${rqI18n.t('叶')}${ci}`, label: leaf, x: dx, y: 196 + ci * step + 14,
           r: 4.5, depth: 2, parent: dn, appearAt: 0.3 + di * 0.06 + ci * 0.045,
         }
         nodes.push(ln)

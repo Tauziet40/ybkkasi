@@ -10,30 +10,30 @@ import {
 } from '../ui.js'
 
 // ---------- 字典 ----------
-const ORG_ROLE_LABEL = { ceo: 'CEO', cto: 'CTO', manager: '经理', engineer: '工程师', analyst: '分析师' }
+const ORG_ROLE_LABEL = { ceo: 'CEO', cto: 'CTO', manager: rqI18n.t('经理'), engineer: rqI18n.t('工程师'), analyst: rqI18n.t('分析师') }
 const HEALTH_BADGE = {
-  healthy: ['badge-ok', '健康'], stale: ['badge-warn', '迟滞'], silent: ['badge-danger', '失联'],
-  frozen: ['badge-purple', '已冻结'], offline: ['badge-muted', '离线'],
+  healthy: ['badge-ok', rqI18n.t('健康')], stale: ['badge-warn', rqI18n.t('迟滞')], silent: ['badge-danger', rqI18n.t('失联')],
+  frozen: ['badge-purple', rqI18n.t('已冻结')], offline: ['badge-muted', rqI18n.t('离线')],
 }
 const ISSUE_STATUS = {
-  todo: ['badge-muted', '待办'], in_progress: ['badge-info', '进行中'], review: ['badge-warn', '待审'],
-  done: ['badge-ok', '完成'], cancelled: ['badge-muted', '已取消'],
+  todo: ['badge-muted', rqI18n.t('待办')], in_progress: ['badge-info', rqI18n.t('进行中')], review: ['badge-warn', rqI18n.t('待审')],
+  done: ['badge-ok', rqI18n.t('完成')], cancelled: ['badge-muted', rqI18n.t('已取消')],
 }
 const ISSUE_TRANSITIONS = {
-  todo: [['in_progress', '开始'], ['cancelled', '取消']],
-  in_progress: [['review', '提审'], ['cancelled', '取消']],
-  review: [['done', '完成'], ['in_progress', '退回'], ['cancelled', '取消']],
+  todo: [['in_progress', rqI18n.t('开始')], ['cancelled', rqI18n.t('取消')]],
+  in_progress: [['review', rqI18n.t('提审')], ['cancelled', rqI18n.t('取消')]],
+  review: [['done', rqI18n.t('完成')], ['in_progress', rqI18n.t('退回')], ['cancelled', rqI18n.t('取消')]],
 }
 const PRIORITY_BADGE = { P0: 'badge-danger', P1: 'badge-warn', P2: 'badge-info', P3: 'badge-muted' }
 const TRIGGER_BADGE = {
-  assign: ['badge-brand', '派发'], comment: ['badge-info', '评论'], dependency: ['badge-purple', '依赖解除'],
-  routine: ['badge-ok', '例行'], api: ['badge-muted', 'API'], webhook: ['badge-info', 'Webhook'],
+  assign: ['badge-brand', rqI18n.t('派发')], comment: ['badge-info', rqI18n.t('评论')], dependency: ['badge-purple', rqI18n.t('依赖解除')],
+  routine: ['badge-ok', rqI18n.t('例行')], api: ['badge-muted', 'API'], webhook: ['badge-info', 'Webhook'],
 }
 const GOAL_STATUS = {
-  active: ['badge-info', '进行中'], done: ['badge-ok', '已完成'], paused: ['badge-warn', '已暂停'],
-  archived: ['badge-muted', '已归档'], draft: ['badge-muted', '草案'],
+  active: ['badge-info', rqI18n.t('进行中')], done: ['badge-ok', rqI18n.t('已完成')], paused: ['badge-warn', rqI18n.t('已暂停')],
+  archived: ['badge-muted', rqI18n.t('已归档')], draft: ['badge-muted', rqI18n.t('草案')],
 }
-const ROUTINE_KIND = { interval: ['badge-info', '定时间隔'], cron: ['badge-brand', 'Cron'], webhook: ['badge-purple', 'Webhook'] }
+const ROUTINE_KIND = { interval: ['badge-info', rqI18n.t('定时间隔')], cron: ['badge-brand', 'Cron'], webhook: ['badge-purple', 'Webhook'] }
 
 const badge = (map, key) => {
   const [cls, text] = map[key] ?? ['badge-muted', key ?? '—']
@@ -53,11 +53,11 @@ export async function renderExec(content, params, ctx) {
   const tab = params.get('tab') ?? 'overview'
   if (!session.can('exec.read')) {
     content.innerHTML = `
-      <div class="page-head"><div><div class="micro-label">EXEC HUB</div><div class="page-title">执行中枢</div></div></div>
+      <div class="page-head"><div><div class="micro-label">EXEC HUB</div><div class="page-title">${rqI18n.t('执行中枢')}</div></div></div>
       <div class="card card-pad" style="text-align:center;padding:44px 24px">
         <div style="font-size:30px;margin-bottom:10px">🔒</div>
-        <div style="font-weight:600;margin-bottom:6px">无访问权限</div>
-        <div class="fs-12 text-3">需要「exec.read」权限（执行中枢只读）才能查看目标、任务与调度。</div>
+        <div style="font-weight:600;margin-bottom:6px">${rqI18n.t('无访问权限')}</div>
+        <div class="fs-12 text-3">${rqI18n.t('需要')}「exec.read」${rqI18n.t('权限')}（${rqI18n.t('执行中枢只读')}）${rqI18n.t('才能查看目标')}、${rqI18n.t('任务与调度')}。</div>
       </div>`
     return
   }
@@ -66,8 +66,8 @@ export async function renderExec(content, params, ctx) {
     <div class="page-head">
       <div>
         <div class="micro-label">EXEC HUB</div>
-        <div class="page-title">执行中枢</div>
-        <div class="page-sub">目标 → 项目 → 任务 → Agent 执行：唤醒队列驱动的心跳式调度，人机共用的执行视图。</div>
+        <div class="page-title">${rqI18n.t('执行中枢')}</div>
+        <div class="page-sub">${rqI18n.t('目标')} → ${rqI18n.t('项目')} → ${rqI18n.t('任务')} → Agent ${rqI18n.t('执行')}：${rqI18n.t('唤醒队列驱动的心跳式调度')}，${rqI18n.t('人机共用的')}${rqI18n.t('执行')}${rqI18n.t('视图')}。</div>
       </div>
       <div class="page-actions" id="exec-actions"></div>
     </div>
@@ -108,7 +108,7 @@ function mountErrorCard(body, title, message, retry) {
       <div style="font-size:30px;margin-bottom:10px">🚫</div>
       <div style="font-weight:600;margin-bottom:6px">${esc(title)}</div>
       <div class="fs-12 text-3" style="margin-bottom:18px">${esc(message)}</div>
-      <button class="btn btn-default" data-retry>重试</button>
+      <button class="btn btn-default" data-retry>${rqI18n.t('重试')}</button>
     </div>`
   body.querySelector('[data-retry]').onclick = () => {
     body.innerHTML = `<div class="card card-pad text-4" style="text-align:center">${esc(rqI18n.t('加载中…'))}</div>`
@@ -128,22 +128,22 @@ async function renderOverviewTab(body, ctx) {
 
   body.innerHTML = `
     <div class="stat-grid mb-20">
-      ${statItem('zap', '待唤醒', ov.pendingWakes ?? 0, '已入队等待派发的唤醒', 'var(--warn)', 'var(--warn-bg)')}
-      ${statItem('clock', '延迟队列', ov.deferredWakes ?? 0, '因阻塞/休眠延后的唤醒', 'var(--info)', 'var(--info-bg)')}
-      ${statItem('activity', '活跃 Run', ov.activeRuns ?? 0, '执行中的运行实例', 'var(--ok)', 'var(--ok-bg)')}
-      ${statItem('lock', '锁定中任务', ov.lockedIssues ?? 0, ov.zombieLocks ? rqI18n.t('含 {n} 个疑似僵尸锁', { n: ov.zombieLocks }) : '被 run 持锁执行的任务', 'var(--purple)', 'var(--purple-bg)')}
+      ${statItem('zap', rqI18n.t('待唤醒'), ov.pendingWakes ?? 0, rqI18n.t('已入队等待派发的唤醒'), 'var(--warn)', 'var(--warn-bg)')}
+      ${statItem('clock', rqI18n.t('延迟队列'), ov.deferredWakes ?? 0, rqI18n.t('因阻塞/休眠延后的唤醒'), 'var(--info)', 'var(--info-bg)')}
+      ${statItem('activity', rqI18n.t('活跃 Run'), ov.activeRuns ?? 0, rqI18n.t('执行中的运行实例'), 'var(--ok)', 'var(--ok-bg)')}
+      ${statItem('lock', rqI18n.t('锁定中任务'), ov.lockedIssues ?? 0, ov.zombieLocks ? rqI18n.t('含 {n} 个疑似僵尸锁', { n: ov.zombieLocks }) : rqI18n.t('被 run 持锁执行的任务'), 'var(--purple)', 'var(--purple-bg)')}
     </div>
     <div class="card">
       <div class="card-head">
-        <span class="card-title">${icon('bot', 15)} Agent 健康</span>
+        <span class="card-title">${icon('bot', 15)} Agent ${rqI18n.t('健康')}</span>
         <span class="card-sub">${esc(rqI18n.t('{n} 个 Agent 接入组织执行', { n: agents.length }))}</span>
-        ${session.can('exec.admin') ? `<div class="card-head-actions"><button class="btn btn-primary btn-sm" id="exec-tick">${icon('play', 13)} 立即调度一轮</button></div>` : ''}
+        ${session.can('exec.admin') ? `<div class="card-head-actions"><button class="btn btn-primary btn-sm" id="exec-tick">${icon('play', 13)} ${rqI18n.t('立即调度一轮')}</button></div>` : ''}
       </div>
       <div class="card-body" style="padding-top:6px">
         ${agents.length ? `
         <div class="table-wrap">
           <table class="tbl">
-            <thead><tr><th>Agent</th><th>组织角色</th><th>职级</th><th>状态</th><th>冻结</th><th>最近心跳</th><th>最近提报</th><th>健康度</th></tr></thead>
+            <thead><tr><th>Agent</th><th>${rqI18n.t('组织角色')}</th><th>${rqI18n.t('职级')}</th><th>${rqI18n.t('状态')}</th><th>${rqI18n.t('冻结')}</th><th>${rqI18n.t('最近心跳')}</th><th>${rqI18n.t('最近提报')}</th><th>${rqI18n.t('健康度')}</th></tr></thead>
             <tbody>
               ${agents.map((a) => `
                 <tr>
@@ -158,7 +158,7 @@ async function renderOverviewTab(body, ctx) {
                 </tr>`).join('')}
             </tbody>
           </table>
-        </div>` : `<div class="tbl-empty">${icon('bot', 28)}<span>暂无 Agent 健康数据——Agent 接入组织并上报心跳后显示</span></div>`}
+        </div>` : `<div class="tbl-empty">${icon('bot', 28)}<span>${rqI18n.t('暂无')} Agent ${rqI18n.t('健康数据')}——Agent ${rqI18n.t('接入组织并上报心跳后显示')}</span></div>`}
       </div>
     </div>`
 
@@ -196,7 +196,7 @@ async function renderGoalsTab(body, ctx) {
       api.get('/api/exec/projects'),
     ])
   } catch (error) {
-    return mountErrorCard(body, '目标数据加载失败', rqI18n.t('{msg}（执行中枢后端可能尚未部署到当前宿主）', { msg: error.message }), () => renderTab('goals', body, ctx))
+    return mountErrorCard(body, rqI18n.t('目标数据加载失败'), rqI18n.t('{msg}（执行中枢后端可能尚未部署到当前宿主）', { msg: error.message }), () => renderTab('goals', body, ctx))
   }
   const goals = goalsData.goals ?? []
   const projects = projectsData.projects ?? []
@@ -225,14 +225,14 @@ async function renderGoalsTab(body, ctx) {
               ${badge(GOAL_STATUS, goal.status)}
             </div>
             <div class="fs-12 text-3 mt-4">
-              ${goal.metric ? esc(rqI18n.t('指标：{metric} {base} → {target}{unit}', { metric: goal.metric, base: String(goal.metricBaseline ?? '?'), target: String(goal.metricTarget ?? '?'), unit: goal.metricUnit ?? '' })) : '未设指标'}
+              ${goal.metric ? esc(rqI18n.t('指标：{metric} {base} → {target}{unit}', { metric: goal.metric, base: String(goal.metricBaseline ?? '?'), target: String(goal.metricTarget ?? '?'), unit: goal.metricUnit ?? '' })) : rqI18n.t('未设指标')}
               ${goal.periodStart || goal.periodEnd ? esc(rqI18n.t(' · 期限 {start} ~ {end}', { start: goal.periodStart ?? '?', end: goal.periodEnd ?? '?' })) : ''}
             </div>
           </div>
           ${canWrite ? `
           <div style="flex-shrink:0;display:flex;gap:6px">
-            <button class="btn btn-ghost btn-sm stop" data-goal-edit="${esc(goal.id)}">${icon('edit', 12)}编辑</button>
-            <button class="btn btn-danger-ghost btn-sm stop" data-goal-del="${esc(goal.id)}">${icon('trash', 12)}删除</button>
+            <button class="btn btn-ghost btn-sm stop" data-goal-edit="${esc(goal.id)}">${icon('edit', 12)}${rqI18n.t('编辑')}</button>
+            <button class="btn btn-danger-ghost btn-sm stop" data-goal-del="${esc(goal.id)}">${icon('trash', 12)}${rqI18n.t('删除')}</button>
           </div>` : ''}
         </div>
       </div>
@@ -242,20 +242,20 @@ async function renderGoalsTab(body, ctx) {
   body.innerHTML = `
     <div class="card mb-20">
       <div class="card-head">
-        <span class="card-title">${icon('target', 15)} 目标树</span>
+        <span class="card-title">${icon('target', 15)} ${rqI18n.t('目标树')}</span>
         <span class="card-sub">${esc(rqI18n.t('{n} 个目标', { n: goals.length }))}</span>
         ${canWrite ? `<div class="card-head-actions">
-          <button class="btn btn-default btn-sm" id="goal-create">${icon('plus', 13)} 新建目标</button>
-          <button class="btn btn-primary btn-sm" id="project-create">${icon('plus', 13)} 新建项目</button>
+          <button class="btn btn-default btn-sm" id="goal-create">${icon('plus', 13)} ${rqI18n.t('新建目标')}</button>
+          <button class="btn btn-primary btn-sm" id="project-create">${icon('plus', 13)} ${rqI18n.t('新建项目')}</button>
         </div>` : ''}
       </div>
       <div class="card-body" style="padding-top:4px">
-        ${goals.length ? roots.map((goal) => goalRow(goal, 0)).join('') : `<div class="tbl-empty">${icon('target', 28)}<span>还没有目标——从公司级目标开始逐层拆解</span></div>`}
+        ${goals.length ? roots.map((goal) => goalRow(goal, 0)).join('') : `<div class="tbl-empty">${icon('target', 28)}<span>${rqI18n.t('还没有目标')}——${rqI18n.t('从公司级目标开始逐层拆解')}</span></div>`}
       </div>
     </div>
     <div class="card">
       <div class="card-head">
-        <span class="card-title">${icon('layers', 15)} 项目</span>
+        <span class="card-title">${icon('layers', 15)} ${rqI18n.t('项目')}</span>
         <span class="card-sub">${esc(rqI18n.t('{n} 个项目承接目标落地', { n: projects.length }))}</span>
       </div>
       <div class="card-body" style="padding-top:8px">
@@ -271,13 +271,13 @@ async function renderGoalsTab(body, ctx) {
               <div class="flex" style="gap:8px;align-items:center">
                 <span style="font-weight:600">${icon('box', 13)} ${esc(p.name)}</span>
                 <span style="flex:1"></span>
-                <span class="fs-12 text-3">${esc(goalById.get(p.goalId)?.title ?? p.goalId ?? '未关联目标')}</span>
+                <span class="fs-12 text-3">${esc(goalById.get(p.goalId)?.title ?? p.goalId ?? rqI18n.t('未关联目标'))}</span>
               </div>
               ${p.description ? `<div class="fs-12 text-3">${esc(p.description)}</div>` : ''}
               ${(p.repos ?? []).length ? `<div class="flex" style="gap:6px;flex-wrap:wrap">${p.repos.map((repo) => `<span class="badge badge-muted no-dot mono fs-11">${esc(repo)}</span>`).join('')}</div>` : ''}
               <div>
                 <div class="flex fs-12" style="justify-content:space-between;margin-bottom:3px">
-                  <span class="text-3">任务进度</span>
+                  <span class="text-3">${rqI18n.t('任务进度')}</span>
                   <span style="font-weight:600">${done}/${total}${esc(rqI18n.t('（{p}%）', { p: pct }))}</span>
                 </div>
                 <div style="height:6px;border-radius:3px;background:var(--surface-2);overflow:hidden">
@@ -286,7 +286,7 @@ async function renderGoalsTab(body, ctx) {
               </div>
             </div>`
           }).join('')}
-        </div>` : `<div class="tbl-empty">${icon('box', 28)}<span>暂无项目——新建项目承接目标执行</span></div>`}
+        </div>` : `<div class="tbl-empty">${icon('box', 28)}<span>${rqI18n.t('暂无项目')}——${rqI18n.t('新建项目承接目标执行')}</span></div>`}
       </div>
     </div>`
 
@@ -300,7 +300,7 @@ async function renderGoalsTab(body, ctx) {
       btn.onclick = async () => {
         const goal = goalById.get(btn.dataset.goalDel)
         const confirmed = await confirmDialog({
-          title: rqI18n.t('删除目标 · {name}', { name: goal.title }), danger: true, confirmText: '确认删除',
+          title: rqI18n.t('删除目标 · {name}', { name: goal.title }), danger: true, confirmText: rqI18n.t('确认删除'),
           message: rqI18n.t('将删除目标「<b>{name}</b>」。其下仍有子目标或关联项目时服务端会拒绝（409）。', { name: esc(goal.title) }),
         })
         if (!confirmed) return
@@ -321,26 +321,26 @@ function openGoalForm(goals, goal, ctx) {
     collect(goal.id)
   }
   const parentOptions = [
-    { value: '', label: '（作为顶级目标）' },
+    { value: '', label: rqI18n.t('（作为顶级目标）') },
     ...goals.filter((g) => !excluded.has(g.id)).map((g) => ({ value: g.id, label: g.title })),
   ]
   const drawer = openDrawer({
-    title: goal ? '编辑目标' : '新建目标',
-    sub: goal ? `ID ${goal.id}` : '目标自上而下拆解：公司 → 部门 → 个人/Agent',
+    title: goal ? rqI18n.t('编辑目标') : rqI18n.t('新建目标'),
+    sub: goal ? `ID ${goal.id}` : rqI18n.t('目标自上而下拆解：公司 → 部门 → 个人/Agent'),
     body: `
-      ${field('标题', inputField('title', { value: goal?.title }), { required: true, full: true })}
-      ${field('描述', textareaField('description', { value: goal?.description, rows: 2 }), { full: true })}
+      ${field(rqI18n.t('标题'), inputField('title', { value: goal?.title }), { required: true, full: true })}
+      ${field(rqI18n.t('描述'), textareaField('description', { value: goal?.description, rows: 2 }), { full: true })}
       <div class="form-grid">
-        ${field('指标', inputField('metric', { value: goal?.metric, placeholder: '如：客户工单 24h 解决率' }))}
-        ${field('单位', inputField('metricUnit', { value: goal?.metricUnit, placeholder: '如：% / 单 / 万元' }))}
-        ${field('基线', `<input class="input" type="number" step="any" name="metricBaseline" value="${esc(goal?.metricBaseline ?? '')}" placeholder="当前值">`)}
-        ${field('目标值', `<input class="input" type="number" step="any" name="metricTarget" value="${esc(goal?.metricTarget ?? '')}" placeholder="期望值">`)}
-        ${field('父目标', selectField('parentGoalId', parentOptions, { value: goal?.parentGoalId ?? '' }))}
-        ${field('负责人', inputField('ownerUserId', { value: goal?.ownerUserId, placeholder: '用户 ID（选填）' }))}
-        ${field('开始日期', `<input class="input" type="date" name="periodStart" value="${esc(goal?.periodStart ?? '')}">`)}
-        ${field('结束日期', `<input class="input" type="date" name="periodEnd" value="${esc(goal?.periodEnd ?? '')}">`)}
+        ${field(rqI18n.t('指标'), inputField('metric', { value: goal?.metric, placeholder: rqI18n.t('如：客户工单 24h 解决率') }))}
+        ${field(rqI18n.t('单位'), inputField('metricUnit', { value: goal?.metricUnit, placeholder: rqI18n.t('如：% / 单 / 万元') }))}
+        ${field(rqI18n.t('基线'), `<input class="input" type="number" step="any" name="metricBaseline" value="${esc(goal?.metricBaseline ?? '')}" placeholder="${rqI18n.t('当前值')}">`)}
+        ${field(rqI18n.t('目标值'), `<input class="input" type="number" step="any" name="metricTarget" value="${esc(goal?.metricTarget ?? '')}" placeholder="${rqI18n.t('期望值')}">`)}
+        ${field(rqI18n.t('父目标'), selectField('parentGoalId', parentOptions, { value: goal?.parentGoalId ?? '' }))}
+        ${field(rqI18n.t('负责人'), inputField('ownerUserId', { value: goal?.ownerUserId, placeholder: rqI18n.t('用户 ID（选填）') }))}
+        ${field(rqI18n.t('开始日期'), `<input class="input" type="date" name="periodStart" value="${esc(goal?.periodStart ?? '')}">`)}
+        ${field(rqI18n.t('结束日期'), `<input class="input" type="date" name="periodEnd" value="${esc(goal?.periodEnd ?? '')}">`)}
       </div>`,
-    foot: `<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>${goal ? '保存' : '创建'}</button>`,
+    foot: `<button class="btn btn-default" data-cancel>${rqI18n.t('取消')}</button><button class="btn btn-primary" data-ok>${goal ? rqI18n.t('保存') : rqI18n.t('创建')}</button>`,
   })
   drawer.el.querySelector('[data-cancel]').onclick = () => drawer.close()
   drawer.el.querySelector('[data-ok]').onclick = async (e) => {
@@ -380,18 +380,18 @@ function childrenListOf(goals, parentId) {
 /** 新建项目抽屉（代码仓以逗号分隔录入，提交转数组）。 */
 function openProjectForm(goals, project, ctx) {
   const goalOptions = [
-    { value: '', label: '（暂不关联目标）' },
+    { value: '', label: rqI18n.t('（暂不关联目标）') },
     ...goals.map((g) => ({ value: g.id, label: g.title })),
   ]
   const drawer = openDrawer({
-    title: project ? '编辑项目' : '新建项目',
-    sub: '项目承接目标，任务挂在项目下执行',
+    title: project ? rqI18n.t('编辑项目') : rqI18n.t('新建项目'),
+    sub: rqI18n.t('项目承接目标，任务挂在项目下执行'),
     body: `
-      ${field('名称', inputField('name', { value: project?.name }), { required: true, full: true })}
-      ${field('描述', textareaField('description', { value: project?.description, rows: 2 }), { full: true })}
-      ${field('关联目标', selectField('goalId', goalOptions, { value: project?.goalId ?? '' }), { full: true })}
-      ${field('代码仓', inputField('repos', { value: (project?.repos ?? []).join(', '), placeholder: '逗号分隔，如 github.com/ybkk/ops, github.com/ybkk/panel' }), { full: true, hint: '多个仓库用逗号分隔' })}`,
-    foot: `<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>${project ? '保存' : '创建'}</button>`,
+      ${field(rqI18n.t('名称'), inputField('name', { value: project?.name }), { required: true, full: true })}
+      ${field(rqI18n.t('描述'), textareaField('description', { value: project?.description, rows: 2 }), { full: true })}
+      ${field(rqI18n.t('关联目标'), selectField('goalId', goalOptions, { value: project?.goalId ?? '' }), { full: true })}
+      ${field(rqI18n.t('代码仓'), inputField('repos', { value: (project?.repos ?? []).join(', '), placeholder: rqI18n.t('逗号分隔，如 github.com/ybkk/ops, github.com/ybkk/panel') }), { full: true, hint: rqI18n.t('多个仓库用逗号分隔') })}`,
+    foot: `<button class="btn btn-default" data-cancel>${rqI18n.t('取消')}</button><button class="btn btn-primary" data-ok>${project ? rqI18n.t('保存') : rqI18n.t('创建')}</button>`,
   })
   drawer.el.querySelector('[data-cancel]').onclick = () => drawer.close()
   drawer.el.querySelector('[data-ok]').onclick = async (e) => {
@@ -430,16 +430,16 @@ async function renderIssuesTab(body, ctx) {
   const canWrite = session.can('exec.write')
 
   // 筛选器候选项从全量数据派生（状态 / 项目 / Agent 三维，服务端过滤）
-  const statusOptions = [{ value: '', label: '全部状态' }, ...Object.keys(ISSUE_STATUS).map((s) => ({ value: s, label: ISSUE_STATUS[s][1] }))]
-  const projectOptions = [{ value: '', label: '全部项目' }, ...distinct(issues.map((i) => i.projectId), issues.map((i) => i.projectName))]
-  const agentOptions = [{ value: '', label: '全部 Agent' }, ...distinct(issues.map((i) => i.assigneeAgentId), issues.map((i) => i.assigneeAgentName))]
+  const statusOptions = [{ value: '', label: rqI18n.t('全部状态') }, ...Object.keys(ISSUE_STATUS).map((s) => ({ value: s, label: ISSUE_STATUS[s][1] }))]
+  const projectOptions = [{ value: '', label: rqI18n.t('全部项目') }, ...distinct(issues.map((i) => i.projectId), issues.map((i) => i.projectName))]
+  const agentOptions = [{ value: '', label: rqI18n.t('全部 Agent') }, ...distinct(issues.map((i) => i.assigneeAgentId), issues.map((i) => i.assigneeAgentName))]
 
   body.innerHTML = `
     <div class="card">
       <div class="card-head">
-        <span class="card-title">${icon('checkSquare', 15)} 任务</span>
+        <span class="card-title">${icon('checkSquare', 15)} ${rqI18n.t('任务')}</span>
         <span class="card-sub" id="issue-count"></span>
-        ${canWrite ? `<div class="card-head-actions"><button class="btn btn-primary btn-sm" id="issue-create">${icon('plus', 13)} 新建任务</button></div>` : ''}
+        ${canWrite ? `<div class="card-head-actions"><button class="btn btn-primary btn-sm" id="issue-create">${icon('plus', 13)} ${rqI18n.t('新建任务')}</button></div>` : ''}
       </div>
       <div class="card-body" style="padding-top:8px">
         <div class="filter-bar">
@@ -468,14 +468,14 @@ async function renderIssuesTab(body, ctx) {
     body.querySelector('#issue-count').textContent = rqI18n.t('共 {n} 条', { n: list.length })
     body.querySelector('#issue-table').innerHTML = list.length ? `
       <table class="tbl">
-        <thead><tr><th>标题</th><th>状态</th><th>执行锁</th><th>负责人 Agent</th><th>优先级</th><th>所属项目</th><th>截止</th>${canWrite ? '<th style="width:250px">操作</th>' : ''}</tr></thead>
+        <thead><tr><th>${rqI18n.t('标题')}</th><th>${rqI18n.t('状态')}</th><th>${rqI18n.t('执行锁')}</th><th>${rqI18n.t('负责人')} Agent</th><th>${rqI18n.t('优先级')}</th><th>${rqI18n.t('所属项目')}</th><th>${rqI18n.t('截止')}</th>${canWrite ? rqI18n.t('<th style="width:250px">操作</th>') : ''}</tr></thead>
         <tbody>
           ${list.map((issue) => `
             <tr data-id="${esc(issue.id)}">
               <td><div class="col-strong">${esc(issue.title)}</div>${(issue.blockerIds ?? []).length ? `<div class="col-sub fs-11">${esc(rqI18n.t('阻塞于 {n} 个前置任务', { n: issue.blockerIds.length }))}</div>` : ''}</td>
               <td>${badge(ISSUE_STATUS, issue.status)}</td>
               <td>${lockedBadge(issue)}</td>
-              <td class="fs-12">${esc(issue.assigneeAgentName ?? issue.assigneeAgentId ?? '未指派')}</td>
+              <td class="fs-12">${esc(issue.assigneeAgentName ?? issue.assigneeAgentId ?? rqI18n.t('未指派'))}</td>
               <td><span class="badge ${PRIORITY_BADGE[issue.priority] ?? 'badge-muted'} no-dot">${esc(issue.priority ?? '—')}</span></td>
               <td class="fs-12">${esc(issue.projectName ?? '—')}</td>
               <td class="fs-12 text-3">${issue.dueAt ? fmtTime(issue.dueAt).slice(0, 10) : '—'}</td>
@@ -484,13 +484,13 @@ async function renderIssuesTab(body, ctx) {
                 <div class="flex" style="gap:6px;flex-wrap:wrap">
                   ${(ISSUE_TRANSITIONS[issue.status] ?? []).map(([to, label]) =>
                     `<button class="btn btn-${to === 'cancelled' ? 'danger-ghost' : 'default'} btn-sm stop" data-transition="${esc(issue.id)}" data-to="${esc(to)}">${esc(label)}</button>`).join('')}
-                  <button class="btn btn-default btn-sm stop" data-wake="${esc(issue.id)}" title="手动触发一次唤醒（入队派发）">${icon('zap', 12)} 唤醒</button>
-                  <button class="btn btn-ghost btn-sm stop" data-detail="${esc(issue.id)}">详情</button>
+                  <button class="btn btn-default btn-sm stop" data-wake="${esc(issue.id)}" title="${rqI18n.t('手动触发一次唤醒（入队派发）')}">${icon('zap', 12)} ${rqI18n.t('唤醒')}</button>
+                  <button class="btn btn-ghost btn-sm stop" data-detail="${esc(issue.id)}">${rqI18n.t('详情')}</button>
                 </div>
               </td>` : ''}
             </tr>`).join('')}
         </tbody>
-      </table>` : `<div class="tbl-empty">${icon('checkSquare', 28)}<span>当前筛选下没有任务</span></div>`
+      </table>` : `<div class="tbl-empty">${icon('checkSquare', 28)}<span>${rqI18n.t('当前筛选下没有任务')}</span></div>`
 
     body.querySelectorAll('[data-transition]').forEach((btn) => {
       btn.onclick = async () => {
@@ -565,24 +565,24 @@ async function openIssueCreate(ctx) {
   const blockers = (issuesRes.issues ?? []).filter((i) => i.status !== 'done' && i.status !== 'cancelled')
 
   const drawer = openDrawer({
-    title: '新建执行任务',
-    sub: '指派给 Agent 后自动触发派发唤醒',
+    title: rqI18n.t('新建执行任务'),
+    sub: rqI18n.t('指派给 Agent 后自动触发派发唤醒'),
     body: `
-      ${field('标题', inputField('title'), { required: true, full: true })}
-      ${field('详情', textareaField('detail', { rows: 3, placeholder: '任务背景、验收标准、注意事项…' }), { full: true })}
+      ${field(rqI18n.t('标题'), inputField('title'), { required: true, full: true })}
+      ${field(rqI18n.t('详情'), textareaField('detail', { rows: 3, placeholder: rqI18n.t('任务背景、验收标准、注意事项…') }), { full: true })}
       <div class="form-grid">
-        ${field('所属项目', selectField('projectId', [{ value: '', label: '（不挂项目）' }, ...projects.map((p) => ({ value: p.id, label: p.name }))]))}
-        ${field('负责人 Agent', selectField('assigneeAgentId', [{ value: '', label: '（暂不指派）' }, ...agents.map((a) => ({ value: a.id, label: a.name }))]), { hint: '仅显示与本账号同组织的 Agent' })}
-        ${field('优先级', selectField('priority', ['P0', 'P1', 'P2', 'P3'].map((p) => ({ value: p, label: p })), { value: 'P2' }))}
-        ${field('截止日期', `<input class="input" type="date" name="dueAt">`)}
+        ${field(rqI18n.t('所属项目'), selectField('projectId', [{ value: '', label: rqI18n.t('（不挂项目）') }, ...projects.map((p) => ({ value: p.id, label: p.name }))]))}
+        ${field(rqI18n.t('负责人 Agent'), selectField('assigneeAgentId', [{ value: '', label: rqI18n.t('（暂不指派）') }, ...agents.map((a) => ({ value: a.id, label: a.name }))]), { hint: rqI18n.t('仅显示与本账号同组织的 Agent') })}
+        ${field(rqI18n.t('优先级'), selectField('priority', ['P0', 'P1', 'P2', 'P3'].map((p) => ({ value: p, label: p })), { value: 'P2' }))}
+        ${field(rqI18n.t('截止日期'), `<input class="input" type="date" name="dueAt">`)}
       </div>
-      ${field('前置任务', `
+      ${field(rqI18n.t('前置任务'), `
         <div class="flex" style="gap:8px">
-          ${selectField('blockerPick', [{ value: '', label: '选择前置任务（可选）' }, ...blockers.map((i) => ({ value: i.id, label: rqI18n.t('{title}（{status}）', { title: i.title, status: rqI18n.t(ISSUE_STATUS[i.status]?.[1] ?? i.status) }) }))], {})}
-          <button type="button" class="btn btn-default btn-sm" id="blocker-add" style="height:34px">${icon('plus', 12)}添加</button>
+          ${selectField('blockerPick', [{ value: '', label: rqI18n.t('选择前置任务（可选）') }, ...blockers.map((i) => ({ value: i.id, label: rqI18n.t('{title}（{status}）', { title: i.title, status: rqI18n.t(ISSUE_STATUS[i.status]?.[1] ?? i.status) }) }))], {})}
+          <button type="button" class="btn btn-default btn-sm" id="blocker-add" style="height:34px">${icon('plus', 12)}${rqI18n.t('添加')}</button>
         </div>
-        <div class="chips mt-8" id="blocker-chips"></div>`, { full: true, hint: '前置任务完成（依赖解除）前，本任务不会唤醒执行' })}`,
-    foot: `<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>创建任务</button>`,
+        <div class="chips mt-8" id="blocker-chips"></div>`, { full: true, hint: rqI18n.t('前置任务完成（依赖解除）前，本任务不会唤醒执行') })}`,
+    foot: `<button class="btn btn-default" data-cancel>${rqI18n.t('取消')}</button><button class="btn btn-primary" data-ok>${rqI18n.t('创建任务')}</button>`,
   })
 
   const picked = new Set()
@@ -654,20 +654,20 @@ async function openIssueDetail(issueId, ctx) {
     sub: `${badge(ISSUE_STATUS, issue?.status)} ${issue?.projectName ? ` · ${issue.projectName}` : ''}`,
     body: `
       <div class="desc-grid mb-14">
-        <div class="desc-item"><span class="k">负责人 Agent</span><span class="v">${esc(issue?.assigneeAgentName ?? issue?.assigneeAgentId ?? '未指派')}</span></div>
-        <div class="desc-item"><span class="k">优先级</span><span class="v">${esc(issue?.priority ?? '—')}</span></div>
-        <div class="desc-item"><span class="k">截止</span><span class="v">${issue?.dueAt ? fmtTime(issue.dueAt) : '—'}</span></div>
-        <div class="desc-item"><span class="k">执行锁</span><span class="v">${issue?.executionRunId ? `🔒 run ${esc(issue.executionRunId.slice(0, 8))}` : '无'}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('负责人')} Agent</span><span class="v">${esc(issue?.assigneeAgentName ?? issue?.assigneeAgentId ?? rqI18n.t('未指派'))}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('优先级')}</span><span class="v">${esc(issue?.priority ?? '—')}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('截止')}</span><span class="v">${issue?.dueAt ? fmtTime(issue.dueAt) : '—'}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('执行锁')}</span><span class="v">${issue?.executionRunId ? `🔒 run ${esc(issue.executionRunId.slice(0, 8))}` : rqI18n.t('无')}</span></div>
       </div>
       ${issue?.detail ? `
-      <div class="card-title mb-8">任务详情</div>
+      <div class="card-title mb-8">${rqI18n.t('任务详情')}</div>
       <div class="muted-box mb-14" style="white-space:pre-wrap">${esc(issue.detail)}</div>` : ''}
-      <div class="card-title mb-8">血缘链（目标 → 项目）</div>
+      <div class="card-title mb-8">${rqI18n.t('血缘链')}（${rqI18n.t('目标')} → ${rqI18n.t('项目')}）</div>
       <div class="mb-14 flex" style="gap:6px;flex-wrap:wrap;align-items:center">
         ${ancestry.length ? ancestry.map((title, index) => `${index > 0 ? `<span class="text-4">${icon('chevronRight', 12)}</span>` : ''}<span class="badge badge-brand no-dot">${esc(title?.title ?? title)}</span>`).join('') : `<span class="text-4 fs-12">${esc(rqI18n.t('未挂接目标链'))}</span>`}
         ${lineage?.project ? `<span class="text-4">${icon('chevronRight', 12)}</span><span class="badge badge-info no-dot">${esc(lineage.project.name ?? lineage.project)}</span>` : ''}
       </div>
-      <div class="card-title mb-8">前置任务</div>
+      <div class="card-title mb-8">${rqI18n.t('前置任务')}</div>
       <div class="mb-14">
         ${blockers.length ? blockers.map((b) => `
           <div class="flex" style="padding:7px 0;border-bottom:1px solid var(--border)">
@@ -676,9 +676,9 @@ async function openIssueDetail(issueId, ctx) {
           </div>`).join('') : `<span class="text-4 fs-12">${esc(rqI18n.t('无前置任务'))}</span>`}
       </div>
       ${contextPack ? `
-      <div class="card-title mb-8">上下文包</div>
+      <div class="card-title mb-8">${rqI18n.t('上下文包')}</div>
       <div class="code-block" style="max-height:220px">${esc(JSON.stringify(contextPack, null, 2))}</div>` : ''}`,
-    foot: session.can('exec.write') ? `<button class="btn btn-default" data-wake>${icon('zap', 14)} 唤醒</button><button class="btn btn-default" data-close>关闭</button>` : '',
+    foot: session.can('exec.write') ? `<button class="btn btn-default" data-wake>${icon('zap', 14)} ${rqI18n.t('唤醒')}</button><button class="btn btn-default" data-close>${rqI18n.t('关闭')}</button>` : '',
   })
   drawer.el.querySelector('[data-close]')?.addEventListener('click', () => drawer.close())
   drawer.el.querySelector('[data-wake]')?.addEventListener('click', async (e) => {
@@ -709,14 +709,14 @@ async function renderRoutineTab(body, ctx) {
   body.innerHTML = `
     <div class="card mb-20">
       <div class="card-head">
-        <span class="card-title">${icon('zap', 15)} 唤醒队列</span>
+        <span class="card-title">${icon('zap', 15)} ${rqI18n.t('唤醒队列')}</span>
         <span class="card-sub">${esc(rqI18n.t('{n} 条唤醒记录 · 失败项会带 lastError', { n: wakes.length }))}</span>
       </div>
       <div class="card-body" style="padding-top:6px">
         ${wakes.length ? `
         <div class="table-wrap">
           <table class="tbl">
-            <thead><tr><th>触发源</th><th>状态</th><th>Agent</th><th>关联任务</th><th>创建时间</th><th>最近错误</th></tr></thead>
+            <thead><tr><th>${rqI18n.t('触发源')}</th><th>${rqI18n.t('状态')}</th><th>Agent</th><th>${rqI18n.t('关联任务')}</th><th>${rqI18n.t('创建时间')}</th><th>${rqI18n.t('最近错误')}</th></tr></thead>
             <tbody>
               ${wakes.map((w) => `
                 <tr>
@@ -729,12 +729,12 @@ async function renderRoutineTab(body, ctx) {
                 </tr>`).join('')}
             </tbody>
           </table>
-        </div>` : `<div class="tbl-empty">${icon('zap', 28)}<span>唤醒队列为空——派发、评论、依赖解除与例行规则都会在这里留痕</span></div>`}
+        </div>` : `<div class="tbl-empty">${icon('zap', 28)}<span>${rqI18n.t('唤醒队列为空')}——${rqI18n.t('派发')}、${rqI18n.t('评论')}、${rqI18n.t('依赖解除与例行规则都会在这里留痕')}</span></div>`}
       </div>
     </div>
     <div class="card">
       <div class="card-head">
-        <span class="card-title">${icon('clock', 15)} 例行规则</span>
+        <span class="card-title">${icon('clock', 15)} ${rqI18n.t('例行规则')}</span>
         <span class="card-sub">${esc(rqI18n.t('{n} 条 · 定时唤醒 Agent 执行例行工作', { n: routines.length }))}</span>
         ${canWrite ? `<div class="card-head-actions"><button class="btn btn-primary btn-sm" id="routine-create">${icon('plus', 13)} ${esc(rqI18n.t('新建例行'))}</button></div>` : ''}
       </div>
@@ -751,18 +751,18 @@ async function renderRoutineTab(body, ctx) {
                   <td>${badge(ROUTINE_KIND, r.kind)}</td>
                   <td class="fs-12">${routineRuleText(r)}</td>
                   <td>${r.enabled ? `<span class="badge badge-ok no-dot">${esc(rqI18n.t('启用'))}</span>` : `<span class="badge badge-muted no-dot">${esc(rqI18n.t('停用'))}</span>`}</td>
-                  <td class="fs-12 text-3">${r.lastFiredAt ? timeAgo(r.lastFiredAt) : '未触发'}</td>
+                  <td class="fs-12 text-3">${r.lastFiredAt ? timeAgo(r.lastFiredAt) : rqI18n.t('未触发')}</td>
                   ${canWrite ? `
                   <td>
                     <div class="flex" style="gap:6px">
-                      <button class="btn btn-default btn-sm stop" data-toggle="${esc(r.id)}" data-next="${r.enabled ? 'false' : 'true'}">${r.enabled ? '停用' : '启用'}</button>
+                      <button class="btn btn-default btn-sm stop" data-toggle="${esc(r.id)}" data-next="${r.enabled ? 'false' : 'true'}">${r.enabled ? rqI18n.t('停用') : rqI18n.t('启用')}</button>
                       <button class="btn btn-danger-ghost btn-sm stop" data-rdel="${esc(r.id)}">${icon('trash', 12)}</button>
                     </div>
                   </td>` : ''}
                 </tr>`).join('')}
             </tbody>
           </table>
-        </div>` : `<div class="tbl-empty">${icon('clock', 28)}<span>暂无例行规则——为 Agent 配置定时间隔、Cron 或 Webhook 例行唤醒</span></div>`}
+        </div>` : `<div class="tbl-empty">${icon('clock', 28)}<span>${rqI18n.t('暂无例行规则')}——${rqI18n.t('为 Agent 配置定时间隔')}、Cron ${rqI18n.t('或')} Webhook ${rqI18n.t('例行唤醒')}</span></div>`}
       </div>
     </div>`
 
@@ -780,8 +780,8 @@ async function renderRoutineTab(body, ctx) {
     body.querySelectorAll('[data-rdel]').forEach((btn) => {
       btn.onclick = async () => {
         const confirmed = await confirmDialog({
-          title: '删除例行规则', danger: true, confirmText: '确认删除',
-          message: '删除后该 Agent 的例行唤醒立即停止，操作不可恢复。',
+          title: rqI18n.t('删除例行规则'), danger: true, confirmText: rqI18n.t('确认删除'),
+          message: rqI18n.t('删除后该 Agent 的例行唤醒立即停止，操作不可恢复。'),
         })
         if (!confirmed) return
         try {
@@ -807,28 +807,28 @@ async function openRoutineCreate(ctx) {
   const agents = agentsOfMyOrg(agentsRes.agents ?? [])
 
   const drawer = openDrawer({
-    title: '新建例行规则',
-    sub: '定时唤醒 Agent 执行例行工作（例会纪要、巡检提报…）',
+    title: rqI18n.t('新建例行规则'),
+    sub: rqI18n.t('定时唤醒 Agent 执行例行工作（例会纪要、巡检提报…）'),
     body: `
       <div class="form-grid">
         ${field('Agent', selectField('agentId', agents.map((a) => ({ value: a.id, label: a.name }))), { required: true })}
-        ${field('名称', inputField('name', { placeholder: '如：每日晨会纪要' }), { required: true })}
+        ${field(rqI18n.t('名称'), inputField('name', { placeholder: rqI18n.t('如：每日晨会纪要') }), { required: true })}
       </div>
-      ${field('类型', selectField('kind', [
-        { value: 'interval', label: '定时间隔' },
-        { value: 'cron', label: 'Cron 表达式' },
-        { value: 'webhook', label: 'Webhook 触发' },
+      ${field(rqI18n.t('类型'), selectField('kind', [
+        { value: 'interval', label: rqI18n.t('定时间隔') },
+        { value: 'cron', label: rqI18n.t('Cron 表达式') },
+        { value: 'webhook', label: rqI18n.t('Webhook 触发') },
       ]), { full: true })}
       <div id="routine-kind-body">
-        <div data-kind="interval">${field('间隔（分钟）', `<input class="input" type="number" name="intervalMinutes" min="1" placeholder="如 30" value="30">`, { full: true, hint: '每隔 N 分钟唤醒一次该 Agent' })}</div>
-        <div data-kind="cron" style="display:none">${field('Cron 表达式', inputField('cron', { placeholder: '0 9 * * 1-5' }), { full: true, hint: '标准 5 段（分钟 小时 日 月 星期）分钟级；示例 0 9 * * 1-5 = 工作日每天 9:00' })}</div>
-        <div data-kind="webhook" style="display:none">${field('Webhook 路径', inputField('webhookPath', { placeholder: '留空自动生成' }), { full: true, hint: '留空将按规则 ID 自动生成；外部系统 POST 该路径即触发一次唤醒' })}</div>
+        <div data-kind="interval">${field(rqI18n.t('间隔（分钟）'), `<input class="input" type="number" name="intervalMinutes" min="1" placeholder="${rqI18n.t('如 30')}" value="30">`, { full: true, hint: rqI18n.t('每隔 N 分钟唤醒一次该 Agent') })}</div>
+        <div data-kind="cron" style="display:none">${field(rqI18n.t('Cron 表达式'), inputField('cron', { placeholder: '0 9 * * 1-5' }), { full: true, hint: rqI18n.t('标准 5 段（分钟 小时 日 月 星期）分钟级；示例 0 9 * * 1-5 = 工作日每天 9:00') })}</div>
+        <div data-kind="webhook" style="display:none">${field(rqI18n.t('Webhook 路径'), inputField('webhookPath', { placeholder: rqI18n.t('留空自动生成') }), { full: true, hint: rqI18n.t('留空将按规则 ID 自动生成；外部系统 POST 该路径即触发一次唤醒') })}</div>
       </div>
       <label class="flex" style="gap:8px;align-items:center;cursor:pointer">
         <input type="checkbox" name="enabled" checked style="accent-color:var(--brand-500)">
-        <span class="fs-12 text-2">创建后立即启用</span>
+        <span class="fs-12 text-2">${rqI18n.t('创建后立即启用')}</span>
       </label>`,
-    foot: `<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>创建</button>`,
+    foot: `<button class="btn btn-default" data-cancel>${rqI18n.t('取消')}</button><button class="btn btn-primary" data-ok>${rqI18n.t('创建')}</button>`,
   })
 
   drawer.body.querySelector('[name="kind"]').onchange = (e) => {

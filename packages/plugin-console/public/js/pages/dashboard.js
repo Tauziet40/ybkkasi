@@ -15,36 +15,36 @@ import { mountThemeLens } from '../theme-lens.js'
 import { mountThemeQuickSwitcher } from '../theme.js'
 
 const TABS = [
-  { key: 'cockpit', label: '经营驾驶舱' },
-  { key: 'goals', label: '目标与价值' },
-  { key: 'actions', label: '行动项目' },
-  { key: 'collab', label: '人机协作' },
-  { key: 'ops', label: '平台运行' },
+  { key: 'cockpit', label: rqI18n.t('经营驾驶舱') },
+  { key: 'goals', label: rqI18n.t('目标与价值') },
+  { key: 'actions', label: rqI18n.t('行动项目') },
+  { key: 'collab', label: rqI18n.t('人机协作') },
+  { key: 'ops', label: rqI18n.t('平台运行') },
 ]
 const TAB_HINTS = {
-  cockpit: '先看全局，再下钻目标、行动与人机协作',
-  goals: '每项行动，都有一个经营理由',
-  actions: '目标 → 行动 → 交付 → 验收',
-  collab: '人负责判断，数字员工负责交付',
-  ops: '平台资源与治理口径 · 用量透明与内部成本穿透',
+  cockpit: rqI18n.t('先看全局，再下钻目标、行动与人机协作'),
+  goals: rqI18n.t('每项行动，都有一个经营理由'),
+  actions: rqI18n.t('目标 → 行动 → 交付 → 验收'),
+  collab: rqI18n.t('人负责判断，数字员工负责交付'),
+  ops: rqI18n.t('平台资源与治理口径 · 用量透明与内部成本穿透'),
 }
 
 /** 图表用色（与设计稿资产类型色系对齐的图表字面量，仅用于 SVG 填色）。 */
 const CHART_COLORS = ['#0e7490', '#7c3aed', '#2563eb', '#059669', '#d97706', '#e11d48', '#0a5f87', '#f59e0b']
 
-const PROJECT_STATUS = { active: ['badge-info', '进行中'], done: ['badge-ok', '已完成'], archived: ['badge-muted', '已归档'] }
-const ISSUE_STATUS_LABEL = { todo: '待办', in_progress: '进行中', review: '待审', done: '完成', cancelled: '已取消' }
+const PROJECT_STATUS = { active: ['badge-info', rqI18n.t('进行中')], done: ['badge-ok', rqI18n.t('已完成')], archived: ['badge-muted', rqI18n.t('已归档')] }
+const ISSUE_STATUS_LABEL = { todo: rqI18n.t('待办'), in_progress: rqI18n.t('进行中'), review: rqI18n.t('待审'), done: rqI18n.t('完成'), cancelled: rqI18n.t('已取消') }
 const ISSUE_COLS = ['todo', 'in_progress', 'review', 'done', 'cancelled']
 const PRIORITY_BADGE = { P0: 'badge-danger', P1: 'badge-warn', P2: 'badge-info', P3: 'badge-muted' }
 
 /** 资产类型中文名（fleet 台账 / 分类速览共用）。 */
-const TYPE_LABELS = { mcp: 'MCP 服务', agent: 'Agent 本体', app: 'AI 应用', skill: 'Skill', model: '模型', nas: 'NAS 存储' }
+const TYPE_LABELS = { mcp: rqI18n.t('MCP 服务'), agent: rqI18n.t('Agent 本体'), app: rqI18n.t('AI 应用'), skill: 'Skill', model: rqI18n.t('模型'), nas: rqI18n.t('NAS 存储') }
 
 // ================================================================ 页面骨架
 export async function renderDashboard(content, params, ctx) {
   const wanted = params.get('tab') ?? 'cockpit'
   const tab = TABS.some((t) => t.key === wanted) ? wanted : 'cockpit'
-  content.innerHTML = `<div class="card card-pad text-4" style="text-align:center;padding:60px 0">加载中…</div>`
+  content.innerHTML = rqI18n.t('<div class="card card-pad text-4" style="text-align:center;padding:60px 0">加载中…</div>')
 
   let d
   try {
@@ -53,16 +53,16 @@ export async function renderDashboard(content, params, ctx) {
     content.innerHTML = `
       <div class="card card-pad" style="text-align:center;padding:44px 24px">
         <div style="margin-bottom:10px;color:var(--danger)">${icon('alert', 26)}</div>
-        <div style="font-weight:600;margin-bottom:6px">工作台数据加载失败</div>
+        <div style="font-weight:600;margin-bottom:6px">${rqI18n.t('工作台数据加载失败')}</div>
         <div class="fs-12 text-3" style="margin-bottom:18px">${esc(error.message)}</div>
-        <button class="btn btn-default" id="dash-retry">重试</button>
+        <button class="btn btn-default" id="dash-retry">${rqI18n.t('重试')}</button>
       </div>`
     $('#dash-retry').onclick = () => ctx?.rerender?.()
     return
   }
 
   const hour = new Date().getHours()
-  const greet = hour < 6 ? '夜深了' : hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好'
+  const greet = hour < 6 ? rqI18n.t('夜深了') : hour < 12 ? rqI18n.t('早上好') : hour < 18 ? rqI18n.t('下午好') : rqI18n.t('晚上好')
   const firstName = session.user?.displayName ?? ''
   const isManager = session.can('usage.read')
 
@@ -79,8 +79,8 @@ export async function renderDashboard(content, params, ctx) {
       }),
       actions: `
         ${d.conflicts > 0 && session.can('iam.user.read') ? `<button class="btn btn-default" id="dash-goto-conflicts" style="color:var(--brand-600)">${icon('link', 14)}${esc(rqI18n.t('处理同步冲突（{n}）', { n: fmtNum(d.conflicts) }))}</button>` : ''}
-        ${session.can('agent.read') ? `<button class="btn btn-default" id="dash-goto-agents">${icon('bot', 14)}查看 Agent</button>` : ''}
-        ${session.can('approval.read') ? `<button class="btn btn-primary" id="dash-goto-approve">${icon('checkSquare', 14)}处理审批</button>` : ''}`,
+        ${session.can('agent.read') ? `<button class="btn btn-default" id="dash-goto-agents">${icon('bot', 14)}${rqI18n.t('查看 Agent')}</button>` : ''}
+        ${session.can('approval.read') ? `<button class="btn btn-primary" id="dash-goto-approve">${icon('checkSquare', 14)}${rqI18n.t('处理审批')}</button>` : ''}`,
     })}
     ${tab === 'cockpit' ? '<div id="theme-quick-switcher"></div><div id="theme-lens"></div>' : ''}
     <div id="dash-binding-banner"></div>
@@ -134,15 +134,15 @@ async function renderCockpitTab(body, d) {
         <div class="flex" style="gap:12px;align-items:flex-start">
           <span class="stat-icon" style="background:var(--brand-50);color:var(--brand-500);flex-shrink:0">${icon('sparkles', 16)}</span>
           <div class="grow" style="min-width:0">
-            <div class="micro-label">今日经营洞察</div>
-            <p id="dash-insight-text" class="fs-13" style="margin:6px 0 0;line-height:1.7;color:var(--text-1)">洞察生成中…</p>
+            <div class="micro-label">${rqI18n.t('今日经营洞察')}</div>
+            <p id="dash-insight-text" class="fs-13" style="margin:6px 0 0;line-height:1.7;color:var(--text-1)">${rqI18n.t('洞察生成中…')}</p>
           </div>
-          <button class="btn btn-default btn-sm" id="dash-insight-go" style="flex-shrink:0">查看行动 ${icon('chevronRight', 12)}</button>
+          <button class="btn btn-default btn-sm" id="dash-insight-go" style="flex-shrink:0">${rqI18n.t('查看行动')} ${icon('chevronRight', 12)}</button>
         </div>
       </div>
       <div class="card card-pad">
         <div class="flex" style="justify-content:space-between;align-items:center">
-          <span class="micro-label">${icon('bell', 12)} 运行与业务影响</span>
+          <span class="micro-label">${icon('bell', 12)} ${rqI18n.t('运行与业务影响')}</span>
           <span class="fs-11 text-3 tnum" id="dash-exc-summary"></span>
         </div>
         <div id="dash-exceptions" style="margin-top:10px"></div>
@@ -155,37 +155,37 @@ async function renderCockpitTab(body, d) {
       <div class="card card-pad">
         ${sectionHead({
           label: 'VALUE / TRACKING',
-          title: 'AI 价值兑现趋势',
-          extra: '从应用投入，追踪到业务结果 · 数据来自执行中枢目标价值口径',
+          title: rqI18n.t('AI 价值兑现趋势'),
+          extra: rqI18n.t('从应用投入，追踪到业务结果 · 数据来自执行中枢目标价值口径'),
         })}
         <div id="dash-value"></div>
       </div>
       <div class="card card-pad">
         ${sectionHead({
           label: 'DECISION',
-          title: '需要您决策',
-          actions: session.can('approval.read') ? `<a href="#/approvals" class="btn btn-ghost btn-sm">全部决策 ${icon('chevronRight', 12)}</a>` : '',
+          title: rqI18n.t('需要您决策'),
+          actions: session.can('approval.read') ? `<a href="#/approvals" class="btn btn-ghost btn-sm">${rqI18n.t('全部决策')} ${icon('chevronRight', 12)}</a>` : '',
         })}
         <div id="dash-decisions"></div>
-        <div class="fs-11 text-3" style="margin-top:10px;background:var(--surface-2);border-radius:6px;padding:8px 10px;line-height:1.6">先看业务影响，再决定执行边界 · 全程留痕</div>
+        <div class="fs-11 text-3" style="margin-top:10px;background:var(--surface-2);border-radius:6px;padding:8px 10px;line-height:1.6">${rqI18n.t('先看业务影响，再决定执行边界 · 全程留痕')}</div>
       </div>
     </div>
 
     <div class="grid-2">
       <div class="card">
         <div class="card-head">
-          <span class="card-title">${icon('clock', 15)} 最近调用</span>
+          <span class="card-title">${icon('clock', 15)} ${rqI18n.t('最近调用')}</span>
           <div class="card-head-actions">${isManagerCta()}</div>
         </div>
         <div class="card-body" id="dash-recent"></div>
       </div>
       ${BASE ? `
       <div class="card" id="dash-chat-card">
-        <div class="card-head"><span class="card-title">${icon('messageSquare', 15)} 对话入口</span></div>
+        <div class="card-head"><span class="card-title">${icon('messageSquare', 15)} ${rqI18n.t('对话入口')}</span></div>
         <div class="card-body" style="display:flex;flex-direction:column;gap:12px">
-          <div class="fs-13 text-2">自然语言直达：问数据、跑流程、调资产——每一次调用都有宿主支撑与审计归因。</div>
-          <a class="btn btn-primary btn-lg btn-block" id="dash-open-chat-main" href="/" target="_top" rel="noopener">进入 AI 对话工作区</a>
-          <div class="fs-11 text-4">单入口免登：从门户/钉钉进入即已登录，无需二次认证。</div>
+          <div class="fs-13 text-2">${rqI18n.t('自然语言直达：问数据、跑流程、调资产——每一次调用都有宿主支撑与审计归因。')}</div>
+          <a class="btn btn-primary btn-lg btn-block" id="dash-open-chat-main" href="/" target="_top" rel="noopener">${rqI18n.t('进入 AI 对话工作区')}</a>
+          <div class="fs-11 text-4">${rqI18n.t('单入口免登：从门户/钉钉进入即已登录，无需二次认证。')}</div>
         </div>
       </div>` : ''}
     </div>`
@@ -203,7 +203,7 @@ async function renderCockpitTab(body, d) {
 /** isManager 派生的用量明细 CTA（QA-02 权限门控模式：用量明细仅 usage.read 持有者可见）。 */
 function isManagerCta() {
   const isManager = session.can('usage.read')
-  return `${isManager ? `<a href="#/assets" class="fs-12">用量明细 ›</a>` : ''}`
+  return `${isManager ? rqI18n.t('<a href="#/assets" class="fs-12">用量明细 ›</a>') : ''}`
 }
 
 /** 洞察文案 + 异常影响行：/api/exec/overview（WB 经营口径）→ /api/overview 派生 → 告警接口补真异常。 */
@@ -232,7 +232,7 @@ async function mountCockpitInsight(d) {
       exceptions = (alerts.alerts ?? []).slice(0, 2).map((alert) => ({
         name: alert.title,
         level: alert.severity === 'critical' ? 'critical' : 'warning',
-        chain: alert.message || '审计告警',
+        chain: alert.message || rqI18n.t('审计告警'),
         owner: rqI18n.t('告警 · {time}', { time: timeAgo(alert.createdAt) }),
       }))
     } catch { /* 无告警数据时保持空态 */ }
@@ -248,8 +248,8 @@ async function mountCockpitInsight(d) {
         <div class="fs-13" style="font-weight:500" title="${esc(e.name)}">${ellipsis(e.name, 34)}</div>
         <div class="fs-11 text-3 ellipsis">${esc(e.chain ?? '')}${e.owner ? ` · ${esc(e.owner)}` : ''}</div>
       </div>
-      <a href="#/audit?tab=alerts" class="fs-11" style="color:var(--brand-600);flex-shrink:0">看影响 ›</a>
-    </div>`).join('') : emptyHint('当前没有需要处置的运行异常。')
+      <a href="#/audit?tab=alerts" class="fs-11" style="color:var(--brand-600);flex-shrink:0">${rqI18n.t('看影响 ›')}</a>
+    </div>`).join('') : emptyHint(rqI18n.t('当前没有需要处置的运行异常。'))
 }
 
 /** KPI 四卡：执行中枢经营 KPI（今日口径）→ 总览派生（累计口径，标签如实标注）。 */
@@ -269,10 +269,10 @@ function buildKpiCards(execOv, d) {
     const risk = k.risk ?? {}
     const riskCount = Number(risk.critical ?? 0) + Number(risk.warning ?? 0)
     return [
-      statCard({ label: '受管资产', value: fmtNum(a.total ?? 0), sub: rqI18n.t('在线 {a} · 草稿 {b} · 弃用 {c}', { a: fmtNum(a.online ?? 0), b: fmtNum(a.draft ?? 0), c: fmtNum(a.deprecated ?? 0) }) }),
-      statCard({ label: '今日调用', value: fmtNum(k.callsToday ?? 0), sub: '近 24 小时平台调用次数' }),
-      statCard({ label: '今日消耗', value: fmtNum(k.tokensToday ?? 0), sub: k.costToday ? rqI18n.t('成本参考 {v}', { v: fmtCost(k.costToday) }) : 'Token 消耗（今日口径）' }),
-      statCard({ label: '风险', value: fmtNum(riskCount), sub: riskCount ? rqI18n.t('熔断/严重 {a} · 关注 {b}', { a: fmtNum(risk.critical ?? 0), b: fmtNum(risk.warning ?? 0) }) : '当前无风险项', tone: riskCount ? (Number(risk.critical ?? 0) > 0 ? 'crit' : 'warn') : '' }),
+      statCard({ label: rqI18n.t('受管资产'), value: fmtNum(a.total ?? 0), sub: rqI18n.t('在线 {a} · 草稿 {b} · 弃用 {c}', { a: fmtNum(a.online ?? 0), b: fmtNum(a.draft ?? 0), c: fmtNum(a.deprecated ?? 0) }) }),
+      statCard({ label: rqI18n.t('今日调用'), value: fmtNum(k.callsToday ?? 0), sub: rqI18n.t('近 24 小时平台调用次数') }),
+      statCard({ label: rqI18n.t('今日消耗'), value: fmtNum(k.tokensToday ?? 0), sub: k.costToday ? rqI18n.t('成本参考 {v}', { v: fmtCost(k.costToday) }) : rqI18n.t('Token 消耗（今日口径）') }),
+      statCard({ label: rqI18n.t('风险'), value: fmtNum(riskCount), sub: riskCount ? rqI18n.t('熔断/严重 {a} · 关注 {b}', { a: fmtNum(risk.critical ?? 0), b: fmtNum(risk.warning ?? 0) }) : rqI18n.t('当前无风险项'), tone: riskCount ? (Number(risk.critical ?? 0) > 0 ? 'crit' : 'warn') : '' }),
     ].join('')
   }
   // 降级：总览真实计数（口径如实标注，不冒充今日值）
@@ -280,10 +280,10 @@ function buildKpiCards(execOv, d) {
   const last = trend.at(-1)
   const riskCount = Number(d.alerts?.critical ?? 0) + Number(d.mcp?.unhealthyServices ?? 0) + Number(d.conflicts ?? 0)
   return [
-    statCard({ label: '受管资产（总览口径）', value: fmtNum(managedTotal(d)), sub: rqI18n.t('Agent 在线 {a}/{b} · 应用在线 {c} · Skill 上架 {d}', { a: fmtNum(d.agents?.online ?? 0), b: fmtNum(d.agents?.total ?? 0), c: fmtNum(d.apps?.online ?? 0), d: fmtNum(d.skills?.published ?? 0) }) }),
-    statCard({ label: '累计调用', value: fmtNum(d.mcp?.totalCalls ?? 0), sub: rqI18n.t('成功率 {p} · P95 {l}ms', { p: fmtPct(d.mcp?.successRate ?? 1), l: fmtNum(d.mcp?.p95Latency ?? 0) }) }),
-    statCard({ label: last ? rqI18n.t('最新一日消耗（{d}）', { d: String(last.key).slice(5) }) : 'Token 消耗', value: fmtNum(last?.llmTokens ?? d.mcp?.tokens ?? 0), sub: last ? rqI18n.t('成本参考 {v}', { v: fmtCost(last.costYuan) }) : 'MCP 调用 Token 累计' }),
-    statCard({ label: '风险', value: fmtNum(riskCount), sub: riskCount ? rqI18n.t('严重告警 {a} · MCP 熔断 {b} · 同步冲突 {c}', { a: fmtNum(d.alerts?.critical ?? 0), b: fmtNum(d.mcp?.unhealthyServices ?? 0), c: fmtNum(d.conflicts ?? 0) }) : '当前无风险项', tone: riskCount ? (Number(d.alerts?.critical ?? 0) > 0 ? 'crit' : 'warn') : '' }),
+    statCard({ label: rqI18n.t('受管资产（总览口径）'), value: fmtNum(managedTotal(d)), sub: rqI18n.t('Agent 在线 {a}/{b} · 应用在线 {c} · Skill 上架 {d}', { a: fmtNum(d.agents?.online ?? 0), b: fmtNum(d.agents?.total ?? 0), c: fmtNum(d.apps?.online ?? 0), d: fmtNum(d.skills?.published ?? 0) }) }),
+    statCard({ label: rqI18n.t('累计调用'), value: fmtNum(d.mcp?.totalCalls ?? 0), sub: rqI18n.t('成功率 {p} · P95 {l}ms', { p: fmtPct(d.mcp?.successRate ?? 1), l: fmtNum(d.mcp?.p95Latency ?? 0) }) }),
+    statCard({ label: last ? rqI18n.t('最新一日消耗（{d}）', { d: String(last.key).slice(5) }) : rqI18n.t('Token 消耗'), value: fmtNum(last?.llmTokens ?? d.mcp?.tokens ?? 0), sub: last ? rqI18n.t('成本参考 {v}', { v: fmtCost(last.costYuan) }) : rqI18n.t('MCP 调用 Token 累计') }),
+    statCard({ label: rqI18n.t('风险'), value: fmtNum(riskCount), sub: riskCount ? rqI18n.t('严重告警 {a} · MCP 熔断 {b} · 同步冲突 {c}', { a: fmtNum(d.alerts?.critical ?? 0), b: fmtNum(d.mcp?.unhealthyServices ?? 0), c: fmtNum(d.conflicts ?? 0) }) : rqI18n.t('当前无风险项'), tone: riskCount ? (Number(d.alerts?.critical ?? 0) > 0 ? 'crit' : 'warn') : '' }),
   ].join('')
 }
 
@@ -296,15 +296,15 @@ async function mountCockpitValue() {
   }
   const series = extractValueSeries(goalsData)
   if (!series) {
-    host.innerHTML = emptyHint('暂无价值核验数据——在执行中枢为目标与项目登记价值口径并通过核验后，这里将展示「实际 vs 目标」双序列趋势。')
+    host.innerHTML = emptyHint(rqI18n.t('暂无价值核验数据——在执行中枢为目标与项目登记价值口径并通过核验后，这里将展示「实际 vs 目标」双序列趋势。'))
     return
   }
   const lastActual = Number(series.actual.at(-1) ?? 0)
   const lastTarget = Number(series.target.at(-1) ?? 0)
   host.innerHTML = `
     <div class="flex mb-8" style="gap:28px;align-items:baseline">
-      <div><div class="fs-11 text-3">期末累计（实际）</div><div class="tnum" style="font-size:20px;font-weight:600">${fmtNum(lastActual)}${series.unit ? ` <span class="fs-12 text-3" style="font-weight:400">${esc(series.unit)}</span>` : ''}</div></div>
-      <div><div class="fs-11 text-3">期末目标</div><div class="tnum" style="font-size:20px;font-weight:600">${fmtNum(lastTarget)}${series.unit ? ` <span class="fs-12 text-3" style="font-weight:400">${esc(series.unit)}</span>` : ''}</div></div>
+      <div><div class="fs-11 text-3">${rqI18n.t('期末累计（实际）')}</div><div class="tnum" style="font-size:20px;font-weight:600">${fmtNum(lastActual)}${series.unit ? ` <span class="fs-12 text-3" style="font-weight:400">${esc(series.unit)}</span>` : ''}</div></div>
+      <div><div class="fs-11 text-3">${rqI18n.t('期末目标')}</div><div class="tnum" style="font-size:20px;font-weight:600">${fmtNum(lastTarget)}${series.unit ? ` <span class="fs-12 text-3" style="font-weight:400">${esc(series.unit)}</span>` : ''}</div></div>
       <div class="fs-11 text-3 grow" style="text-align:right">${esc(rqI18n.t('目标完成度 {v}', { v: lastTarget > 0 ? fmtPct(lastActual / lastTarget) : '—' }))}</div>
     </div>
     ${dualTrendChart({ actual: series.actual, target: series.target, labels: series.labels, unit: series.unit })}`
@@ -312,16 +312,16 @@ async function mountCockpitValue() {
 
 // ================================================================ Tab 2：goals 目标与价值
 async function renderGoalsTab(body) {
-  body.innerHTML = `<div class="card card-pad text-4" style="text-align:center">加载中…</div>`
+  body.innerHTML = rqI18n.t('<div class="card card-pad text-4" style="text-align:center">加载中…</div>')
   if (!session.can('exec.read')) {
-    body.innerHTML = permCard('目标与价值', 'exec.read', rqI18n.t('需要「exec.read」权限（执行中枢只读）才能查看目标、项目与价值口径。'))
+    body.innerHTML = permCard(rqI18n.t('目标与价值'), 'exec.read', rqI18n.t('需要「exec.read」权限（执行中枢只读）才能查看目标、项目与价值口径。'))
     return
   }
   let goalsData, projectsData
   try {
     ;[goalsData, projectsData] = await Promise.all([api.get('/api/exec/goals'), api.get('/api/exec/projects')])
   } catch (error) {
-    body.innerHTML = errorCard('目标数据加载失败', rqI18n.t('{msg}（执行中枢后端可能尚未部署到当前宿主）', { msg: error.message }))
+    body.innerHTML = errorCard(rqI18n.t('目标数据加载失败'), rqI18n.t('{msg}（执行中枢后端可能尚未部署到当前宿主）', { msg: error.message }))
     return
   }
   const goals = goalsData.goals ?? []
@@ -332,21 +332,21 @@ async function renderGoalsTab(body) {
     <div class="card card-pad mb-14 flex" style="justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
       <div>
         <div class="micro-label">GOALS / VALUE</div>
-        <div style="font-size:15px;font-weight:600;margin-top:2px">目标与价值</div>
+        <div style="font-size:15px;font-weight:600;margin-top:2px">${rqI18n.t('目标与价值')}</div>
       </div>
-      <span class="fs-11 text-3">每项行动，都有一个经营理由 · 目标拆解、指标口径、负责人和关联项目在同一条链路上</span>
+      <span class="fs-11 text-3">${rqI18n.t('每项行动，都有一个经营理由 · 目标拆解、指标口径、负责人和关联项目在同一条链路上')}</span>
     </div>
     ${goals.length ? `
     <div class="grid-cards g3 mb-14">
       ${goals.map((g) => goalCardHtml(g, projects)).join('')}
-    </div>` : `<div class="mb-14">${emptyHint('还没有目标——从公司级目标开始逐层拆解（在执行中枢登记）。')}</div>`}
+    </div>` : `<div class="mb-14">${emptyHint(rqI18n.t('还没有目标——从公司级目标开始逐层拆解（在执行中枢登记）。'))}</div>`}
     <div class="card card-pad">
       <div class="micro-label mb-8">VERIFY / RULES</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px">
         ${[
-          { no: '01', title: '统一计量口径', desc: '价值与用量均来自平台统一计量管道：usage 事件幂等入账，统计周期、维度与排除项在报表口径中固定，同一结果不重复计数。' },
-          { no: '02', title: '变更先审批', desc: '权限变更、灰度上线、写入类授权等高风险操作一律先经审批中心：先看业务影响面，再决定执行边界，决策全程留痕。' },
-          { no: '03', title: '结果可回溯', desc: '每次执行与调用进入审计日志，可从指标下钻到具体项目、任务、Agent 执行链与调用明细，验收证据随交付物归档。' },
+          { no: '01', title: rqI18n.t('统一计量口径'), desc: rqI18n.t('价值与用量均来自平台统一计量管道：usage 事件幂等入账，统计周期、维度与排除项在报表口径中固定，同一结果不重复计数。') },
+          { no: '02', title: rqI18n.t('变更先审批'), desc: rqI18n.t('权限变更、灰度上线、写入类授权等高风险操作一律先经审批中心：先看业务影响面，再决定执行边界，决策全程留痕。') },
+          { no: '03', title: rqI18n.t('结果可回溯'), desc: rqI18n.t('每次执行与调用进入审计日志，可从指标下钻到具体项目、任务、Agent 执行链与调用明细，验收证据随交付物归档。') },
         ].map((r) => `
           <div class="flex" style="gap:10px">
             <span class="tnum mono" style="font-size:13px;font-weight:600;color:var(--brand-600);flex-shrink:0">${esc(r.no)}</span>
@@ -411,9 +411,9 @@ function goalCardHtml(goal, projects) {
 
 // ================================================================ Tab 3：actions 行动项目
 async function renderActionsTab(body) {
-  body.innerHTML = `<div class="card card-pad text-4" style="text-align:center">加载中…</div>`
+  body.innerHTML = rqI18n.t('<div class="card card-pad text-4" style="text-align:center">加载中…</div>')
   if (!session.can('exec.read')) {
-    body.innerHTML = permCard('行动项目', 'exec.read', rqI18n.t('需要「exec.read」权限（执行中枢只读）才能查看行动项目与交付任务。'))
+    body.innerHTML = permCard(rqI18n.t('行动项目'), 'exec.read', rqI18n.t('需要「exec.read」权限（执行中枢只读）才能查看行动项目与交付任务。'))
     return
   }
   let projectsData, issuesData, goalsData
@@ -424,7 +424,7 @@ async function renderActionsTab(body) {
       api.get('/api/exec/goals'),
     ])
   } catch (error) {
-    body.innerHTML = errorCard('行动数据加载失败', rqI18n.t('{msg}（执行中枢后端可能尚未部署到当前宿主）', { msg: error.message }))
+    body.innerHTML = errorCard(rqI18n.t('行动数据加载失败'), rqI18n.t('{msg}（执行中枢后端可能尚未部署到当前宿主）', { msg: error.message }))
     return
   }
   const projects = projectsData.projects ?? []
@@ -436,19 +436,19 @@ async function renderActionsTab(body) {
       <div class="card-head" style="flex-wrap:wrap;gap:10px">
         <div>
           <div class="micro-label">ACTIONS</div>
-          <span class="card-title" style="margin-top:2px">${icon('layers', 15)} 重点行动推进</span>
+          <span class="card-title" style="margin-top:2px">${icon('layers', 15)} ${rqI18n.t('重点行动推进')}</span>
         </div>
         <div class="card-head-actions" style="display:flex;gap:10px;align-items:center">
           <span id="actions-filter"></span>
-          <a href="#/exec?tab=goals" class="btn btn-default btn-sm">全部项目 ${icon('chevronRight', 12)}</a>
+          <a href="#/exec?tab=goals" class="btn btn-default btn-sm">${rqI18n.t('全部项目')} ${icon('chevronRight', 12)}</a>
         </div>
       </div>
       <div class="card-body" style="padding-top:4px" id="actions-table"></div>
-      <div class="fs-11 text-3" style="padding:10px 16px;border-top:1px solid var(--border)">仅展示承接目标落地的行动项目 · 过程按任务状态推进，核验价值以执行中枢验收口径为准</div>
+      <div class="fs-11 text-3" style="padding:10px 16px;border-top:1px solid var(--border)">${rqI18n.t('仅展示承接目标落地的行动项目 · 过程按任务状态推进，核验价值以执行中枢验收口径为准')}</div>
     </div>
 
     <div class="card card-pad">
-      ${sectionHead({ label: 'DELIVERY / KANBAN', title: '交付任务看板', extra: '点击任务进入执行中枢查看执行记录与验收标准 · 有负责人、有边界、有交付标准' })}
+      ${sectionHead({ label: 'DELIVERY / KANBAN', title: rqI18n.t('交付任务看板'), extra: rqI18n.t('点击任务进入执行中枢查看执行记录与验收标准 · 有负责人、有边界、有交付标准') })}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px" id="actions-kanban"></div>
     </div>`
 
@@ -457,10 +457,10 @@ async function renderActionsTab(body) {
   const filterHost = $('#actions-filter')
   const chips = chipRow(
     [
-      { value: 'all', label: '全部项目', count: projects.length },
-      { value: 'active', label: '进行中', count: projects.filter((p) => p.status === 'active').length },
-      { value: 'done', label: '已完成', count: projects.filter((p) => p.status === 'done').length },
-      { value: 'archived', label: '已归档', count: projects.filter((p) => p.status === 'archived').length },
+      { value: 'all', label: rqI18n.t('全部项目'), count: projects.length },
+      { value: 'active', label: rqI18n.t('进行中'), count: projects.filter((p) => p.status === 'active').length },
+      { value: 'done', label: rqI18n.t('已完成'), count: projects.filter((p) => p.status === 'done').length },
+      { value: 'archived', label: rqI18n.t('已归档'), count: projects.filter((p) => p.status === 'archived').length },
     ],
     filter,
     (value) => { filter = value; drawTable() },
@@ -472,7 +472,7 @@ async function renderActionsTab(body) {
     $('#actions-table').innerHTML = rows.length ? `
       <table class="tbl">
         <thead><tr>
-          <th>行动项目 / 关联目标</th><th style="width:150px">负责人</th><th style="width:190px">进度</th><th style="width:110px;text-align:right">核验价值</th><th style="width:90px;text-align:right">状态</th>
+          <th>${rqI18n.t('行动项目 / 关联目标')}</th><th style="width:150px">${rqI18n.t('负责人')}</th><th style="width:190px">${rqI18n.t('进度')}</th><th style="width:110px;text-align:right">${rqI18n.t('核验价值')}</th><th style="width:90px;text-align:right">${rqI18n.t('状态')}</th>
         </tr></thead>
         <tbody>
           ${rows.map((p) => {
@@ -485,14 +485,14 @@ async function renderActionsTab(body) {
                 <div class="col-strong">${esc(p.name)}</div>
                 <div class="col-sub fs-11">${p.goalId ? rqI18n.t('关联目标 {name}', { name: goalTitles.get(p.goalId) ?? p.goalId }) : rqI18n.t('未关联目标')}${(p.repos ?? []).length ? rqI18n.t(' · 仓库 {n} 个', { n: (p.repos ?? []).length }) : ''}</div>
               </td>
-              <td class="fs-12">${p.ownerUserId ? `<span class="mono">${esc(p.ownerUserId)}</span>` : '未指定'}</td>
+              <td class="fs-12">${p.ownerUserId ? `<span class="mono">${esc(p.ownerUserId)}</span>` : rqI18n.t('未指定')}</td>
               <td>${progressBar(pct, { width: '110px', label: `${prog.done ?? 0}/${prog.total ?? 0}（${pct}%）` })}</td>
-              <td class="fs-12 text-3" style="text-align:right">待核验</td>
+              <td class="fs-12 text-3" style="text-align:right">${rqI18n.t('待核验')}</td>
               <td style="text-align:right"><span class="badge ${st[0]} no-dot">${esc(st[1])}</span></td>
             </tr>`
           }).join('')}
         </tbody>
-      </table>` : emptyHint('当前筛选下没有行动项目。')
+      </table>` : emptyHint(rqI18n.t('当前筛选下没有行动项目。'))
     $$('#actions-table [data-goto-exec]').forEach((tr) => { tr.onclick = () => { location.hash = '#/exec?tab=goals' } })
   }
   drawTable()
@@ -513,12 +513,12 @@ async function renderActionsTab(body) {
             ${issue.executionRunId ? `<span class="badge badge-purple no-dot" style="font-size:10px" title="${esc(rqI18n.t('任务执行加锁中'))}">${esc(rqI18n.t('执行中'))}</span>` : ''}
           </div>
           <div class="fs-13" style="font-weight:500;margin-top:6px;line-height:1.4" title="${esc(issue.title)}">${ellipsis(issue.title, 42)}</div>
-          <div class="fs-11 text-3" style="margin-top:2px">${esc(issue.projectName ?? '未挂项目')}</div>
+          <div class="fs-11 text-3" style="margin-top:2px">${esc(issue.projectName ?? rqI18n.t('未挂项目'))}</div>
           <div class="flex fs-11 text-3" style="justify-content:space-between;margin-top:8px;border-top:1px solid var(--border);padding-top:6px">
-            <span class="ellipsis" style="max-width:60%">${icon('bot', 11)} ${esc(issue.assigneeAgentName ?? issue.assigneeAgentId ?? '未指派')}</span>
+            <span class="ellipsis" style="max-width:60%">${icon('bot', 11)} ${esc(issue.assigneeAgentName ?? issue.assigneeAgentId ?? rqI18n.t('未指派'))}</span>
             <span class="tnum mono">${issue.dueAt ? esc(fmtDue(issue.dueAt)) : ''}</span>
           </div>
-        </div>`).join('') || `<div class="fs-11 text-4" style="text-align:center;padding:14px 0">暂无任务</div>`}
+        </div>`).join('') || rqI18n.t('<div class="fs-11 text-4" style="text-align:center;padding:14px 0">暂无任务</div>')}
       ${list.length > 12 ? `<div class="fs-11 text-3" style="text-align:center;padding:4px 0">${esc(rqI18n.t('… 其余 {n} 条见执行中枢', { n: list.length - 12 }))}</div>` : ''}
     </div>`
   }).join('')
@@ -528,37 +528,37 @@ async function renderActionsTab(body) {
 // ================================================================ Tab 4：collab 人机协作
 async function renderCollabTab(body, d) {
   body.innerHTML = `
-    ${sectionHead({ label: 'COLLAB / HUMAN × AI', title: '人机协作', extra: rqI18n.t('人负责判断，数字员工负责交付 · 把对话、任务、资源与结果留在同一个业务上下文里') })}
+    ${sectionHead({ label: 'COLLAB / HUMAN × AI', title: rqI18n.t('人机协作'), extra: rqI18n.t('人负责判断，数字员工负责交付 · 把对话、任务、资源与结果留在同一个业务上下文里') })}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px" class="mb-14">
       <div class="card card-pad">
         <div class="flex" style="justify-content:space-between;align-items:center;margin-bottom:10px">
-          <span class="fs-13" style="font-weight:600">数字员工正在协作</span>
+          <span class="fs-13" style="font-weight:600">${rqI18n.t('数字员工正在协作')}</span>
           <span class="fs-11 text-3" id="collab-workers-count"></span>
         </div>
-        <div id="collab-workers"><div class="fs-12 text-4" style="padding:10px 0">加载中…</div></div>
-        <div class="fs-11 text-3" style="margin-top:10px;background:var(--surface-2);border-radius:6px;padding:8px 10px;line-height:1.6">执行绑定部门资源。新增权限与高风险操作先走审批。</div>
+        <div id="collab-workers"><div class="fs-12 text-4" style="padding:10px 0">${rqI18n.t('加载中…')}</div></div>
+        <div class="fs-11 text-3" style="margin-top:10px;background:var(--surface-2);border-radius:6px;padding:8px 10px;line-height:1.6">${rqI18n.t('执行绑定部门资源。新增权限与高风险操作先走审批。')}</div>
       </div>
       <div class="card card-pad">
         <div class="flex" style="justify-content:space-between;align-items:center;margin-bottom:10px">
-          <span class="fs-13" style="font-weight:600">${icon('messageSquare', 14)} 协作会话（部门面板）</span>
-          <span class="fs-11 text-3">只读摘要</span>
+          <span class="fs-13" style="font-weight:600">${icon('messageSquare', 14)} ${rqI18n.t('协作会话（部门面板）')}</span>
+          <span class="fs-11 text-3">${rqI18n.t('只读摘要')}</span>
         </div>
-        <div id="collab-sessions"><div class="fs-12 text-4" style="padding:10px 0">加载中…</div></div>
+        <div id="collab-sessions"><div class="fs-12 text-4" style="padding:10px 0">${rqI18n.t('加载中…')}</div></div>
       </div>
     </div>
     <div class="grid-2">
       <div class="card card-pad">
-        <div class="micro-label">当前业务目标</div>
-        <div id="collab-goal"><div class="fs-12 text-4" style="padding:8px 0">加载中…</div></div>
+        <div class="micro-label">${rqI18n.t('当前业务目标')}</div>
+        <div id="collab-goal"><div class="fs-12 text-4" style="padding:8px 0">${rqI18n.t('加载中…')}</div></div>
       </div>
       <div class="card card-pad">
-        <div class="micro-label" style="margin-bottom:10px">执行边界</div>
+        <div class="micro-label" style="margin-bottom:10px">${rqI18n.t('执行边界')}</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px 20px" class="fs-12">
           ${[
-            ['数据范围', '按部门面板绑定组织'],
-            ['运行方式', '辅助分析 · 结果人工确认'],
-            ['业务写入', '高风险操作先走审批'],
-            ['对外发送', '连接器单独授权'],
+            [rqI18n.t('数据范围'), rqI18n.t('按部门面板绑定组织')],
+            [rqI18n.t('运行方式'), rqI18n.t('辅助分析 · 结果人工确认')],
+            [rqI18n.t('业务写入'), rqI18n.t('高风险操作先走审批')],
+            [rqI18n.t('对外发送'), rqI18n.t('连接器单独授权')],
           ].map(([k, v]) => `<div class="flex" style="justify-content:space-between;gap:8px"><span class="text-3">${esc(k)}</span><span>${esc(v)}</span></div>`).join('')}
         </div>
       </div>
@@ -574,7 +574,7 @@ async function mountCollabWorkers(d) {
   const host = $('#collab-workers')
   const countEl = $('#collab-workers-count')
   if (!session.can('agent.read')) {
-    host.innerHTML = permHint('agent.read', '查看在线数字员工阵容')
+    host.innerHTML = permHint('agent.read', rqI18n.t('查看在线数字员工阵容'))
     countEl.textContent = ''
     return
   }
@@ -606,11 +606,11 @@ async function mountCollabSessions() {
   try {
     depts = (await api.get('/api/panel/depts')).depts ?? []
   } catch {
-    host.innerHTML = emptyHint('部门面板会话不可见：需要「panel.read」权限，或面板服务尚未在当前宿主启用。')
+    host.innerHTML = emptyHint(rqI18n.t('部门面板会话不可见：需要「panel.read」权限，或面板服务尚未在当前宿主启用。'))
     return
   }
   if (!depts.length) {
-    host.innerHTML = emptyHint('还没有部门面板——配置部门面板后，人机协作会话将在这里汇总展示。')
+    host.innerHTML = emptyHint(rqI18n.t('还没有部门面板——配置部门面板后，人机协作会话将在这里汇总展示。'))
     return
   }
   host.innerHTML = depts.slice(0, 6).map((dept) => `
@@ -628,14 +628,14 @@ async function mountCollabSessions() {
 async function mountCollabGoal() {
   const host = $('#collab-goal')
   if (!session.can('exec.read')) {
-    host.innerHTML = permHint('exec.read', '查看当前业务目标')
+    host.innerHTML = permHint('exec.read', rqI18n.t('查看当前业务目标'))
     return
   }
   let goals = []
   try { goals = (await api.get('/api/exec/goals')).goals ?? [] } catch { goals = [] }
   const goal = goals.find((g) => g.metric) ?? goals[0]
   if (!goal) {
-    host.innerHTML = emptyHint('暂无当前目标——在执行中枢登记目标后，这里展示协作围绕的业务目标。')
+    host.innerHTML = emptyHint(rqI18n.t('暂无当前目标——在执行中枢登记目标后，这里展示协作围绕的业务目标。'))
     return
   }
   host.innerHTML = `
@@ -649,7 +649,7 @@ async function mountCollabGoal() {
         <span class="fs-11 text-3" style="margin-left:6px">${esc(rqI18n.t('目标{unit}', { unit: goal.metricUnit ?? '' }))}</span>
       </div>
     </div>
-    <div style="margin-top:10px;text-align:right"><a href="#/exec?tab=goals" class="fs-11" style="color:var(--brand-600)">进入执行中枢 ›</a></div>`
+    <div style="margin-top:10px;text-align:right"><a href="#/exec?tab=goals" class="fs-11" style="color:var(--brand-600)">${rqI18n.t('进入执行中枢 ›')}</a></div>`
 }
 
 // ================================================================ Tab 5：ops 平台运行
@@ -657,50 +657,50 @@ async function renderOpsTab(body, d, isManager) {
   const trend = d.costTrend ?? []
   const riskCount = Number(d.alerts?.critical ?? 0) + Number(d.mcp?.unhealthyServices ?? 0)
   body.innerHTML = `
-    ${sectionHead({ label: 'PLATFORM / OPS', title: '平台运行', extra: '平台资源与治理口径 · 用量透明与内部成本穿透' })}
+    ${sectionHead({ label: 'PLATFORM / OPS', title: rqI18n.t('平台运行'), extra: rqI18n.t('平台资源与治理口径 · 用量透明与内部成本穿透') })}
     <div class="grid-cards g4 mb-14">
-      ${statCard({ label: '受管 AI 资产', value: fmtNum(managedTotal(d)), sub: rqI18n.t('Agent {a} · 应用 {b} · Skill {c} · MCP 在线 {d}', { a: fmtNum(d.agents?.total ?? 0), b: fmtNum(d.apps?.total ?? 0), c: fmtNum(d.skills?.total ?? 0), d: fmtNum(d.mcp?.onlineServices ?? 0) }) })}
-      ${statCard({ label: '累计调用', value: fmtNum(d.mcp?.totalCalls ?? 0), sub: rqI18n.t('成功率 {p} · P95 {l}ms', { p: fmtPct(d.mcp?.successRate ?? 1), l: fmtNum(d.mcp?.p95Latency ?? 0) }) })}
-      ${statCard({ label: 'Token 消耗（MCP 口径）', value: fmtNum(d.mcp?.tokens ?? 0), sub: rqI18n.t('计量管道幂等入账 · 近 {n} 日成本 {c}', { n: trend.length, c: fmtCost(trend.reduce((s, row) => s + row.costYuan, 0)) }) })}
-      ${statCard({ label: '风险', value: fmtNum(riskCount), sub: riskCount ? rqI18n.t('严重告警 {a} · MCP 熔断 {b}', { a: fmtNum(d.alerts?.critical ?? 0), b: fmtNum(d.mcp?.unhealthyServices ?? 0) }) : '无熔断项', tone: riskCount ? (Number(d.alerts?.critical ?? 0) > 0 ? 'crit' : 'warn') : '' })}
+      ${statCard({ label: rqI18n.t('受管 AI 资产'), value: fmtNum(managedTotal(d)), sub: rqI18n.t('Agent {a} · 应用 {b} · Skill {c} · MCP 在线 {d}', { a: fmtNum(d.agents?.total ?? 0), b: fmtNum(d.apps?.total ?? 0), c: fmtNum(d.skills?.total ?? 0), d: fmtNum(d.mcp?.onlineServices ?? 0) }) })}
+      ${statCard({ label: rqI18n.t('累计调用'), value: fmtNum(d.mcp?.totalCalls ?? 0), sub: rqI18n.t('成功率 {p} · P95 {l}ms', { p: fmtPct(d.mcp?.successRate ?? 1), l: fmtNum(d.mcp?.p95Latency ?? 0) }) })}
+      ${statCard({ label: rqI18n.t('Token 消耗（MCP 口径）'), value: fmtNum(d.mcp?.tokens ?? 0), sub: rqI18n.t('计量管道幂等入账 · 近 {n} 日成本 {c}', { n: trend.length, c: fmtCost(trend.reduce((s, row) => s + row.costYuan, 0)) }) })}
+      ${statCard({ label: rqI18n.t('风险'), value: fmtNum(riskCount), sub: riskCount ? rqI18n.t('严重告警 {a} · MCP 熔断 {b}', { a: fmtNum(d.alerts?.critical ?? 0), b: fmtNum(d.mcp?.unhealthyServices ?? 0) }) : rqI18n.t('无熔断项'), tone: riskCount ? (Number(d.alerts?.critical ?? 0) > 0 ? 'crit' : 'warn') : '' })}
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px" class="mb-14">
       <div class="card card-pad">
         <div class="card-head" style="margin-bottom:10px">
           <span class="card-title">${icon('barChart3', 15)} ${esc(rqI18n.t('用量趋势（近 {n} 天）', { n: trend.length }))}</span>
-          <div class="card-head-actions">${isManager ? `<a href="#/assets" class="fs-12">用量明细 ›</a>` : ''}</div>
+          <div class="card-head-actions">${isManager ? rqI18n.t('<a href="#/assets" class="fs-12">用量明细 ›</a>') : ''}</div>
         </div>
         <div id="ops-usage"></div>
       </div>
       <div class="card card-pad">
         <div class="card-head" style="margin-bottom:10px">
-          <span class="card-title">${icon('coins', 15)} 成本构成</span>
-          <span class="card-sub">按组织 · 内部成本参考</span>
+          <span class="card-title">${icon('coins', 15)} ${rqI18n.t('成本构成')}</span>
+          <span class="card-sub">${rqI18n.t('按组织 · 内部成本参考')}</span>
         </div>
-        <div id="ops-cost" style="display:flex;justify-content:center"><div class="fs-12 text-4" style="padding:20px 0">加载中…</div></div>
+        <div id="ops-cost" style="display:flex;justify-content:center"><div class="fs-12 text-4" style="padding:20px 0">${rqI18n.t('加载中…')}</div></div>
       </div>
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px" class="mb-14">
       <div class="card card-pad">
         <div class="card-head" style="margin-bottom:10px">
-          <span class="card-title">${icon('building2', 15)} 部门用量</span>
-          <span class="card-sub">本月 · tokens</span>
+          <span class="card-title">${icon('building2', 15)} ${rqI18n.t('部门用量')}</span>
+          <span class="card-sub">${rqI18n.t('本月 · tokens')}</span>
         </div>
         <div id="ops-depts"></div>
       </div>
       <div class="card card-pad">
         <div class="card-head" style="margin-bottom:10px">
-          <span class="card-title">${icon('fileCheck', 15)} 待办审批</span>
+          <span class="card-title">${icon('fileCheck', 15)} ${rqI18n.t('待办审批')}</span>
           <div class="card-head-actions">${session.can('approval.read') ? `<a href="#/approvals" class="fs-12">${esc(rqI18n.t('全部 ›'))}</a>` : ''}</div>
         </div>
         <div id="ops-approvals"></div>
       </div>
       <div class="card card-pad">
         <div class="card-head" style="margin-bottom:10px">
-          <span class="card-title">${icon('radio', 15)} 最近事件</span>
-          <div class="card-head-actions"><a href="#/audit?tab=logs" class="fs-12">审计 ›</a></div>
+          <span class="card-title">${icon('radio', 15)} ${rqI18n.t('最近事件')}</span>
+          <div class="card-head-actions"><a href="#/audit?tab=logs" class="fs-12">${rqI18n.t('审计 ›')}</a></div>
         </div>
         <div id="ops-events"></div>
       </div>
@@ -708,9 +708,9 @@ async function renderOpsTab(body, d, isManager) {
 
     <div class="card card-pad">
       <div class="card-head" style="margin-bottom:12px">
-        <span class="card-title">${icon('boxes', 15)} 资产健康速览</span>
+        <span class="card-title">${icon('boxes', 15)} ${rqI18n.t('资产健康速览')}</span>
         <div class="card-head-actions" style="display:flex;gap:8px">
-          <a href="#/assets" class="btn btn-default btn-sm">资产台账 ${icon('chevronRight', 12)}</a>
+          <a href="#/assets" class="btn btn-default btn-sm">${rqI18n.t('资产台账')} ${icon('chevronRight', 12)}</a>
         </div>
       </div>
       <div id="ops-fleet"></div>
@@ -724,18 +724,18 @@ async function renderOpsTab(body, d, isManager) {
       ${areaChart({ series: trend.map((row) => +(row.llmTokens / 10000).toFixed(1)), labels: trend.map((row) => String(row.key).slice(5)), unit: rqI18n.t('万 tokens / 日'), height: 170 })}
       <div class="flex fs-12 text-3" style="justify-content:space-between;border-top:1px solid var(--border);padding-top:10px;margin-top:8px">
         <span>${esc(rqI18n.t('成本参考合计'))} <span class="tnum mono" style="font-weight:600;color:var(--text-1)">${fmtCost(trend.reduce((s, row) => s + row.costYuan, 0))}</span>${esc(rqI18n.t(' / {n} 天', { n: trend.length }))}</span>
-        <span>按日归集 · 应用 → Agent → MCP 穿透</span>
+        <span>${rqI18n.t('按日归集 · 应用 → Agent → MCP 穿透')}</span>
       </div>`
   } else {
-    usageEl.innerHTML = emptyHint('暂无用量趋势数据——平台产生计量事件后，这里展示近 14 天 Token 消耗曲线。')
+    usageEl.innerHTML = emptyHint(rqI18n.t('暂无用量趋势数据——平台产生计量事件后，这里展示近 14 天 Token 消耗曲线。'))
   }
 
   // 成本构成 + 部门用量：月度用量报表（usage.read）双视图共用一次拉取
   if (isManager) {
     void mountOpsCostMix()
   } else {
-    $('#ops-cost').innerHTML = permHint('usage.read', '查看成本构成')
-    $('#ops-depts').innerHTML = permHint('usage.read', '查看部门用量分摊')
+    $('#ops-cost').innerHTML = permHint('usage.read', rqI18n.t('查看成本构成'))
+    $('#ops-depts').innerHTML = permHint('usage.read', rqI18n.t('查看部门用量分摊'))
   }
 
   // 待办审批 top3（approval.read 门控）
@@ -755,7 +755,7 @@ async function renderOpsTab(body, d, isManager) {
     <div class="flex fs-12" style="gap:8px;align-items:center;margin-top:12px;border:1px solid var(--danger);background:var(--danger-bg);color:var(--danger);border-radius:6px;padding:8px 12px">
       ${icon('shieldAlert', 14)}
       <span class="grow">${esc(rqI18n.t('{items}，建议优先巡检处理。', { items: circuit.join(rqI18n.t('；')) }))}</span>
-      <a href="#/mcp" style="color:var(--danger);text-decoration:underline;flex-shrink:0">去处理</a>
+      <a href="#/mcp" style="color:var(--danger);text-decoration:underline;flex-shrink:0">${rqI18n.t('去处理')}</a>
     </div>` : ''
 }
 
@@ -768,8 +768,8 @@ async function mountOpsCostMix() {
   const deptEl = $('#ops-depts')
   if (!costEl || !deptEl) return
   if (!byOrg.length) {
-    costEl.innerHTML = emptyHint('本月暂无组织维度成本数据。')
-    deptEl.innerHTML = emptyHint('本月暂无组织维度用量数据。')
+    costEl.innerHTML = emptyHint(rqI18n.t('本月暂无组织维度成本数据。'))
+    deptEl.innerHTML = emptyHint(rqI18n.t('本月暂无组织维度用量数据。'))
     return
   }
   const parts = byOrg.map((row, i) => ({
@@ -779,8 +779,8 @@ async function mountOpsCostMix() {
   })).filter((p) => p.value > 0)
   const totalYuan = parts.reduce((s, p) => s + p.value, 0)
   costEl.innerHTML = parts.length
-    ? donutCenter(parts, { centerLabel: '月成本参考', centerValue: fmtCost(totalYuan) })
-    : emptyHint('本月成本参考为零（零价快照口径或尚无计费事件）。')
+    ? donutCenter(parts, { centerLabel: rqI18n.t('月成本参考'), centerValue: fmtCost(totalYuan) })
+    : emptyHint(rqI18n.t('本月成本参考为零（零价快照口径或尚无计费事件）。'))
   deptEl.innerHTML = hBarList(
     byOrg.map((row) => ({ name: row.dimension, value: Number(row.tokens ?? 0), hint: rqI18n.t('{n} 次事件', { n: fmtNum(row.events ?? 0) }) })),
     { format: (v) => `${fmtNum(v)} tok` },
@@ -799,7 +799,7 @@ async function mountOpsEvents(d) {
             <span class="tl-dot"></span>
             <div style="min-width:0">
               <div class="fs-13 ellipsis" title="${esc(log.action)}">${esc(log.action)}</div>
-              <div class="fs-11 text-3 tnum">${timeAgo(log.createdAt)} · ${esc(log.actorName ?? '系统')}${log.result && log.result !== 'ok' ? ` · ${esc(log.result)}` : ''}</div>
+              <div class="fs-11 text-3 tnum">${timeAgo(log.createdAt)} · ${esc(log.actorName ?? rqI18n.t('系统'))}${log.result && log.result !== 'ok' ? ` · ${esc(log.result)}` : ''}</div>
             </div>
           </div>`).join('')}</div>`
         return
@@ -814,7 +814,7 @@ async function mountOpsEvents(d) {
         <div class="fs-13 ellipsis" title="${esc(eventLabel(event.name))}">${esc(eventLabel(event.name))}</div>
         <div class="fs-11 text-3 tnum">${timeAgo(event.at)}${event.payload ? ` · ${ellipsis(event.payload, 26)}` : ''}</div>
       </div>
-    </div>`).join('')}</div>` : emptyHint('暂无事件——平台事件将实时显示在这里。')
+    </div>`).join('')}</div>` : emptyHint(rqI18n.t('暂无事件——平台事件将实时显示在这里。'))
 }
 
 /** 资产健康速览：/api/fleet/ledger（WB 六类台账聚合）top10 → 总览派生分类卡。 */
@@ -857,7 +857,7 @@ async function mountOpsFleet(d) {
         <div class="tnum" style="font-size:18px;font-weight:600;margin-top:8px">${esc(c.main)}</div>
         <div class="fs-11 text-3">${esc(c.sub)}</div>
       </div>`).join('')}</div>
-    <div class="fs-11 text-4" style="margin-top:8px">分类速览（台账聚合端点未就绪时的降级视图）· 明细见资产台账</div>`
+    <div class="fs-11 text-4" style="margin-top:8px">${rqI18n.t('分类速览（台账聚合端点未就绪时的降级视图）· 明细见资产台账')}</div>`
   $$('[data-goto-assets]', host).forEach((tile) => { tile.onclick = () => { location.hash = '#/assets' } })
 }
 
@@ -866,7 +866,7 @@ async function mountOpsFleet(d) {
 async function mountDecisionRows(host, limit = 3) {
   if (!host) return
   if (!session.can('approval.read')) {
-    host.innerHTML = permHint('approval.read', '查看待办审批')
+    host.innerHTML = permHint('approval.read', rqI18n.t('查看待办审批'))
     return
   }
   let items = []
@@ -878,7 +878,7 @@ async function mountDecisionRows(host, limit = 3) {
     return
   }
   if (!items.length) {
-    host.innerHTML = emptyHint('当前没有待办审批——所有审批已处理完毕。')
+    host.innerHTML = emptyHint(rqI18n.t('当前没有待办审批——所有审批已处理完毕。'))
     return
   }
   host.innerHTML = items.map((item) => `
@@ -888,7 +888,7 @@ async function mountDecisionRows(host, limit = 3) {
         <div class="fs-13" style="font-weight:500" title="${esc(item.title)}">${ellipsis(item.title, 30)}</div>
         <div class="fs-11 text-3">${esc(rqI18n.t('{name} 发起 · {kind} · {time}', { name: item.requesterName ?? '—', kind: item.kind ?? '', time: timeAgo(item.createdAt) }))}</div>
       </div>
-      <span class="risk-pill ${item.riskLevel === 'high' ? 'risk-high' : 'risk-normal'}" style="flex-shrink:0">${item.riskLevel === 'high' ? '高风险' : '常规'}</span>
+      <span class="risk-pill ${item.riskLevel === 'high' ? 'risk-high' : 'risk-normal'}" style="flex-shrink:0">${item.riskLevel === 'high' ? rqI18n.t('高风险') : rqI18n.t('常规')}</span>
     </div>`).join('')
   $$('[data-approval]', host).forEach((row) => {
     row.onclick = () => { location.hash = `#/approvals?focus=${row.dataset.approval}` }
@@ -902,7 +902,7 @@ async function mountRecentCalls() {
   try {
     const recent = await api.get('/api/usage/recent?limit=5')
     if (!recent.items?.length) {
-      host.innerHTML = emptyHint('还没有调用记录——完成一次 AI 调用后，最近记录将显示在这里。')
+      host.innerHTML = emptyHint(rqI18n.t('还没有调用记录——完成一次 AI 调用后，最近记录将显示在这里。'))
       return
     }
     host.innerHTML = recent.items.map((item) => `
@@ -912,7 +912,7 @@ async function mountRecentCalls() {
         <span class="fs-11 text-4">${timeAgo(item.occurred_at)}</span>
       </div>`).join('')
   } catch {
-    host.innerHTML = `<div class="fs-12 text-4" style="padding:14px 0">最近调用加载失败</div>`
+    host.innerHTML = rqI18n.t('<div class="fs-12 text-4" style="padding:14px 0">最近调用加载失败</div>')
   }
 }
 
@@ -939,10 +939,10 @@ function deriveInsightText(d, execOv) {
 /** 总览派生异常行（无执行中枢洞察时的真实降级）。 */
 function deriveExceptions(d) {
   const rows = []
-  if ((d.mcp?.unhealthyServices ?? 0) > 0) rows.push({ name: rqI18n.t('MCP 熔断服务 {n} 个', { n: fmtNum(d.mcp.unhealthyServices) }), level: 'critical', chain: '调用按降级链路处理', owner: '平台运维' })
-  if ((d.alerts?.critical ?? 0) > 0) rows.push({ name: rqI18n.t('严重告警 {n} 条', { n: fmtNum(d.alerts.critical) }), level: 'critical', chain: '审计与告警中心', owner: '平台治理' })
-  else if ((d.alerts?.unread ?? 0) > 0) rows.push({ name: rqI18n.t('未读告警 {n} 条', { n: fmtNum(d.alerts.unread) }), level: 'warning', chain: '审计与告警中心', owner: '平台治理' })
-  if ((d.conflicts ?? 0) > 0) rows.push({ name: rqI18n.t('三方同步冲突 {n} 条', { n: fmtNum(d.conflicts) }), level: 'warning', chain: '组织同步 · 待确认', owner: '组织管理员' })
+  if ((d.mcp?.unhealthyServices ?? 0) > 0) rows.push({ name: rqI18n.t('MCP 熔断服务 {n} 个', { n: fmtNum(d.mcp.unhealthyServices) }), level: 'critical', chain: rqI18n.t('调用按降级链路处理'), owner: rqI18n.t('平台运维') })
+  if ((d.alerts?.critical ?? 0) > 0) rows.push({ name: rqI18n.t('严重告警 {n} 条', { n: fmtNum(d.alerts.critical) }), level: 'critical', chain: rqI18n.t('审计与告警中心'), owner: rqI18n.t('平台治理') })
+  else if ((d.alerts?.unread ?? 0) > 0) rows.push({ name: rqI18n.t('未读告警 {n} 条', { n: fmtNum(d.alerts.unread) }), level: 'warning', chain: rqI18n.t('审计与告警中心'), owner: rqI18n.t('平台治理') })
+  if ((d.conflicts ?? 0) > 0) rows.push({ name: rqI18n.t('三方同步冲突 {n} 条', { n: fmtNum(d.conflicts) }), level: 'warning', chain: rqI18n.t('组织同步 · 待确认'), owner: rqI18n.t('组织管理员') })
   return rows
 }
 
@@ -977,7 +977,7 @@ function permCard(title, point, message) {
       <div style="margin-bottom:10px;color:var(--text-4)">${icon('lock', 24)}</div>
       <div style="font-weight:600;margin-bottom:6px">${esc(title)}</div>
       <div class="fs-12 text-3">${esc(message)}</div>
-      <div class="fs-12 text-4" style="margin-top:6px">所需权限点：<span class="mono">${esc(point)}</span></div>
+      <div class="fs-12 text-4" style="margin-top:6px">${rqI18n.t('所需权限点：')}<span class="mono">${esc(point)}</span></div>
     </div>`
 }
 
@@ -1009,38 +1009,38 @@ function fmtDue(iso) {
 
 /** 事件名中文标签：字典命中优先；未收录事件按分段转译兜底（新事件不裸奔英文）。 */
 const EVENT_LABELS = {
-  'iam.user.frozen': '账号冻结', 'iam.user.activated': '账号启用', 'iam.org.changed': '组织变更',
-  'iam.permission.changed': '权限变更', 'iam.connector.synced': '通讯录同步',
-  'authn.token.issued': '令牌签发', 'authn.token.revoked': '令牌吊销',
-  'oidc.authorize.granted': 'SSO 授权通过', 'oidc.authorize.denied': 'SSO 授权拒绝',
-  'mcp.deployed': 'MCP 发布', 'mcp.offlined': 'MCP 下线', 'mcp.unhealthy': 'MCP 熔断', 'mcp.invoked': 'MCP 调用',
-  'behavior.recorded': '行为事件',
-  'connector.gateway.changed': '连接器网关变更', 'connector.gateway.synced': '连接器目录同步',
-  'connector.gateway.unhealthy': '连接器网关异常', 'connector.connected': 'SaaS 连接建立',
-  'connector.disconnected': 'SaaS 连接断开', 'connector.invoked': 'SaaS 连接器调用',
-  'connector.permgroup.changed': '连接器权限组变更',
-  'nas.registered': 'NAS 注册', 'nas.onlined': 'NAS 上线', 'nas.offlined': 'NAS 下线',
-  'skill.published': 'Skill 上架', 'skill.submitted': 'Skill 提交', 'skill.installed': 'Skill 安装', 'skill.deprecated': 'Skill 弃用',
-  'agent.registered': 'Agent 注册', 'agent.onlined': 'Agent 上线', 'agent.offlined': 'Agent 下线',
-  'app.registered': '应用注册', 'app.onlined': '应用发布', 'app.offlined': '应用下架', 'app.updated': '应用更新', 'app.archived': '应用归档',
-  'approval.created': '新建审批', 'approval.decided': '审批决策',
-  'audit.alert.fired': '触发告警',
-  'market.plugin.submitted': '插件提交', 'market.plugin.listed': '插件上架', 'market.plugin.installed': '插件安装',
-  'connect.code.created': '接入码生成', 'connect.client.enrolled': '客户端接入', 'connect.client.disabled': '客户端停用',
-  'platform.update.available': '发现平台更新', 'platform.update.applied': '平台更新完成',
+  'iam.user.frozen': rqI18n.t('账号冻结'), 'iam.user.activated': rqI18n.t('账号启用'), 'iam.org.changed': rqI18n.t('组织变更'),
+  'iam.permission.changed': rqI18n.t('权限变更'), 'iam.connector.synced': rqI18n.t('通讯录同步'),
+  'authn.token.issued': rqI18n.t('令牌签发'), 'authn.token.revoked': rqI18n.t('令牌吊销'),
+  'oidc.authorize.granted': rqI18n.t('SSO 授权通过'), 'oidc.authorize.denied': rqI18n.t('SSO 授权拒绝'),
+  'mcp.deployed': rqI18n.t('MCP 发布'), 'mcp.offlined': rqI18n.t('MCP 下线'), 'mcp.unhealthy': rqI18n.t('MCP 熔断'), 'mcp.invoked': rqI18n.t('MCP 调用'),
+  'behavior.recorded': rqI18n.t('行为事件'),
+  'connector.gateway.changed': rqI18n.t('连接器网关变更'), 'connector.gateway.synced': rqI18n.t('连接器目录同步'),
+  'connector.gateway.unhealthy': rqI18n.t('连接器网关异常'), 'connector.connected': rqI18n.t('SaaS 连接建立'),
+  'connector.disconnected': rqI18n.t('SaaS 连接断开'), 'connector.invoked': rqI18n.t('SaaS 连接器调用'),
+  'connector.permgroup.changed': rqI18n.t('连接器权限组变更'),
+  'nas.registered': rqI18n.t('NAS 注册'), 'nas.onlined': rqI18n.t('NAS 上线'), 'nas.offlined': rqI18n.t('NAS 下线'),
+  'skill.published': rqI18n.t('Skill 上架'), 'skill.submitted': rqI18n.t('Skill 提交'), 'skill.installed': rqI18n.t('Skill 安装'), 'skill.deprecated': rqI18n.t('Skill 弃用'),
+  'agent.registered': rqI18n.t('Agent 注册'), 'agent.onlined': rqI18n.t('Agent 上线'), 'agent.offlined': rqI18n.t('Agent 下线'),
+  'app.registered': rqI18n.t('应用注册'), 'app.onlined': rqI18n.t('应用发布'), 'app.offlined': rqI18n.t('应用下架'), 'app.updated': rqI18n.t('应用更新'), 'app.archived': rqI18n.t('应用归档'),
+  'approval.created': rqI18n.t('新建审批'), 'approval.decided': rqI18n.t('审批决策'),
+  'audit.alert.fired': rqI18n.t('触发告警'),
+  'market.plugin.submitted': rqI18n.t('插件提交'), 'market.plugin.listed': rqI18n.t('插件上架'), 'market.plugin.installed': rqI18n.t('插件安装'),
+  'connect.code.created': rqI18n.t('接入码生成'), 'connect.client.enrolled': rqI18n.t('客户端接入'), 'connect.client.disabled': rqI18n.t('客户端停用'),
+  'platform.update.available': rqI18n.t('发现平台更新'), 'platform.update.applied': rqI18n.t('平台更新完成'),
 }
 function eventLabel(name, labels = EVENT_LABELS) {
   if (labels[name]) return rqI18n.t(labels[name])
   const SEGMENTS = {
-    iam: '账号', authn: '认证', oidc: '单点登录', mcp: 'MCP', nas: 'NAS', audit: '审计',
-    skill: '技能', agent: '智能体', app: '应用', usage: '用量', market: '市场',
-    platform: '平台', approval: '审批', connector: '连接器', console: '控制台', connect: '接入',
-    behavior: '行为', user: '用户', org: '组织', permission: '权限', token: '令牌', gateway: '网关', permgroup: '权限组',
-    created: '创建', changed: '变更', issued: '签发', revoked: '吊销', deployed: '发布', onlined: '上线',
-    offlined: '下线', unhealthy: '异常', invoked: '调用', connected: '连接', disconnected: '断开',
-    submitted: '提交', published: '上架', installed: '安装', deprecated: '弃用', registered: '注册',
-    updated: '更新', archived: '归档', granted: '通过', denied: '拒绝', fired: '触发', synced: '同步',
-    available: '可更新', applied: '已应用', settled: '结算', enrolled: '接入', disabled: '停用', frozen: '冻结', activated: '启用',
+    iam: rqI18n.t('账号'), authn: rqI18n.t('认证'), oidc: rqI18n.t('单点登录'), mcp: 'MCP', nas: 'NAS', audit: rqI18n.t('审计'),
+    skill: rqI18n.t('技能'), agent: rqI18n.t('智能体'), app: rqI18n.t('应用'), usage: rqI18n.t('用量'), market: rqI18n.t('市场'),
+    platform: rqI18n.t('平台'), approval: rqI18n.t('审批'), connector: rqI18n.t('连接器'), console: rqI18n.t('控制台'), connect: rqI18n.t('接入'),
+    behavior: rqI18n.t('行为'), user: rqI18n.t('用户'), org: rqI18n.t('组织'), permission: rqI18n.t('权限'), token: rqI18n.t('令牌'), gateway: rqI18n.t('网关'), permgroup: rqI18n.t('权限组'),
+    created: rqI18n.t('创建'), changed: rqI18n.t('变更'), issued: rqI18n.t('签发'), revoked: rqI18n.t('吊销'), deployed: rqI18n.t('发布'), onlined: rqI18n.t('上线'),
+    offlined: rqI18n.t('下线'), unhealthy: rqI18n.t('异常'), invoked: rqI18n.t('调用'), connected: rqI18n.t('连接'), disconnected: rqI18n.t('断开'),
+    submitted: rqI18n.t('提交'), published: rqI18n.t('上架'), installed: rqI18n.t('安装'), deprecated: rqI18n.t('弃用'), registered: rqI18n.t('注册'),
+    updated: rqI18n.t('更新'), archived: rqI18n.t('归档'), granted: rqI18n.t('通过'), denied: rqI18n.t('拒绝'), fired: rqI18n.t('触发'), synced: rqI18n.t('同步'),
+    available: rqI18n.t('可更新'), applied: rqI18n.t('已应用'), settled: rqI18n.t('结算'), enrolled: rqI18n.t('接入'), disabled: rqI18n.t('停用'), frozen: rqI18n.t('冻结'), activated: rqI18n.t('启用'),
   }
   const translated = name.split('.').map((seg) => (SEGMENTS[seg] ? rqI18n.t(SEGMENTS[seg]) : seg)).join(' · ')
   return translated === name ? name : translated

@@ -4,6 +4,7 @@
  * 本骨架只做 tab 路由分发；对外导出面（renderIam）与迁出前一致。
  */
 import { $, $$ } from '../../ui.js'
+import rqI18n from '../../i18n.js'
 import { renderMembers } from './members.js'
 import { renderRoles } from './roles.js'
 import { renderGroups } from './groups.js'
@@ -16,17 +17,17 @@ export async function renderIam(content, params, ctx) {
     <div class="page-head">
       <div>
         <div class="micro-label">IAM / ORG</div>
-        <div class="page-title">组织与账号</div>
-        <div class="page-sub">一套身份贯穿 MCP / Agent / 应用 / Skill / 模型 / NAS——组织架构、账号生命周期、角色权限与三方同步，人是一切授权的主体。</div>
+        <div class="page-title">${rqI18n.t('组织与账号')}</div>
+        <div class="page-sub">${rqI18n.t('一套身份贯穿 MCP / Agent / 应用 / Skill / 模型 / NAS——组织架构、账号生命周期、角色权限与三方同步，人是一切授权的主体。')}</div>
       </div>
       <div class="page-actions" id="iam-actions"></div>
     </div>
     <div class="tabs" id="iam-tabs">
-      <div class="tab ${tab === 'members' ? 'active' : ''}" data-tab="members">组织成员</div>
-      <div class="tab ${tab === 'roles' ? 'active' : ''}" data-tab="roles">角色权限</div>
-      <div class="tab ${tab === 'groups' ? 'active' : ''}" data-tab="groups">用户组</div>
-      <div class="tab ${tab === 'connectors' ? 'active' : ''}" data-tab="connectors">三方集成</div>
-      <div class="tab ${tab === 'conflicts' ? 'active' : ''}" data-tab="conflicts">同步冲突 <span class="tab-count" id="conflict-count"></span></div>
+      <div class="tab ${tab === 'members' ? 'active' : ''}" data-tab="members">${rqI18n.t('组织成员')}</div>
+      <div class="tab ${tab === 'roles' ? 'active' : ''}" data-tab="roles">${rqI18n.t('角色权限')}</div>
+      <div class="tab ${tab === 'groups' ? 'active' : ''}" data-tab="groups">${rqI18n.t('用户组')}</div>
+      <div class="tab ${tab === 'connectors' ? 'active' : ''}" data-tab="connectors">${rqI18n.t('三方集成')}</div>
+      <div class="tab ${tab === 'conflicts' ? 'active' : ''}" data-tab="conflicts">${rqI18n.t('同步冲突')} <span class="tab-count" id="conflict-count"></span></div>
     </div>
     <div id="iam-body"></div>`
 

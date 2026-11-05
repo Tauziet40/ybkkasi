@@ -34,7 +34,7 @@ export function renderConnections(content, params, { standalone = false } = {}) 
     const connections = mount()
     const current = active()
     const rows = [
-      rowHtml({ id: LOCAL_ID, name: '本机宿主服务', base: PAGE_BASE }, current, true),
+      rowHtml({ id: LOCAL_ID, name: rqI18n.t('本机宿主服务'), base: PAGE_BASE }, current, true),
       ...connections.map((item) => rowHtml(item, current, false)),
     ].join('')
 
@@ -42,41 +42,41 @@ export function renderConnections(content, params, { standalone = false } = {}) 
       ${standalone ? `
         <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#f3f5f9;padding:24px">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px">
-            <img src="ybk-mark.png" alt="元冰可" style="width:40px;height:40px;border-radius:10px">
-            <div style="font-size:17px;font-weight:600">宿主服务连接</div>
+            <img src="ybk-mark.png" alt="${rqI18n.t('元冰可')}" style="width:40px;height:40px;border-radius:10px">
+            <div style="font-size:17px;font-weight:600">${rqI18n.t('宿主服务连接')}</div>
           </div>
           <div class="card" style="width:100%;max-width:720px" id="conn-card">` : `
         <div class="page-head">
           <div>
             <div class="micro-label">HOST CONNECTIONS</div>
-            <div class="page-title">宿主服务连接</div>
-            <div class="page-sub">控制台默认连接本机宿主服务；可手动配置其他宿主（如 http://192.168.0.7:7300），配置过即可一键切换，切换后页面自动刷新生效。</div>
+            <div class="page-title">${rqI18n.t('宿主服务连接')}</div>
+            <div class="page-sub">${rqI18n.t('控制台默认连接本机宿主服务')}；${rqI18n.t('可手动配置其他宿主')}（${rqI18n.t('如')} http://192.168.0.7:7300），${rqI18n.t('配置过即可一键切换')}，${rqI18n.t('切换后页面自动刷新生效')}。</div>
           </div>
         </div>
         <div class="card mb-20" id="conn-card">`}
-        <div class="card-head"><span class="card-title">${icon('server', 15)} 连接清单</span><span class="card-sub">当前：${esc(current.name)}${IS_LOCAL_HOST ? '' : '（远程）'}</span></div>
+        <div class="card-head"><span class="card-title">${icon('server', 15)} ${rqI18n.t('连接清单')}</span><span class="card-sub">${rqI18n.t('当前')}：${esc(current.name)}${IS_LOCAL_HOST ? '' : rqI18n.t('（远程）')}</span></div>
         <div class="card-body" style="padding-top:8px">
           <div id="conn-rows">${rows}</div>
           <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px">
-            <div class="fs-13" style="font-weight:600;margin-bottom:8px">${icon('plus', 14)} 新增连接</div>
+            <div class="fs-13" style="font-weight:600;margin-bottom:8px">${icon('plus', 14)} ${rqI18n.t('新增连接')}</div>
             <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
               <div style="flex:1;min-width:160px">
-                <label class="form-label">名称（留空取地址主机名）</label>
-                <input class="input" id="conn-new-name" placeholder="如：参考机 0.7">
+                <label class="form-label">${rqI18n.t('名称')}（${rqI18n.t('留空取地址主机名')}）</label>
+                <input class="input" id="conn-new-name" placeholder="${rqI18n.t('如：参考机 0.7')}">
               </div>
               <div style="flex:2;min-width:260px">
-                <label class="form-label">宿主服务地址</label>
-                <input class="input" id="conn-new-base" placeholder="http://192.168.0.7:7300（挂载形态含前缀，如 http://host:8801/rq）">
+                <label class="form-label">${rqI18n.t('宿主服务地址')}</label>
+                <input class="input" id="conn-new-base" placeholder="${rqI18n.t('http://192.168.0.7:7300（挂载形态含前缀，如 http://host:8801/rq）')}">
               </div>
-              <button class="btn btn-primary" id="conn-new-save">保存</button>
+              <button class="btn btn-primary" id="conn-new-save">${rqI18n.t('保存')}</button>
             </div>
-            <div class="form-hint" style="margin-top:8px">目标宿主需与本控台同代版本（数据面默认放行跨域）；登录账号、组织与权限均为目标宿主侧数据，切换后需按目标宿主重新登录。</div>
+            <div class="form-hint" style="margin-top:8px">${rqI18n.t('目标宿主需与本控台同代版本')}（${rqI18n.t('数据面默认放行跨域')}）；${rqI18n.t('登录账号')}、${rqI18n.t('组织与权限均为目标宿主侧数据')}，${rqI18n.t('切换后需按目标宿主重新登录')}。</div>
           </div>
           ${standalone ? '' : `
           <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px" id="conn-panels"></div>`}
         </div>
       </div>
-      ${standalone ? '<div style="margin-top:16px"><a class="fs-13" style="color:var(--brand-500);cursor:pointer" id="conn-back">${esc(rqI18n.t('← 返回登录'))}</a></div></div>' : ''}
+      ${standalone ? `<div style="margin-top:16px"><a class="fs-13" style="color:var(--brand-500);cursor:pointer" id="conn-back">${esc(rqI18n.t('← 返回登录'))}</a></div></div>` : ''}
     `
 
     $('#conn-back')?.addEventListener('click', () => { location.hash = '#/login' })
@@ -93,7 +93,7 @@ export function renderConnections(content, params, { standalone = false } = {}) 
     // 独立登录形态（无会话）不渲染——登记是登录后的管理动作。
     const panelsHost = $('#conn-panels')
     if (panelsHost) {
-      panelsHost.innerHTML = '<div class="fs-12 text-4">${esc(rqI18n.t('正在读取面板部门目录…'))}</div>'
+      panelsHost.innerHTML = `<div class="fs-12 text-4">${esc(rqI18n.t('正在读取面板部门目录…'))}</div>`
       renderPanelRegistry(panelsHost, { depts: panelDepts, onChange: render })
     }
 
@@ -112,13 +112,13 @@ export function renderConnections(content, params, { standalone = false } = {}) 
         <div class="fs-12 conn-probe" style="color:var(--text-3)"></div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn btn-ghost btn-sm" data-act="probe">${icon('activity', 13)} 测活</button>
+        <button class="btn btn-ghost btn-sm" data-act="probe">${icon('activity', 13)} ${rqI18n.t('测活')}</button>
         ${current.id === item.id
-          ? (isLocal ? '' : `<button class="btn btn-ghost btn-sm" data-act="switch" title="连接已变更时重新应用">${icon('refresh', 13)} 重新应用</button>`)
-          : `<button class="btn btn-primary btn-sm" data-act="switch">${icon('check', 13)} 切换</button>`}
+          ? (isLocal ? '' : `<button class="btn btn-ghost btn-sm" data-act="switch" title="${rqI18n.t('连接已变更时重新应用')}">${icon('refresh', 13)} ${rqI18n.t('重新应用')}</button>`)
+          : `<button class="btn btn-primary btn-sm" data-act="switch">${icon('check', 13)} ${rqI18n.t('切换')}</button>`}
         ${isLocal ? '' : `
           <button class="btn btn-ghost btn-sm" data-act="edit">${icon('edit', 13)}</button>
-          <button class="btn btn-ghost btn-sm" data-act="remove" title="删除">${icon('trash', 13)}</button>`}
+          <button class="btn btn-ghost btn-sm" data-act="remove" title="${rqI18n.t('删除')}">${icon('trash', 13)}</button>`}
       </div>
     </div>`
 
@@ -127,7 +127,7 @@ export function renderConnections(content, params, { standalone = false } = {}) 
       const id = row.dataset.id
       const isLocal = id === LOCAL_ID
       const item = isLocal
-        ? { id: LOCAL_ID, name: '本机宿主服务', base: PAGE_BASE }
+        ? { id: LOCAL_ID, name: rqI18n.t('本机宿主服务'), base: PAGE_BASE }
         : mount().find((entry) => entry.id === id)
       if (!item) return
       row.querySelector('[data-act="probe"]')?.addEventListener('click', async (event) => {
@@ -163,17 +163,17 @@ export function renderConnections(content, params, { standalone = false } = {}) 
     row.innerHTML = `
       <div style="flex:1;min-width:260px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
         <div style="flex:1;min-width:140px">
-          <label class="form-label">名称</label>
+          <label class="form-label">${rqI18n.t('名称')}</label>
           <input class="input" data-edit="name" value="${esc(item.name)}">
         </div>
         <div style="flex:2;min-width:240px">
-          <label class="form-label">宿主服务地址</label>
+          <label class="form-label">${rqI18n.t('宿主服务地址')}</label>
           <input class="input" data-edit="base" value="${esc(item.base)}">
         </div>
       </div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-primary btn-sm" data-act="save">保存</button>
-        <button class="btn btn-ghost btn-sm" data-act="cancel">取消</button>
+        <button class="btn btn-primary btn-sm" data-act="save">${rqI18n.t('保存')}</button>
+        <button class="btn btn-ghost btn-sm" data-act="cancel">${rqI18n.t('取消')}</button>
       </div>`
     row.querySelector('[data-act="cancel"]').addEventListener('click', render)
     row.querySelector('[data-act="save"]').addEventListener('click', () => {

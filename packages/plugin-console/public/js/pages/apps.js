@@ -16,7 +16,7 @@ import {
   miniStat, renderTopologyList, barChartSafe,
 } from './agents.js'
 
-const APP_TYPE = { web: ['Web 应用', 'globe'], h5: ['H5', 'app'], miniapp: ['小程序', 'app'], desktop: ['桌面端', 'server'], api: ['API 服务', 'plug'] }
+const APP_TYPE = { web: [rqI18n.t('Web 应用'), 'globe'], h5: ['H5', 'app'], miniapp: [rqI18n.t('小程序'), 'app'], desktop: [rqI18n.t('桌面端'), 'server'], api: [rqI18n.t('API 服务'), 'plug'] }
 
 const isIconUrl = (value) => /^https?:\/\//i.test(String(value ?? '').trim())
 
@@ -63,15 +63,15 @@ export async function renderApps(content, params, ctx) {
     <div class="page-head">
       <div>
         <div class="micro-label">AI APPS</div>
-        <div class="page-title">AI 应用</div>
-        <div class="page-sub">在 Agent 底座上扩展应用形态与访问入口；应用 → Agent → MCP/Skill 依赖一图穿透，成本链路可归集。</div>
+        <div class="page-title">${rqI18n.t('AI 应用')}</div>
+        <div class="page-sub">${rqI18n.t('在 Agent 底座上扩展应用形态与访问入口；应用 → Agent → MCP/Skill 依赖一图穿透，成本链路可归集。')}</div>
       </div>
       <div class="page-actions">
-        ${session.can('app.write') ? `<button class="btn btn-primary" id="app-add">${icon('plus', 14)}注册应用</button>` : ''}
+        ${session.can('app.write') ? `<button class="btn btn-primary" id="app-add">${icon('plus', 14)}${rqI18n.t('注册应用')}</button>` : ''}
       </div>
     </div>
     <div class="filter-bar">
-      <div class="search-input">${icon('search')}<input class="input" id="app-q" placeholder="搜索应用名称 / 标识"></div>
+      <div class="search-input">${icon('search')}<input class="input" id="app-q" placeholder="${rqI18n.t('搜索应用名称 / 标识')}"></div>
       <div class="chips" id="app-cats">
         <span class="chip active" data-c="">${esc(rqI18n.t('全部'))}</span>
         ${ASSET_CATEGORIES.map((cat) => `<span class="chip" data-c="${cat}">${esc(rqI18n.t(cat))}</span>`).join('')}
@@ -95,11 +95,11 @@ export async function renderApps(content, params, ctx) {
     if (!holder) return
     holder.innerHTML = ''
     if (!list.length) {
-      holder.appendChild(emptyState({ title: '没有匹配的 AI 应用', desc: '换个分类或关键字试试', icon: 'app' }))
+      holder.appendChild(emptyState({ title: rqI18n.t('没有匹配的 AI 应用'), desc: rqI18n.t('换个分类或关键字试试'), icon: 'app' }))
       return
     }
     for (const app of list) {
-      const [typeLabel_, typeIcon] = APP_TYPE[app.attrs['appType']] ?? ['应用', 'app']
+      const [typeLabel_, typeIcon] = APP_TYPE[app.attrs['appType']] ?? [rqI18n.t('应用'), 'app']
       const card = h(`
       <div class="res-card" data-id="${esc(app.id)}">
         <div class="res-card-top">
@@ -124,7 +124,7 @@ export async function renderApps(content, params, ctx) {
             <span class="metric">${icon('activity', 13)}${esc(rqI18n.t('会话 {n}', { n: fmtNum(app.metrics.sessions) }))}</span>
           </div>
           <div class="res-foot-side">
-            ${app.attrs['url'] ? `<a class="btn btn-ghost btn-sm" data-entry href="javascript:void(0)">${icon('external', 13)}打开</a>` : ''}
+            ${app.attrs['url'] ? `<a class="btn btn-ghost btn-sm" data-entry href="javascript:void(0)">${icon('external', 13)}${rqI18n.t('打开')}</a>` : ''}
             ${app.attrs['developerName'] ? `<span class="text-4">${esc(rqI18n.t('开发者 · {name}', { name: app.attrs['developerName'] }))}</span>` : ''}
           </div>
         </div>
@@ -173,31 +173,31 @@ async function openAppDetail(id, ctx) {
       </div>
 
       <div class="stat-grid mb-20" style="grid-template-columns:repeat(6,1fr)">
-        ${miniStat('eye', '今日 PV', fmtNum(app.metrics.pv ?? 0))}
-        ${miniStat('users', '今日 UV', fmtNum(app.metrics.uv ?? 0))}
-        ${miniStat('users', '今日 DAU', fmtNum(app.metrics.dau))}
-        ${miniStat('activity', '累计会话', fmtNum(app.metrics.sessions))}
-        ${miniStat('zap', '会话深度', rqI18n.t('{n} 轮', { n: app.metrics.avgDepth }))}
-        ${miniStat('trending', '7 日留存', fmtPct(app.metrics.retention7))}
+        ${miniStat('eye', rqI18n.t('今日 PV'), fmtNum(app.metrics.pv ?? 0))}
+        ${miniStat('users', rqI18n.t('今日 UV'), fmtNum(app.metrics.uv ?? 0))}
+        ${miniStat('users', rqI18n.t('今日 DAU'), fmtNum(app.metrics.dau))}
+        ${miniStat('activity', rqI18n.t('累计会话'), fmtNum(app.metrics.sessions))}
+        ${miniStat('zap', rqI18n.t('会话深度'), rqI18n.t('{n} 轮', { n: app.metrics.avgDepth }))}
+        ${miniStat('trending', rqI18n.t('7 日留存'), fmtPct(app.metrics.retention7))}
       </div>
 
       <div class="tabs" id="app-tabs">
-        <div class="tab active" data-tab="topology">编排拓扑</div>
-        <div class="tab" data-tab="metrics">应用指标</div>
-        <div class="tab" data-tab="cost">成本穿透</div>
-        <div class="tab" data-tab="caps">${icon('puzzle', 13)} MCP 能力</div>
+        <div class="tab active" data-tab="topology">${rqI18n.t('编排拓扑')}</div>
+        <div class="tab" data-tab="metrics">${rqI18n.t('应用指标')}</div>
+        <div class="tab" data-tab="cost">${rqI18n.t('成本穿透')}</div>
+        <div class="tab" data-tab="caps">${icon('puzzle', 13)} ${rqI18n.t('MCP 能力')}</div>
         <div class="tab" data-tab="creds">${icon('lock', 13)} ${esc(rqI18n.t('外部凭证'))}</div>
-        <div class="tab" data-tab="lifecycle">生命周期</div>
-        <div class="tab" data-tab="sso">${icon('key', 13)} SSO 配置${app.sso ? (app.sso.status === 'active' ? '' : ' ⚠') : ''}</div>
+        <div class="tab" data-tab="lifecycle">${rqI18n.t('生命周期')}</div>
+        <div class="tab" data-tab="sso">${icon('key', 13)} ${rqI18n.t('SSO 配置')}${app.sso ? (app.sso.status === 'active' ? '' : ' ⚠') : ''}</div>
       </div>
       <div id="app-tab-body"></div>`,
     foot: (app.availableTransitions.map((t) => {
       const isL4 = t.action === 'online' || t.action === 'offline'
       return `<button class="btn ${isL4 ? 'btn-primary' : 'btn-default'}" data-action="${esc(t.action)}">${icon(t.action === 'online' ? 'play' : t.action === 'offline' ? 'alert' : 'chevronRight', 14)}${esc(t.label)}</button>`
     }).join('') || `<button class="btn btn-default" disabled>${esc(rqI18n.t('终态'))}</button>`)
-      + `<button class="btn btn-default" id="app-onboard">${icon('book', 14)}生成接入提示词</button>`
-      + `<button class="btn btn-default" id="app-edit">${icon('edit', 14)}编辑资料</button>`
-      + (['draft', 'archived'].includes(app.status) ? `<button class="btn btn-danger-ghost" id="app-delete">${icon('trash', 14)}删除</button>` : ''),
+      + `<button class="btn btn-default" id="app-onboard">${icon('book', 14)}${rqI18n.t('生成接入提示词')}</button>`
+      + `<button class="btn btn-default" id="app-edit">${icon('edit', 14)}${rqI18n.t('编辑资料')}</button>`
+      + (['draft', 'archived'].includes(app.status) ? `<button class="btn btn-danger-ghost" id="app-delete">${icon('trash', 14)}${rqI18n.t('删除')}</button>` : ''),
   })
 
   const tabBody = drawer.body.querySelector('#app-tab-body')
@@ -207,32 +207,32 @@ async function openAppDetail(id, ctx) {
     if (tab === 'topology') {
       tabBody.innerHTML = `
         <div class="card card-pad mb-14">
-          <div class="card-title mb-14">${icon('gitBranch', 14)} 依赖拓扑（应用 → Agent → MCP/Skill）</div>
+          <div class="card-title mb-14">${icon('gitBranch', 14)} ${rqI18n.t('依赖拓扑（应用 → Agent → MCP/Skill）')}</div>
           ${topologySvg(app.topology)}
-          <div class="form-hint mt-8">异常节点标红；一图穿透到底层能力，出问题可快速定位层级。</div>
+          <div class="form-hint mt-8">${rqI18n.t('异常节点标红；一图穿透到底层能力，出问题可快速定位层级。')}</div>
         </div>
         <div class="card card-pad">
-          <div class="card-title mb-8">结构化视图</div>
+          <div class="card-title mb-8">${rqI18n.t('结构化视图')}</div>
           ${renderTopologyList(app.topology)}
         </div>
         ${app.impact.length ? `
           <div class="card card-pad mt-14" style="border-color:var(--warn-border);background:var(--warn-bg)">
-            <div class="card-title mb-8">${icon('alert', 14)} 影响面（若下架）</div>
+            <div class="card-title mb-8">${icon('alert', 14)} ${rqI18n.t('影响面（若下架）')}</div>
             ${app.impact.map((i) => `<div class="fs-13" style="padding:3px 0">${esc(rqI18n.t('· {name}（{type}）', { name: i.name, type: rqI18n.t(typeLabel(i.type)) }))}</div>`).join('')}
           </div>` : ''}`
     }
     if (tab === 'metrics') {
       tabBody.innerHTML = `
         <div class="card card-pad mb-14">
-          <div class="card-title mb-8">近 14 天 UV / DAU（日去重口径）</div>
+          <div class="card-title mb-8">${rqI18n.t('近 14 天 UV / DAU（日去重口径）')}</div>
           ${lineChart([app.metrics.series.map((s) => s.uv ?? 0), app.metrics.series.map((s) => s.dau)], { width: 640, height: 150, colors: ['#10b981', '#0052D9'], labels: ['UV', 'DAU'] })}
         </div>
         <div class="card card-pad mb-14">
-          <div class="card-title mb-8">近 14 天 PV（页面浏览量）</div>
+          <div class="card-title mb-8">${rqI18n.t('近 14 天 PV（页面浏览量）')}</div>
           ${barChartSafe(app.metrics.series.map((s) => ({ label: s.date, value: s.pv ?? 0 })), 640, 150)}
         </div>
         <div class="card card-pad">
-          <div class="card-title mb-8">近 14 天会话数</div>
+          <div class="card-title mb-8">${rqI18n.t('近 14 天会话数')}</div>
           ${barChartSafe(app.metrics.series.map((s) => ({ label: s.date, value: s.sessions })), 640, 150)}
         </div>`
     }
@@ -240,8 +240,8 @@ async function openAppDetail(id, ctx) {
       const total = app.cost.reduce((s, row) => s + row.costYuan, 0)
       tabBody.innerHTML = `
         <div class="flex-between mb-14">
-          <div><span class="fs-12 text-3">累计成本</span><div style="font-size:22px;font-weight:700">${fmtCost(total)}</div></div>
-          <span class="fs-12 text-3">应用 → Agent → MCP/模型 穿透归集</span>
+          <div><span class="fs-12 text-3">${rqI18n.t('累计成本')}</span><div style="font-size:22px;font-weight:700">${fmtCost(total)}</div></div>
+          <span class="fs-12 text-3">${rqI18n.t('应用 → Agent → MCP/模型 穿透归集')}</span>
         </div>
         ${app.cost.map((row) => `
           <div class="flex" style="padding:10px 0;border-bottom:1px solid var(--border)">
@@ -283,10 +283,10 @@ async function openAppDetail(id, ctx) {
       if (transition.action === 'online' || transition.action === 'offline') {
         const isOnline = transition.action === 'online'
         const result = await confirmDialog({
-          title: isOnline ? '应用发布上线（L4）' : '应用下架（L4）',
+          title: isOnline ? rqI18n.t('应用发布上线（L4）') : rqI18n.t('应用下架（L4）'),
           requireReason: !isOnline,
           danger: !isOnline,
-          confirmText: '提交审批',
+          confirmText: rqI18n.t('提交审批'),
           message: isOnline
             ? rqI18n.t('发布 <b>{name}</b> 需要另一管理员审批确认。', { name: esc(app.name) })
             : rqI18n.t('下架 <b>{name}</b> 后终端用户立即无法访问，机器凭证同步吊销。', { name: esc(app.name) }),
@@ -318,7 +318,7 @@ async function openAppDetail(id, ctx) {
   const deleteBtn = drawer.el.querySelector('#app-delete')
   if (deleteBtn) deleteBtn.onclick = async () => {
     const result = await confirmDialog({
-      title: rqI18n.t('删除应用 · {name}', { name: app.name }), requireReason: true, danger: true, confirmText: '确认删除',
+      title: rqI18n.t('删除应用 · {name}', { name: app.name }), requireReason: true, danger: true, confirmText: rqI18n.t('确认删除'),
       message: rqI18n.t('将永久删除 <b>{name}</b>：清除编排依赖、禁用 SSO 客户端与机器凭证，操作不可恢复；指标与审计数据保留。', { name: esc(app.name) }),
     })
     if (!result) return
@@ -336,18 +336,18 @@ function renderSsoTab(holder, app, ctx) {
   if (!sso) {
     holder.innerHTML = `
       <div class="card card-pad">
-        <div class="card-title mb-8">${icon('key', 14)} 应用身份纳管（SSO）</div>
+        <div class="card-title mb-8">${icon('key', 14)} ${rqI18n.t('应用身份纳管（SSO）')}</div>
         <div class="fs-13 text-2 mb-8" style="line-height:1.9">
-          签发 OIDC 客户端后，应用即可按标准协议接入平台统一身份：
+          ${rqI18n.t('签发 OIDC 客户端后，应用即可按标准协议接入平台统一身份：')}
           <div class="muted-box mt-8" style="font-size:12.5px">
-            ① 授权码模式跳转 <code class="mono">${esc(app.sso?.discovery?.authorization_endpoint ?? '/oauth/authorize')}</code>（强制 PKCE S256）<br>
-            ② <code class="mono">code</code> 换 <code class="mono">id_token / access_token</code>（Basic 或 Post 认证）<br>
-            ③ <code class="mono">access_token</code> 调 <code class="mono">/oauth/userinfo</code> 取用户身份（sub / org / roles / tenant），业务权限应用内自理
+            ${rqI18n.t('① 授权码模式跳转')} <code class="mono">${esc(app.sso?.discovery?.authorization_endpoint ?? '/oauth/authorize')}</code>${rqI18n.t('（强制 PKCE S256）')}<br>
+            ② <code class="mono">code</code> ${rqI18n.t('换')} <code class="mono">id_token / access_token</code>${rqI18n.t('（Basic 或 Post 认证）')}<br>
+            ③ <code class="mono">access_token</code> ${rqI18n.t('调')} <code class="mono">/oauth/userinfo</code> ${rqI18n.t('取用户身份（sub / org / roles / tenant），业务权限应用内自理')}
           </div>
         </div>
         ${enforced ? `<div class="muted-box mb-14" style="display:flex;gap:8px;border-color:var(--warn-border);background:var(--warn-bg)">${icon('alert', 15)}<span><b>${esc(rqI18n.t('{type} 形态应用上线门禁', { type: app.attrs['appType'] }))}</b>${esc(rqI18n.t('：未完成 SSO 签发前，上线审批将被拒绝。'))}</span></div>` : ''}
-        <button class="btn btn-primary" id="sso-issue">${icon('key', 14)}签发 SSO 客户端</button>
-        <a class="btn btn-default" href="https://github.com/01men/ybkk-AIOS/blob/main/docs/app-sso-integration.md" target="_blank" style="margin-left:8px">接入文档</a>
+        <button class="btn btn-primary" id="sso-issue">${icon('key', 14)}${rqI18n.t('签发 SSO 客户端')}</button>
+        <a class="btn btn-default" href="https://github.com/01men/ybkk-AIOS/blob/main/docs/app-sso-integration.md" target="_blank" style="margin-left:8px">${rqI18n.t('接入文档')}</a>
         <div class="form-hint mt-8">${esc(rqI18n.t('本机联调免控制台：回调地址为环回（127.0.0.1 / localhost / 0.0.0.0）时，应用机器凭证可直接'))} <code class="mono">POST /api/apps/${esc(app.id)}/sso-client</code> ${esc(rqI18n.t('自助签发并一次性取回 secret（改回调 PATCH 同路径，换 secret POST …/rotate）。'))}</div>
       </div>
       ${entryDirectCardHtml(app)}`
@@ -359,20 +359,20 @@ function renderSsoTab(holder, app, ctx) {
   holder.innerHTML = `
     <div class="card card-pad mb-14">
       <div class="flex-between mb-8">
-        <div class="card-title">${icon('key', 14)} 已签发客户端 ${statusBadge(active ? 'active' : 'frozen', active ? '使用中' : '已禁用')}</div>
-        <span class="badge ${sso.clientType === 'public' ? 'badge-purple' : 'badge-info'} no-dot">${sso.clientType === 'public' ? 'public（免 secret · 强制 PKCE）' : 'confidential'}</span>
+        <div class="card-title">${icon('key', 14)} ${rqI18n.t('已签发客户端')} ${statusBadge(active ? 'active' : 'frozen', active ? rqI18n.t('使用中') : rqI18n.t('已禁用'))}</div>
+        <span class="badge ${sso.clientType === 'public' ? 'badge-purple' : 'badge-info'} no-dot">${sso.clientType === 'public' ? rqI18n.t('public（免 secret · 强制 PKCE）') : 'confidential'}</span>
       </div>
       <div class="desc-grid mb-14">
-        <div class="desc-item"><span class="k">client_id</span><span class="v mono">${esc(sso.clientId)} <button class="btn btn-ghost btn-sm" id="sso-copy-id">复制</button></span></div>
-        <div class="desc-item"><span class="k">关联应用</span><span class="v">${esc(sso.refAppName ?? app.name)}</span></div>
-        <div class="desc-item"><span class="k">签发时间</span><span class="v">${fmtTime(sso.createdAt)}</span></div>
+        <div class="desc-item"><span class="k">client_id</span><span class="v mono">${esc(sso.clientId)} <button class="btn btn-ghost btn-sm" id="sso-copy-id">${rqI18n.t('复制')}</button></span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('关联应用')}</span><span class="v">${esc(sso.refAppName ?? app.name)}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('签发时间')}</span><span class="v">${fmtTime(sso.createdAt)}</span></div>
       </div>
       <div class="form-item">
-        <label class="form-label">回调地址（redirect_uris，每行一个；https://，或 http:// 内网/本机地址）</label>
+        <label class="form-label">${rqI18n.t('回调地址（redirect_uris，每行一个；https://，或 http:// 内网/本机地址）')}</label>
         <textarea class="form-control mono" id="sso-redirects" rows="2">${esc(sso.redirectUris.join('\n'))}</textarea>
       </div>
       <div class="form-item">
-        <label class="form-label">登出回跳白名单（post_logout_redirect_uris，每行一个，可空）</label>
+        <label class="form-label">${rqI18n.t('登出回跳白名单（post_logout_redirect_uris，每行一个，可空）')}</label>
         <textarea class="form-control mono" id="sso-postlogouts" rows="2">${esc((sso.postLogoutUris ?? []).join('\n'))}</textarea>
       </div>
       <label class="flex" style="gap:8px;font-size:13px;margin:6px 0 12px;cursor:pointer">
@@ -380,8 +380,8 @@ function renderSsoTab(holder, app, ctx) {
         <span>${esc(rqI18n.t('授权页要求用户显式勾选同意（对外部应用建议开启）'))}</span>
       </label>
       <div class="flex" style="gap:8px;flex-wrap:wrap">
-        <button class="btn btn-primary" id="sso-save">${icon('check', 14)}保存配置</button>
-        ${sso.clientType !== 'public' ? `<button class="btn btn-default" id="sso-rotate">${icon('refresh', 14)}轮换 secret</button>` : ''}
+        <button class="btn btn-primary" id="sso-save">${icon('check', 14)}${rqI18n.t('保存配置')}</button>
+        ${sso.clientType !== 'public' ? `<button class="btn btn-default" id="sso-rotate">${icon('refresh', 14)}${rqI18n.t('轮换 secret')}</button>` : ''}
         ${active
           ? `<button class="btn btn-danger-ghost" id="sso-disable">${esc(rqI18n.t('禁用客户端'))}</button>`
           : `<button class="btn btn-primary" id="sso-enable">${esc(rqI18n.t('启用客户端'))}</button>`}
@@ -389,7 +389,7 @@ function renderSsoTab(holder, app, ctx) {
       ${!active && enforced ? `<div class="muted-box mt-8" style="display:flex;gap:8px;border-color:var(--warn-border);background:var(--warn-bg)">${icon('alert', 15)}<span>${esc(rqI18n.t('客户端处于禁用状态：{type} 形态应用的上线门禁将被阻断。', { type: app.attrs['appType'] }))}</span></div>` : ''}
     </div>
     <div class="card card-pad">
-      <div class="card-title mb-8">${icon('plug', 14)} 接入端点（discovery）</div>
+      <div class="card-title mb-8">${icon('plug', 14)} ${rqI18n.t('接入端点（discovery）')}</div>
       <div class="desc-grid">
         <div class="desc-item"><span class="k">issuer</span><span class="v mono">${esc(sso.discovery.issuer)}</span></div>
         <div class="desc-item"><span class="k">authorize</span><span class="v mono">${esc(sso.discovery.authorization_endpoint)}</span></div>
@@ -397,8 +397,8 @@ function renderSsoTab(holder, app, ctx) {
         <div class="desc-item"><span class="k">userinfo</span><span class="v mono">${esc(sso.discovery.userinfo_endpoint)}</span></div>
       </div>
       <div class="flex mt-8" style="gap:8px">
-        <button class="btn btn-default btn-sm" id="sso-copy-discovery">复制 discovery 地址</button>
-        <a class="btn btn-default btn-sm" href="https://github.com/01men/ybkk-AIOS/blob/main/docs/app-sso-integration.md" target="_blank">接入文档</a>
+        <button class="btn btn-default btn-sm" id="sso-copy-discovery">${rqI18n.t('复制 discovery 地址')}</button>
+        <a class="btn btn-default btn-sm" href="https://github.com/01men/ybkk-AIOS/blob/main/docs/app-sso-integration.md" target="_blank">${rqI18n.t('接入文档')}</a>
       </div>
       <div class="form-hint mt-8">${esc(rqI18n.t('应用侧按 OIDC 标准接入（openid-client / oidc-client-ts 一行 discovery 驱动）；id_token 验签公钥见 JWKS：'))}<code class="mono">${esc(sso.discovery.issuer)}/.well-known/jwks.json</code></div>
     </div>
@@ -452,25 +452,25 @@ function entryDirectCardHtml(app) {
   if (!app.attrs['url']) {
     return `
       <div class="card card-pad mt-14">
-        <div class="card-title mb-8">${icon('external', 14)} 平台直达（entry-ticket）</div>
-        <div class="form-hint">未登记访问地址（attrs.url）——登记后控制台即可带平台身份直达应用。</div>
+        <div class="card-title mb-8">${icon('external', 14)} ${rqI18n.t('平台直达（entry-ticket）')}</div>
+        <div class="form-hint">${rqI18n.t('未登记访问地址（attrs.url）——登记后控制台即可带平台身份直达应用。')}</div>
       </div>`
   }
   return `
     <div class="card card-pad mt-14">
       <div class="flex-between mb-8">
-        <div class="card-title">${icon('external', 14)} 平台直达（entry-ticket）</div>
-        <span class="badge badge-ok no-dot">已启用</span>
+        <div class="card-title">${icon('external', 14)} ${rqI18n.t('平台直达（entry-ticket）')}</div>
+        <span class="badge badge-ok no-dot">${rqI18n.t('已启用')}</span>
       </div>
       <div class="desc-grid mb-14">
-        <div class="desc-item"><span class="k">访问地址</span><span class="v mono">${esc(app.attrs['url'])}</span></div>
-        <div class="desc-item"><span class="k">兑换端点</span><span class="v mono">POST /api/authn/entry-tickets/redeem</span></div>
-        <div class="desc-item"><span class="k">票据时效</span><span class="v">一次性 · 短时（默认 120s）</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('访问地址')}</span><span class="v mono">${esc(app.attrs['url'])}</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('兑换端点')}</span><span class="v mono">POST /api/authn/entry-tickets/redeem</span></div>
+        <div class="desc-item"><span class="k">${rqI18n.t('票据时效')}</span><span class="v">${rqI18n.t('一次性 · 短时（默认 120s）')}</span></div>
       </div>
       <div class="flex" style="gap:8px">
-        <button class="btn btn-primary" id="sso-entry-open">${icon('external', 14)}带平台身份打开应用</button>
+        <button class="btn btn-primary" id="sso-entry-open">${icon('external', 14)}${rqI18n.t('带平台身份打开应用')}</button>
       </div>
-      <div class="form-hint mt-8">「打开应用」按钮已升级为带平台身份直达：签发一次性票据后以 <code class="mono">#entry_ticket=…</code> 打开，应用前端兑换平台身份；与上方标准 OIDC 授权码接入互不影响。</div>
+      <div class="form-hint mt-8">${rqI18n.t('「打开应用」按钮已升级为带平台身份直达：签发一次性票据后以')} <code class="mono">#entry_ticket=…</code> ${rqI18n.t('打开，应用前端兑换平台身份；与上方标准 OIDC 授权码接入互不影响。')}</div>
     </div>`
 }
 
@@ -593,13 +593,13 @@ function openIssueSsoModal(app, ctx) {
   const modal = openModal({
     title: rqI18n.t('签发 SSO 客户端 · {name}', { name: app.name }), wide: true,
     body: `
-      <div class="muted-box mb-14" style="display:flex;gap:8px">${icon('info', 15)}<span>client_secret 仅签发后展示一次；应用按 OIDC 授权码模式接入（强制 PKCE S256）。</span></div>
+      <div class="muted-box mb-14" style="display:flex;gap:8px">${icon('info', 15)}<span>${rqI18n.t('client_secret 仅签发后展示一次；应用按 OIDC 授权码模式接入（强制 PKCE S256）。')}</span></div>
       <div class="form-grid">
-        ${field('回调地址 redirect_uris（每行一个）', `
-          <textarea class="form-control mono" name="redirectUris" rows="2" placeholder="https://app.example.com/auth/cb&#10;http://192.168.0.7:8080/auth/cb${esc(rqI18n.t('（内网）'))}&#10;http://localhost:3000/cb${esc(rqI18n.t('（本机调试）'))}"></textarea>`, { required: true, full: true, hint: 'https:// 任意主机；http:// 仅限内网（localhost / 127.0.0.1 / 10.x / 172.16-31.x / 192.168.x）' })}
-        ${field('客户端类型', selectField('clientType', [
-          { value: 'confidential', label: 'confidential —— 有后端，持有 secret（推荐）' },
-          { value: 'public', label: 'public —— 纯前端 SPA，免 secret（强制 PKCE、不发 refresh）' },
+        ${field(rqI18n.t('回调地址 redirect_uris（每行一个）'), `
+          <textarea class="form-control mono" name="redirectUris" rows="2" placeholder="https://app.example.com/auth/cb&#10;http://192.168.0.7:8080/auth/cb${esc(rqI18n.t('（内网）'))}&#10;http://localhost:3000/cb${esc(rqI18n.t('（本机调试）'))}"></textarea>`, { required: true, full: true, hint: rqI18n.t('https:// 任意主机；http:// 仅限内网（localhost / 127.0.0.1 / 10.x / 172.16-31.x / 192.168.x）') })}
+        ${field(rqI18n.t('客户端类型'), selectField('clientType', [
+          { value: 'confidential', label: rqI18n.t('confidential —— 有后端，持有 secret（推荐）') },
+          { value: 'public', label: rqI18n.t('public —— 纯前端 SPA，免 secret（强制 PKCE、不发 refresh）') },
         ]), { full: true })}
         <label class="flex" style="gap:8px;font-size:13px;cursor:pointer">
           <input type="checkbox" name="consentRequired" style="accent-color:var(--brand-500)">
@@ -628,11 +628,11 @@ function openIssueSsoModal(app, ctx) {
 /** 一次性 secret 展示弹窗（签发 / 轮换共用）。 */
 function showSsoSecret({ clientId, clientSecret, note }) {
   openModal({
-    title: 'SSO 凭据（仅此一次展示）',
+    title: rqI18n.t('SSO 凭据（仅此一次展示）'),
     body: `
-      <div class="form-hint" style="margin-bottom:10px;color:var(--danger)">请立即复制保存，关闭后无法再次查看 client_secret。</div>
+      <div class="form-hint" style="margin-bottom:10px;color:var(--danger)">${rqI18n.t('请立即复制保存，关闭后无法再次查看 client_secret。')}</div>
       <div class="code-block">client_id:     ${esc(clientId)}
-${clientSecret ? `client_secret: ${esc(clientSecret)}` : '（public 客户端无 secret，凭 PKCE 保护）'}</div>
+${clientSecret ? `client_secret: ${esc(clientSecret)}` : rqI18n.t('（public 客户端无 secret，凭 PKCE 保护）')}</div>
       <div class="form-hint mt-8">${esc(note ?? '')}</div>`,
     foot: `<button class="btn btn-primary" data-ok>${esc(rqI18n.t('已保存'))}</button>`,
   })
@@ -706,19 +706,19 @@ function clip(text, max) {
 /** 编辑应用资料（头像/开发者/描述/访问地址）：与注册白名单同源，PATCH attrs；开发者空选表示清除。 */
 function openAppEdit(app, ctx) {
   void api.get('/api/apps/developer-options').catch(() => ({ options: [] })).then((devData) => {
-    const devOptions = (devData.options ?? []).map((u) => ({ value: u.id, label: rqI18n.t('{name}（@{user}）', { name: u.name, user: u.username }), group: u.orgName || '未分组' }))
+    const devOptions = (devData.options ?? []).map((u) => ({ value: u.id, label: rqI18n.t('{name}（@{user}）', { name: u.name, user: u.username }), group: u.orgName || rqI18n.t('未分组') }))
     const modal = openModal({
       title: rqI18n.t('编辑应用资料 · {name}', { name: app.name }), wide: true,
       body: `
         <div class="form-grid">
-          ${field('头像 / 图标', inputField('icon', { value: String(app.attrs['icon'] ?? '✨'), placeholder: 'emoji 或图片 URL（https://…）' }), { hint: '填图片 http(s) 地址即显示为头像' })}
-          ${field('开发者', searchableSelectField('developerId', devOptions, {
+          ${field(rqI18n.t('头像 / 图标'), inputField('icon', { value: String(app.attrs['icon'] ?? '✨'), placeholder: rqI18n.t('emoji 或图片 URL（https://…）') }), { hint: rqI18n.t('填图片 http(s) 地址即显示为头像') })}
+          ${field(rqI18n.t('开发者'), searchableSelectField('developerId', devOptions, {
             value: app.attrs['developerId'] ?? '',
-            placeholder: '搜索姓名 / 账号选择开发者',
-            emptyLabel: '（不指定开发者）',
+            placeholder: rqI18n.t('搜索姓名 / 账号选择开发者'),
+            emptyLabel: rqI18n.t('（不指定开发者）'),
           }))}
-          ${field('访问地址', inputField('url', { value: String(app.attrs['url'] ?? ''), placeholder: 'https://…' }), { full: true })}
-          ${field('描述', textareaField('description', { rows: 2, value: app.attrs['description'] ?? '' }), { required: true, full: true })}
+          ${field(rqI18n.t('访问地址'), inputField('url', { value: String(app.attrs['url'] ?? ''), placeholder: 'https://…' }), { full: true })}
+          ${field(rqI18n.t('描述'), textareaField('description', { rows: 2, value: app.attrs['description'] ?? '' }), { required: true, full: true })}
         </div>`,
       foot: `<button class="btn btn-default" data-cancel>${esc(rqI18n.t('取消'))}</button><button class="btn btn-primary" data-ok>${esc(rqI18n.t('保存'))}</button>`,
     })
@@ -757,11 +757,11 @@ function openAppOnboardPrompt(app) {
       modal.close()
       openOnboardingModal({
         title: rqI18n.t('接入提示词 · {name}{suffix}', { name: app.name, suffix: rotate ? rqI18n.t('（密钥已重新生成）') : '' }),
-        resourceLabel: 'AI 应用',
+        resourceLabel: rqI18n.t('AI 应用'),
         resource: app,
         credential: result.credential,
         metaRows: [
-          ['应用 ID', app.id],
+          [rqI18n.t('应用 ID'), app.id],
           ['client_id', result.credential.clientId],
           ...(result.credential.clientSecret ? [['client_secret', result.credential.clientSecret]] : []),
         ],
@@ -785,31 +785,31 @@ function openAppCreate(schema, ctx) {
       body: `
         <div class="form-grid">
           ${field(rqI18n.t('应用名称'), inputField('name'), { required: true })}
-          ${field(rqI18n.t('应用标识'), inputField('slug', { placeholder: '小写字母与中划线' }))}
+          ${field(rqI18n.t('应用标识'), inputField('slug', { placeholder: rqI18n.t('小写字母与中划线') }))}
           ${field(rqI18n.t('应用类型'), selectField('appType', [
-            { value: 'web', label: 'Web 应用' }, { value: 'h5', label: 'H5' }, { value: 'miniapp', label: '小程序' },
-            { value: 'desktop', label: '桌面端' }, { value: 'api', label: 'API 服务' },
+            { value: 'web', label: rqI18n.t('Web 应用') }, { value: 'h5', label: 'H5' }, { value: 'miniapp', label: rqI18n.t('小程序') },
+            { value: 'desktop', label: rqI18n.t('桌面端') }, { value: 'api', label: rqI18n.t('API 服务') },
           ]), { required: true })}
-          ${field(rqI18n.t('头像 / 图标'), inputField('icon', { value: '✨', placeholder: 'emoji 或图片 URL（https://…）' }), { hint: '填图片 http(s) 地址即显示为头像，否则按 emoji 展示' })}
-          ${field(rqI18n.t('访问地址'), inputField('url', { placeholder: 'https://…' }), { full: true, hint: '上线（发布）前必须登记' })}
+          ${field(rqI18n.t('头像 / 图标'), inputField('icon', { value: '✨', placeholder: rqI18n.t('emoji 或图片 URL（https://…）') }), { hint: rqI18n.t('填图片 http(s) 地址即显示为头像，否则按 emoji 展示') })}
+          ${field(rqI18n.t('访问地址'), inputField('url', { placeholder: 'https://…' }), { full: true, hint: rqI18n.t('上线（发布）前必须登记') })}
           ${field(rqI18n.t('描述'), textareaField('description', { rows: 2 }), { required: true, full: true })}
         </div>
         <div class="card-title mb-8" style="margin-top:8px">${esc(rqI18n.t('归属与编排'))}</div>
-        ${field('开发者', searchableSelectField('developerId', (devData.options ?? []).map((u) => ({
+        ${field(rqI18n.t('开发者'), searchableSelectField('developerId', (devData.options ?? []).map((u) => ({
           value: u.id,
           label: rqI18n.t('{name}（@{user}）', { name: u.name, user: u.username }),
-          group: u.orgName || '未分组',
-        })), { placeholder: '搜索姓名 / 账号选择开发者', emptyLabel: '（不指定，默认注册人）' }), { full: true, hint: '从平台在编用户中选择；不选则默认注册人' })}
+          group: u.orgName || rqI18n.t('未分组'),
+        })), { placeholder: rqI18n.t('搜索姓名 / 账号选择开发者'), emptyLabel: rqI18n.t('（不指定，默认注册人）') }), { full: true, hint: rqI18n.t('从平台在编用户中选择；不选则默认注册人') })}
         <div class="card-title mb-8" style="margin-top:8px">${esc(rqI18n.t('编排 Agent（依赖拓扑数据源）'))}</div>
         ${onlineAgents.length
           ? field(rqI18n.t('选择编排 Agent（可多选）'), multiSelectField('agentIds', onlineAgents.map((a) => ({
               value: a.id,
               label: rqI18n.t('{avatar} {name}（{slug}）', { avatar: a.attrs['avatar'] ?? '🤖', name: a.name, slug: a.slug }),
-            })), { placeholder: '搜索并选择编排 Agent，可多选；留空表示暂无依赖' }))
+            })), { placeholder: rqI18n.t('搜索并选择编排 Agent，可多选；留空表示暂无依赖') }))
           : `<div class="form-hint mb-8">${esc(rqI18n.t('没有在线 Agent 可编排（Agent 需先上线）'))}</div>`}
         <div class="form-grid">
-          ${field(rqI18n.t('风险等级'), selectField('riskLevel', [{ value: 'low', label: '低' }, { value: 'medium', label: '中' }, { value: 'high', label: '高' }]), { required: true })}
-          ${field(rqI18n.t('数据密级'), selectField('dataClass', [{ value: 'internal', label: '内部' }, { value: 'public', label: '公开' }, { value: 'confidential', label: '机密' }]), { required: true })}
+          ${field(rqI18n.t('风险等级'), selectField('riskLevel', [{ value: 'low', label: rqI18n.t('低') }, { value: 'medium', label: rqI18n.t('中') }, { value: 'high', label: rqI18n.t('高') }]), { required: true })}
+          ${field(rqI18n.t('数据密级'), selectField('dataClass', [{ value: 'internal', label: rqI18n.t('内部') }, { value: 'public', label: rqI18n.t('公开') }, { value: 'confidential', label: rqI18n.t('机密') }]), { required: true })}
         </div>`,
       foot: `<button class="btn btn-default" data-cancel>${esc(rqI18n.t('取消'))}</button><button class="btn btn-primary" data-ok>${esc(rqI18n.t('注册应用'))}</button>`,
     })
@@ -832,12 +832,12 @@ function openAppCreate(schema, ctx) {
         if (result.credential) {
           openOnboardingModal({
             title: rqI18n.t('注册成功 · 接入指引与应用凭证（仅此一次展示）'),
-            resourceLabel: 'AI 应用',
+            resourceLabel: rqI18n.t('AI 应用'),
             resource: result.app,
             credential: result.credential,
             metaRows: [
-              ['应用 ID', result.app.id],
-              ['标识', result.app.slug],
+              [rqI18n.t('应用 ID'), result.app.id],
+              [rqI18n.t('标识'), result.app.slug],
               ['client_id', result.credential.clientId],
               ['client_secret', result.credential.clientSecret],
             ],
@@ -894,7 +894,7 @@ function renderCredsTab(holder, app, ctx) {
         <div class="card-title mb-8">${icon('shield', 14)} ${esc(rqI18n.t('接入方自检（托管在哪 / 谁能读 / 最近谁读过）'))}</div>
         ${checkData ? `
           <div class="desc-grid mb-14">
-            <div class="desc-item"><span class="k">存储</span><span class="v">${esc(rqI18n.t('{algo} 静态加密 · 密钥文件 0600 / 目录 0700 · 主密钥独立', { algo: checkData.storage?.algorithm ?? 'AES-256-GCM' }))}</span></div>
+            <div class="desc-item"><span class="k">${rqI18n.t('存储')}</span><span class="v">${esc(rqI18n.t('{algo} 静态加密 · 密钥文件 0600 / 目录 0700 · 主密钥独立', { algo: checkData.storage?.algorithm ?? 'AES-256-GCM' }))}</span></div>
             <div class="desc-item"><span class="k">${esc(rqI18n.t('可读权限点'))}</span><span class="v mono">${esc(checkData.whoCanRead?.permissionPoint ?? 'app.credential.fetch')}</span></div>
             <div class="desc-item"><span class="k">${esc(rqI18n.t('可读机器凭证'))}</span><span class="v">${(checkData.whoCanRead?.machinePrincipals ?? []).length ? esc(checkData.whoCanRead.machinePrincipals.map((p) => p.name).join('、')) : esc(rqI18n.t('无（机器凭证须绑定本应用并授予该权限点）'))}</span></div>
             <div class="desc-item"><span class="k">${esc(rqI18n.t('可读人工规则'))}</span><span class="v">${esc(checkData.whoCanRead?.humanRule ?? '')}</span></div>

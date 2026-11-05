@@ -18,26 +18,26 @@ export function showUserCredentials({ userId, username, displayName, password, o
   const modal = openModal({
     title: esc(rqI18n.t('账号凭据（{name}）', { name: displayName })),
     body: `
-      <div class="form-hint" style="margin-bottom:12px">请立即复制并安全传达给本人；口令仅本次展示，传达前可在下方直接二次修改。</div>
+      <div class="form-hint" style="margin-bottom:12px">${rqI18n.t('请立即复制并安全传达给本人；口令仅本次展示，传达前可在下方直接二次修改。')}</div>
       <div class="muted-box mb-8" style="display:flex;align-items:center;gap:10px;justify-content:space-between">
-        <span style="min-width:64px" class="fs-12 text-4">用户名</span>
+        <span style="min-width:64px" class="fs-12 text-4">${rqI18n.t('用户名')}</span>
         <code id="cred-username" style="flex:1;font-size:15px;font-weight:700;color:var(--danger);word-break:break-all">${esc(username)}</code>
-        <button class="btn btn-default btn-sm" id="cred-copy-user">复制</button>
+        <button class="btn btn-default btn-sm" id="cred-copy-user">${rqI18n.t('复制')}</button>
       </div>
       <div class="muted-box mb-8" style="display:flex;align-items:center;gap:10px;justify-content:space-between">
-        <span style="min-width:64px" class="fs-12 text-4">口令</span>
+        <span style="min-width:64px" class="fs-12 text-4">${rqI18n.t('口令')}</span>
         <code id="cred-password" style="flex:1;font-size:15px;font-weight:700;color:var(--danger);word-break:break-all">${esc(current)}</code>
-        <button class="btn btn-default btn-sm" id="cred-copy-pw">复制</button>
+        <button class="btn btn-default btn-sm" id="cred-copy-pw">${rqI18n.t('复制')}</button>
       </div>
-      <button class="btn btn-default btn-sm mb-8" id="cred-copy-all">${icon('check', 12)}一键复制完整凭据（用户名 + 口令）</button>
-      <div class="card-title mb-8 mt-14">二次修改口令（可选）</div>
+      <button class="btn btn-default btn-sm mb-8" id="cred-copy-all">${icon('check', 12)}${rqI18n.t('一键复制完整凭据（用户名 + 口令）')}</button>
+      <div class="card-title mb-8 mt-14">${rqI18n.t('二次修改口令（可选）')}</div>
       <div style="display:flex;gap:8px;align-items:center">
-        <input class="input" id="cred-newpw" placeholder="新口令（至少 8 位，不含中文）" autocomplete="off" style="flex:1">
-        <button class="btn btn-default" id="cred-setpw">设为该口令</button>
-        <button class="btn btn-default" id="cred-randpw">重新随机</button>
+        <input class="input" id="cred-newpw" placeholder="${rqI18n.t('新口令（至少 8 位，不含中文）')}" autocomplete="off" style="flex:1">
+        <button class="btn btn-default" id="cred-setpw">${rqI18n.t('设为该口令')}</button>
+        <button class="btn btn-default" id="cred-randpw">${rqI18n.t('重新随机')}</button>
       </div>
-      <div class="form-hint mt-8">修改后原口令立即失效，请以弹窗内最新口令为准传达。</div>`,
-    foot: '<button class="btn btn-primary" data-cancel>我已妥善传达</button>',
+      <div class="form-hint mt-8">${rqI18n.t('修改后原口令立即失效，请以弹窗内最新口令为准传达。')}</div>`,
+    foot: rqI18n.t('<button class="btn btn-primary" data-cancel>我已妥善传达</button>'),
   })
   const pwEl = modal.body.querySelector('#cred-password')
   const applyPassword = (next, note) => {
@@ -65,7 +65,7 @@ export function showUserCredentials({ userId, username, displayName, password, o
 }
 
 export function providerName(provider) {
-  return { dingtalk: '钉钉', feishu: '飞书', wecom: '企业微信' }[provider] ?? provider
+  return { dingtalk: rqI18n.t('钉钉'), feishu: rqI18n.t('飞书'), wecom: rqI18n.t('企业微信') }[provider] ?? provider
 }
 /**
  * UI-05：姓名里含「已废除/离职/退休」等状态字样但账号状态仍是「正常」时给出提示徽标。
@@ -73,17 +73,17 @@ export function providerName(provider) {
  */
 export function nameStatusMismatch(user) {
   if (user.status !== 'active') return ''
-  const keywords = ['废除', '已废', '离职', '退休', '辞退', '解聘', '停用', '注销', '删除']
+  const keywords = [rqI18n.t('废除'), rqI18n.t('已废'), rqI18n.t('离职'), rqI18n.t('退休'), rqI18n.t('辞退'), rqI18n.t('解聘'), rqI18n.t('停用'), rqI18n.t('注销'), rqI18n.t('删除')]
   const hit = keywords.find((kw) => String(user.displayName ?? '').includes(kw))
   if (!hit) return ''
   const tip = rqI18n.t('姓名含「{state}」字样，但账号状态仍为「正常」，可能是改名后未停用，请进入详情核实', { state: hit })
   return ` <span class="badge badge-warn no-dot" title="${esc(tip)}">${esc(rqI18n.t('名称疑似已{state}？', { state: hit }))}</span>`
 }
 export function strategyName(strategy) {
-  return { manual: '人工确认', third_party_wins: '以三方为准', platform_wins: '以平台为准' }[strategy] ?? strategy
+  return { manual: rqI18n.t('人工确认'), third_party_wins: rqI18n.t('以三方为准'), platform_wins: rqI18n.t('以平台为准') }[strategy] ?? strategy
 }
 export function fieldName(key) {
-  return { displayName: '姓名', title: '职位', orgId: '所属部门', orgName: '部门名称', unionId: '三方ID' }[key] ?? key
+  return { displayName: rqI18n.t('姓名'), title: rqI18n.t('职位'), orgId: rqI18n.t('所属部门'), orgName: rqI18n.t('部门名称'), unionId: rqI18n.t('三方ID') }[key] ?? key
 }
 export function syncStatCard(label, value, color) {
   return `

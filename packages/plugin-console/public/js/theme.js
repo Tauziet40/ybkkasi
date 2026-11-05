@@ -3,11 +3,11 @@ import rqI18n from './i18n.js'
 
 export const UI_THEME_KEY = 'ybk_console_ui_theme'
 export const UI_THEMES = [
-  { id: 'classic', label: '经典 · 原版' },
-  { id: 'clear', label: '澄明 · 经营总览' },
-  { id: 'graph', label: '星图 · 协作关系' },
-  { id: 'night', label: '夜航 · 治理观察' },
-  { id: 'crystal', label: '冰晶 · 协同全景' },
+  { id: 'classic', label: rqI18n.t('经典 · 原版') },
+  { id: 'clear', label: rqI18n.t('澄明 · 经营总览') },
+  { id: 'graph', label: rqI18n.t('星图 · 协作关系') },
+  { id: 'night', label: rqI18n.t('夜航 · 治理观察') },
+  { id: 'crystal', label: rqI18n.t('冰晶 · 协同全景') },
 ]
 
 export function currentUiTheme() {

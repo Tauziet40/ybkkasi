@@ -43,10 +43,12 @@ async function listFiles(dir) {
  * wrapped=true signifie que le segment est déjà la clé d'un rqI18n.t('…') (clé = texte source chinois, convention du dépôt, pas à nettoyer).
  */
 export function scanVisibleCjk(source) {
-  // Précollecte les spans des littéraux de clés rqI18n.t('…') (clé = texte source chinois, pas à nettoyer)
+  // Précollecte les spans des littéraux de clés rqI18n.t('…') et tr('…') (clé = texte source chinois, pas à nettoyer).
+  // tr( = assistant local des modules à double usage Node/nav (connections.js/errors.js/realtime.js :
+  // traduction différée via window.rqI18n, périmètre identique à rqI18n.t).
   const wrappedSpans = []
   {
-    const re = /(?:window\.)?rqI18n\.t\(\s*'(?:[^'\\]|\\.)*'/g
+    const re = /(?:window\.)?rqI18n\.t\(\s*(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")|\btr\(\s*(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/g
     let m
     while ((m = re.exec(source)) !== null) wrappedSpans.push([m.index, m.index + m[0].length])
   }
@@ -68,7 +70,10 @@ export function scanVisibleCjk(source) {
   while (i < source.length) {
     const c = source[i]
     const next = source[i + 1]
-    if (c === '\n') { line++; i++; continue }
+    // Correctif 2026-11 : le retour à la ligne termine un commentaire « // » (avant ce correctif,
+    // le mode 'line' ne se fermait jamais et rendait invisible tout le reste du fichier —
+    // seuls les fichiers sans commentaire « // » étaient mesurés correctement).
+    if (c === '\n') { line++; if (mode === 'line') mode = 'code'; i++; continue }
     if (mode === 'line') { i++; continue }
     if (mode === 'block') {
       if (c === '*' && next === '/') { mode = stack.length ? stack[stack.length - 1].kind === 'tpl' ? 'tpl' : 'code' : 'code'; i += 2 } else i++
@@ -111,14 +116,20 @@ export function scanVisibleCjk(source) {
     if (c === "'") { mode = 'single'; i++; continue }
     if (c === '"') { mode = 'double'; i++; continue }
     if (c === '`') { stack.push({ kind: 'tpl' }); mode = 'tpl'; i++; continue }
-    if (c === '/' && (/[({,;=!&|?+\-*%~^<>:\[)]/.test(lastSig) || lastSig === '' || /^(return|typeof|case|in|of|instanceof|new|delete|void|do|else|yield|await)$/.test(lastWord))) {
+    // À l'intérieur d'une interpolation ${…}, « ) » et « ] » précèdent le plus souvent une division
+    // (ex. ${Math.round(x * 1000) / 10}) : ne pas y amorcer d'heuristique regex, sinon le balayage
+    // jusqu'au « / » suivant (souvent celui d'une balise HTML fermante) avale le « }» de fermeture
+    // de l'interpolation et désynchronise toute la machine à états (correctif 2026-11).
+    const inInterp = stack.length > 0 && stack[stack.length - 1].kind === 'interp'
+    const regexTrigger = inInterp ? /[({,;=!&|?+\-*%~^<>:\[]/.test(lastSig) || lastSig === '' : /[({,;=!&|?+\-*%~^<>:\[)]/.test(lastSig) || lastSig === ''
+    if (c === '/' && (regexTrigger || /^(return|typeof|case|in|of|instanceof|new|delete|void|do|else|yield|await)$/.test(lastWord))) {
       // Littéral de regex (heuristique) : sauter jusqu'au / de fin non échappé
       let j = i + 1
       let ok = false
       while (j < source.length) {
         if (source[j] === '\\') { j += 2; continue }
         if (source[j] === '\n') break
-        if (source[j] === '/') { ok = true; break }
+        if (source[j] === '/' || source[j] === '`') { ok = source[j] === '/'; break }
         j++
       }
       if (ok) { i = j + 1; continue }
@@ -156,8 +167,11 @@ export function scanVisibleCjk(source) {
  */
 const EXCLUSIONS = [
   { file: 'onboarding.js', ranges: [[8, 180]], label: 'agent-onboarding-prompt' },
-  { file: 'access.js', ranges: [[20, 95], [172, 203], [221, 249]], label: 'agent-dshctl-and-spec-doc' },
-  { file: 'i18n.js', ranges: [[20, 20]], label: 'native-language-names' },
+  { file: 'access.js', ranges: [[20, 97], [172, 203], [221, 249]], label: 'agent-dshctl-and-spec-doc' },
+  { file: 'i18n.js', ranges: [[20, 20], [166, 168]], label: 'native-language-names' },
+  { file: 'asset-filters.js', ranges: [[9, 13]], label: 'selftest-pure-module' },
+  { file: 'taxonomy.js', ranges: [[7, 14]], label: 'backend-aligned-taxonomy-values' },
+  { file: 'errors.js', ranges: [[22, 424], [445, 449], [453, 458]], label: 'deferred-tr-copy-registry' },
 ]
 
 async function main() {

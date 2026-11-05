@@ -17,7 +17,7 @@ import {
 import rqI18n from '../../i18n.js'
 
 export async function renderRoles(ctx) {
-  $('#iam-actions').innerHTML = `<button class="btn btn-primary" id="role-add">${icon('plus', 14)}新建角色</button>`
+  $('#iam-actions').innerHTML = `<button class="btn btn-primary" id="role-add">${icon('plus', 14)}${rqI18n.t('新建角色')}</button>`
   const data = await api.get('/api/iam/roles')
   const groups = new Map()
   for (const perm of data.catalog) {
@@ -29,18 +29,18 @@ export async function renderRoles(ctx) {
     <div class="grid-2" style="grid-template-columns:1fr 1.2fr;align-items:start">
       <div class="card table-wrap">
         <table class="tbl">
-          <thead><tr><th>角色</th><th>类型</th><th>权限数</th></tr></thead>
+          <thead><tr><th>${rqI18n.t('角色')}</th><th>${rqI18n.t('类型')}</th><th>${rqI18n.t('权限数')}</th></tr></thead>
           <tbody id="role-rows"></tbody>
         </table>
       </div>
-      <div class="card card-pad" id="perm-panel"><span class="text-4 fs-13">← 点击左侧角色查看权限点矩阵</span></div>
+      <div class="card card-pad" id="perm-panel"><span class="text-4 fs-13">${rqI18n.t('← 点击左侧角色查看权限点矩阵')}</span></div>
     </div>`
   const rowsEl = $('#role-rows')
   data.roles.forEach((role) => {
     const tr = h(`<tr>
       <td><div class="col-strong">${esc(role.name)}</div><div class="col-sub mono">${esc(role.code)}</div></td>
-      <td>${role.builtin ? '<span class="badge badge-muted no-dot">内置</span>' : '<span class="badge badge-brand no-dot">自定义</span>'}</td>
-      <td class="col-num">${role.permissions.includes('*') ? '全部' : role.permissions.length}</td>
+      <td>${role.builtin ? rqI18n.t('<span class="badge badge-muted no-dot">内置</span>') : rqI18n.t('<span class="badge badge-brand no-dot">自定义</span>')}</td>
+      <td class="col-num">${role.permissions.includes('*') ? rqI18n.t('全部') : role.permissions.length}</td>
     </tr>`)
     tr.onclick = () => renderPermPanel(role)
     rowsEl.appendChild(tr)
@@ -50,15 +50,15 @@ export async function renderRoles(ctx) {
     const isEdit = !!role
     const has = (point) => role && (role.permissions.includes('*') || role.permissions.includes(point) || role.permissions.some((p) => p.endsWith('.*') && point.startsWith(p.slice(0, -1))))
     const modal = openModal({
-      title: isEdit ? esc(rqI18n.t('编辑角色：{name}', { name: role.name })) : '新建角色', wide: true,
+      title: isEdit ? esc(rqI18n.t('编辑角色：{name}', { name: role.name })) : rqI18n.t('新建角色'), wide: true,
       body: `
         <div class="form-grid">
-          ${field('角色名称', inputField('name', { value: role?.name ?? '' }), { required: true })}
-          ${isEdit ? field('角色 code', `<code class="mono" style="line-height:32px">${esc(role.code)}</code>`, { hint: 'code 创建后不可修改' }) : field('角色 code', inputField('code', { placeholder: '小写字母，如 data_steward' }), { required: true })}
-          ${field('描述', inputField('description', { value: role?.description ?? '' }), { full: true })}
+          ${field(rqI18n.t('角色名称'), inputField('name', { value: role?.name ?? '' }), { required: true })}
+          ${isEdit ? field(rqI18n.t('角色 code'), `<code class="mono" style="line-height:32px">${esc(role.code)}</code>`, { hint: rqI18n.t('code 创建后不可修改') }) : field(rqI18n.t('角色 code'), inputField('code', { placeholder: rqI18n.t('小写字母，如 data_steward') }), { required: true })}
+          ${field(rqI18n.t('描述'), inputField('description', { value: role?.description ?? '' }), { full: true })}
         </div>
-        <div class="card-title mb-8">权限点（菜单 + API + 数据范围）</div>
-        <div class="muted-box mb-8" style="font-size:12px">引用此角色的<b>机器凭证</b>权限将实时同步：此处保存后立即生效，无需调整凭证。</div>
+        <div class="card-title mb-8">${rqI18n.t('权限点（菜单 + API + 数据范围）')}</div>
+        <div class="muted-box mb-8" style="font-size:12px">${rqI18n.t('引用此角色的')}<b>${rqI18n.t('机器凭证')}</b>${rqI18n.t('权限将实时同步：此处保存后立即生效，无需调整凭证。')}</div>
         <div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px" id="new-role-perms">
           ${[...groups.entries()].map(([group, perms]) => `
             <div style="padding:6px 4px">
@@ -69,7 +69,7 @@ export async function renderRoles(ctx) {
               </label>`).join('')}
             </div>`).join('')}
         </div>`,
-      foot: `<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>${isEdit ? '保存' : '创建'}</button>`,
+      foot: `<button class="btn btn-default" data-cancel>${rqI18n.t('取消')}</button><button class="btn btn-primary" data-ok>${isEdit ? rqI18n.t('保存') : rqI18n.t('创建')}</button>`,
     })
     modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
     modal.el.querySelector('[data-ok]').onclick = async () => {
@@ -95,10 +95,10 @@ export async function renderRoles(ctx) {
     panel.innerHTML = `
       <div class="flex-between mb-14">
         <div>
-          <div class="card-title">${esc(role.name)} ${role.builtin ? '<span class="badge badge-muted no-dot">内置</span>' : ''}</div>
+          <div class="card-title">${esc(role.name)} ${role.builtin ? rqI18n.t('<span class="badge badge-muted no-dot">内置</span>') : ''}</div>
           <div class="fs-12 text-3 mt-8">${esc(role.description)}</div>
         </div>
-        ${role.builtin ? '' : `<button class="btn btn-default btn-sm" id="role-edit">${icon('edit', 13)}编辑角色</button>`}
+        ${role.builtin ? '' : `<button class="btn btn-default btn-sm" id="role-edit">${icon('edit', 13)}${rqI18n.t('编辑角色')}</button>`}
       </div>
       ${[...groups.entries()].map(([group, perms]) => `
         <div style="margin-bottom:12px">

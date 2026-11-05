@@ -32,8 +32,8 @@ export async function renderApprovals(content, params, ctx) {
   content.innerHTML = `
     ${sectionHead({
       label: 'APPROVAL / L4',
-      title: '审批中心',
-      extra: '上线 / 下线 / 下架 / 吊销强制审批单 · 有审批权限者单人通过即执行 · 执行结果回写',
+      title: rqI18n.t('审批中心'),
+      extra: rqI18n.t('上线 / 下线 / 下架 / 吊销强制审批单 · 有审批权限者单人通过即执行 · 执行结果回写'),
     })}
     <div id="ap-tabs" style="margin-bottom:14px"></div>
     ${sla ? `
@@ -50,8 +50,8 @@ export async function renderApprovals(content, params, ctx) {
     </div>`
 
   $('#ap-tabs').appendChild(tabRow([
-    { key: 'pending', label: '待审批', badge: pendingCount, badgeTone: pendingCount > 0 ? 'warn' : undefined },
-    { key: 'all', label: '全部', badge: approvals.length },
+    { key: 'pending', label: rqI18n.t('待审批'), badge: pendingCount, badgeTone: pendingCount > 0 ? 'warn' : undefined },
+    { key: 'all', label: rqI18n.t('全部'), badge: approvals.length },
   ], statusFilter, (key) => { statusFilter = key; renderList() }))
 
   function visibleList() {
@@ -64,8 +64,8 @@ export async function renderApprovals(content, params, ctx) {
     const list = visibleList()
     if (!list.length) {
       holder.appendChild(emptyState({
-        title: statusFilter === 'pending' ? '没有待办审批' : '暂无审批记录',
-        desc: 'L4 高危操作提交后将自动生成审批单',
+        title: statusFilter === 'pending' ? rqI18n.t('没有待办审批') : rqI18n.t('暂无审批记录'),
+        desc: rqI18n.t('L4 高危操作提交后将自动生成审批单'),
         icon: 'checkSquare',
       }))
       return
@@ -119,7 +119,7 @@ export async function renderApprovals(content, params, ctx) {
       </div>
 
       <div style="padding:16px 20px">
-        <div class="micro-label" style="margin-bottom:8px;display:flex;align-items:center;gap:6px">${icon('terminal', 13)} dry-run 影响面预览（申请负载）</div>
+        <div class="micro-label" style="margin-bottom:8px;display:flex;align-items:center;gap:6px">${icon('terminal', 13)} ${rqI18n.t('dry-run 影响面预览（申请负载）')}</div>
         ${payloadEntries.length ? `
         <ul style="display:flex;flex-direction:column;gap:6px;list-style:none;padding:0;margin:0">
           ${payloadEntries.map(([key, value]) => `
@@ -129,18 +129,18 @@ export async function renderApprovals(content, params, ctx) {
           </li>`).join('')}
         </ul>
         <details style="margin-top:10px">
-          <summary class="fs-12 text-4" style="cursor:pointer">查看完整申请负载（JSON）</summary>
+          <summary class="fs-12 text-4" style="cursor:pointer">${rqI18n.t('查看完整申请负载（JSON）')}</summary>
           <div class="code-block" style="margin-top:8px;max-height:220px">${esc(JSON.stringify(approval.payload, null, 2))}</div>
-        </details>` : emptyStateText('该审批单没有附带申请负载')}
+        </details>` : emptyStateText(rqI18n.t('该审批单没有附带申请负载'))}
       </div>
 
       <div style="border-top:1px solid var(--border);padding:16px 20px">
-        <div class="micro-label" style="margin-bottom:12px">审批时间线</div>
+        <div class="micro-label" style="margin-bottom:12px">${rqI18n.t('审批时间线')}</div>
         <div class="timeline">
           <div class="tl-item">
             <span class="tl-dot done"></span>
             <div style="min-width:0">
-              <div style="font-size:13px">发起申请</div>
+              <div style="font-size:13px">${rqI18n.t('发起申请')}</div>
               <div class="tnum mono fs-11 text-3" style="margin-top:2px">${esc(timeAgo(approval.createdAt))} · ${esc(approval.requesterName)}</div>
             </div>
           </div>
@@ -148,8 +148,8 @@ export async function renderApprovals(content, params, ctx) {
           <div class="tl-item">
             <span class="tl-dot current"></span>
             <div style="min-width:0">
-              <div style="font-size:13px">等待审批</div>
-              <div class="fs-12 text-3" style="margin-top:2px">任意具有审批权限的成员可处理（提交人与审批人可为同一账号）</div>
+              <div style="font-size:13px">${rqI18n.t('等待审批')}</div>
+              <div class="fs-12 text-3" style="margin-top:2px">${rqI18n.t('任意具有审批权限的成员可处理（提交人与审批人可为同一账号）')}</div>
             </div>
           </div>` : `
           <div class="tl-item">
@@ -166,7 +166,7 @@ export async function renderApprovals(content, params, ctx) {
           <div class="tl-item">
             <span class="tl-dot done"></span>
             <div style="min-width:0">
-              <div style="font-size:13px">公司级终审标记（审计 action=approval.final_review）</div>
+              <div style="font-size:13px">${rqI18n.t('公司级终审标记（审计 action=approval.final_review）')}</div>
               <div class="tnum mono fs-11 text-3" style="margin-top:2px">${esc(timeAgo(approval.finalReview.at))} · ${esc(approval.finalReview.approverName)}</div>
             </div>
           </div>` : ''}`}
@@ -175,14 +175,14 @@ export async function renderApprovals(content, params, ctx) {
 
       <div style="display:flex;align-items:center;gap:10px;border-top:1px solid var(--border);background:var(--surface-2);padding:13px 20px;flex-wrap:wrap">
         ${pending && canDecide ? `
-          <button class="btn btn-primary btn-sm" id="ap-approve" data-approve="${esc(approval.id)}">${icon('check', 14)} 通过并执行</button>
-          <button class="btn btn-default btn-sm" id="ap-reject" data-reject="${esc(approval.id)}">${icon('x', 14)} 驳回（原因必填）</button>
-          <span style="margin-left:auto;font-size:11px;color:var(--text-3)">执行期复核 · 挂单期间资源被禁用将执行失败留痕</span>` : ''}
+          <button class="btn btn-primary btn-sm" id="ap-approve" data-approve="${esc(approval.id)}">${icon('check', 14)} ${rqI18n.t('通过并执行')}</button>
+          <button class="btn btn-default btn-sm" id="ap-reject" data-reject="${esc(approval.id)}">${icon('x', 14)} ${rqI18n.t('驳回（原因必填）')}</button>
+          <span style="margin-left:auto;font-size:11px;color:var(--text-3)">${rqI18n.t('执行期复核 · 挂单期间资源被禁用将执行失败留痕')}</span>` : ''}
         ${pending && !canDecide ? `
-          <span class="fs-13 text-3">等待审批中——需具备审批权限（approval.decide）的成员处理</span>` : ''}
+          <span class="fs-13 text-3">${rqI18n.t('等待审批中——需具备审批权限（approval.decide）的成员处理')}</span>` : ''}
         ${!pending ? decidedCopy(approval) : ''}
         ${approval.status === 'rejected' && canDecide ? `
-          <button class="btn btn-danger-ghost btn-sm" id="ap-delete" style="margin-left:auto">${icon('trash', 13)} 删除该驳回单</button>` : ''}
+          <button class="btn btn-danger-ghost btn-sm" id="ap-delete" style="margin-left:auto">${icon('trash', 13)} ${rqI18n.t('删除该驳回单')}</button>` : ''}
       </div>
     </div>`)
 
@@ -199,15 +199,15 @@ export async function renderApprovals(content, params, ctx) {
   renderDetail()
 }
 
-function emptyStateText(text = '请选择左侧审批单查看详情') {
+function emptyStateText(text = rqI18n.t('请选择左侧审批单查看详情')) {
   return `<div style="padding:36px 16px;text-align:center;color:var(--text-3);font-size:13px">${esc(text)}</div>`
 }
 
 /** 风险徽章（risk-pill 组件类）：high→红 / medium→琥珀 / 其余→灰（值来自服务端 riskLevel 字段）。 */
 function riskPill(riskLevel) {
-  const [cls, label] = riskLevel === 'high' ? ['risk-crit', '高风险']
-    : riskLevel === 'medium' ? ['risk-high', '中风险']
-    : ['risk-normal', '常规']
+  const [cls, label] = riskLevel === 'high' ? ['risk-crit', rqI18n.t('高风险')]
+    : riskLevel === 'medium' ? ['risk-high', rqI18n.t('中风险')]
+    : ['risk-normal', rqI18n.t('常规')]
   return `<span class="risk-pill ${cls}">${esc(label)}</span>`
 }
 
@@ -218,20 +218,20 @@ function pickReason(payload) {
 }
 
 function decisionTitle(status) {
-  return rqI18n.t({ approved: '审批通过', executed: '审批通过并已执行', rejected: '已驳回', failed: '审批通过但执行失败', superseded: '已自动收口（同目标审批单已执行）' }[status] ?? status)
+  return rqI18n.t({ approved: rqI18n.t('审批通过'), executed: rqI18n.t('审批通过并已执行'), rejected: rqI18n.t('已驳回'), failed: rqI18n.t('审批通过但执行失败'), superseded: rqI18n.t('已自动收口（同目标审批单已执行）') }[status] ?? status)
 }
 
 function decidedCopy(approval) {
   if (approval.status === 'rejected') {
-    return `<span style="font-size:13px;font-weight:500;color:var(--danger)">本单已驳回 · 原因已留痕，结果已回写并通知申请人</span>`
+    return rqI18n.t('<span style="font-size:13px;font-weight:500;color:var(--danger)">本单已驳回 · 原因已留痕，结果已回写并通知申请人</span>')
   }
   if (approval.status === 'failed') {
-    return `<span style="font-size:13px;font-weight:500;color:var(--danger)">本单已通过但执行失败 · 失败原因已回写，可重新发起</span>`
+    return rqI18n.t('<span style="font-size:13px;font-weight:500;color:var(--danger)">本单已通过但执行失败 · 失败原因已回写，可重新发起</span>')
   }
   if (approval.status === 'superseded') {
     return `<span style="font-size:13px;font-weight:500;color:var(--text-3)">${esc(rqI18n.t('本单已自动收口 · 同目标审批单已执行、诉求已满足，无需处理'))}</span>`
   }
-  return `<span style="font-size:13px;font-weight:500;color:#047857">本单已通过 · 结果已回写并通知申请人</span>`
+  return rqI18n.t('<span style="font-size:13px;font-weight:500;color:#047857">本单已通过 · 结果已回写并通知申请人</span>')
 }
 
 /** 删除驳回审批单：仅清理已驳回单（不涉及已执行单与业务资产），服务端校验状态。——既有逻辑原样保留。 */
@@ -299,8 +299,8 @@ function openDecision(id, decision, ctx, approval) {
 
 function kindLabel(kind) {
   return {
-    'agent.online': 'Agent 上线', 'agent.offline': 'Agent 下线',
-    'app.online': '应用发布', 'app.offline': '应用下架',
-    'mcp.offline': 'MCP 下线',
+    'agent.online': rqI18n.t('Agent 上线'), 'agent.offline': rqI18n.t('Agent 下线'),
+    'app.online': rqI18n.t('应用发布'), 'app.offline': rqI18n.t('应用下架'),
+    'mcp.offline': rqI18n.t('MCP 下线'),
   }[kind] ?? kind
 }

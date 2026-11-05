@@ -13,9 +13,9 @@ import { esc } from '../ui.js'
 import rqI18n from '../i18n.js'
 
 const SCOPE_LABEL = {
-  openid: '确认你的身份标识（sub，平台内稳定不变）',
-  profile: '读取基础资料（用户名 / 姓名 / 组织 / 角色 / 租户）',
-  email: '读取邮箱地址',
+  openid: rqI18n.t('确认你的身份标识（sub，平台内稳定不变）'),
+  profile: rqI18n.t('读取基础资料（用户名 / 姓名 / 组织 / 角色 / 租户）'),
+  email: rqI18n.t('读取邮箱地址'),
 }
 
 /** 原始 JSON 请求（不带 {ok,data} 包裹处理逻辑的平台内部约定由本页自行解析）。 */
@@ -33,10 +33,10 @@ function pageShell(inner) {
     <div class="oauth-page">
       <div class="oauth-card">
         <div class="oauth-brand">
-          <img class="brand-mark brand-logo" src="ybk-mark.png" alt="元冰可">
+          <img class="brand-mark brand-logo" src="ybk-mark.png" alt="${rqI18n.t('元冰可')}">
           <div>
-            <div class="oauth-title">元冰可 · 企业AI资源管理平台</div>
-            <div class="oauth-sub">统一身份源 · OIDC 授权</div>
+            <div class="oauth-title">${rqI18n.t('元冰可 · 企业AI资源管理平台')}</div>
+            <div class="oauth-sub">${rqI18n.t('统一身份源 · OIDC 授权')}</div>
           </div>
         </div>
         ${inner}
@@ -46,11 +46,11 @@ function pageShell(inner) {
 
 /** 错误码 → 中文说明（协议错误码保持原文透传）。 */
 const ERROR_LABEL = {
-  invalid_request: '授权请求参数不完整或非法',
-  unauthorized_client: '客户端未登记或已被禁用',
-  unsupported_response_type: '仅支持授权码模式（response_type=code）',
-  invalid_scope: '申请的授权范围（scope）未获平台允许',
-  access_denied: '授权被拒绝',
+  invalid_request: rqI18n.t('授权请求参数不完整或非法'),
+  unauthorized_client: rqI18n.t('客户端未登记或已被禁用'),
+  unsupported_response_type: rqI18n.t('仅支持授权码模式（response_type=code）'),
+  invalid_scope: rqI18n.t('申请的授权范围（scope）未获平台允许'),
+  access_denied: rqI18n.t('授权被拒绝'),
 }
 
 // -- 授权确认页 -------------------------------------------------------------
@@ -58,14 +58,14 @@ const ERROR_LABEL = {
 export async function renderOauthAuthorize(app, params) {
   const reqId = params.get('req') ?? ''
   if (!reqId) {
-    renderOauthError(app, new URLSearchParams({ error: 'invalid_request', error_description: '缺少 req 参数（授权请求无效）' }))
+    renderOauthError(app, new URLSearchParams({ error: 'invalid_request', error_description: rqI18n.t('缺少 req 参数（授权请求无效）') }))
     return
   }
   app.innerHTML = pageShell(`<div class="oauth-sub">${esc(rqI18n.t('正在加载授权请求…'))}</div>`)
   let info
   try {
     const result = await rawJson('GET', `/api/authn/oidc/auth-requests/${encodeURIComponent(reqId)}`)
-    if (result.status !== 200 || !result.payload?.clientName) throw new Error(result.payload?.error_description ?? '授权请求无效、已使用或已过期')
+    if (result.status !== 200 || !result.payload?.clientName) throw new Error(result.payload?.error_description ?? rqI18n.t('授权请求无效、已使用或已过期'))
     info = result.payload
   } catch (error) {
     renderOauthError(app, new URLSearchParams({ error: 'invalid_request', error_description: error.message }))
@@ -83,64 +83,64 @@ function renderLoginPanel(app, reqId, info) {
   app.innerHTML = pageShell(`
     <div class="oauth-sub" style="margin-bottom:14px">${esc(rqI18n.t('登录平台账号后继续授权给'))} <b>${esc(info.clientName)}</b></div>
     <div class="segmented" style="margin-bottom:18px" id="oauth-login-tabs">
-      <span class="segmented-item" data-tab="dingtalk">钉钉扫码</span>
-      <span class="segmented-item active" data-tab="password">账号密码</span>
+      <span class="segmented-item" data-tab="dingtalk">${rqI18n.t('钉钉扫码')}</span>
+      <span class="segmented-item active" data-tab="password">${rqI18n.t('账号密码')}</span>
     </div>
     <form id="oauth-login-form">
       <div class="form-item">
-        <label class="form-label">用户名</label>
-        <input class="input input-lg" id="oauth-login-user" placeholder="平台用户名" autocomplete="username">
+        <label class="form-label">${rqI18n.t('用户名')}</label>
+        <input class="input input-lg" id="oauth-login-user" placeholder="${rqI18n.t('平台用户名')}" autocomplete="username">
       </div>
       <div class="form-item">
-        <label class="form-label">密码</label>
-        <input class="input input-lg" id="oauth-login-pass" type="password" placeholder="密码" autocomplete="current-password">
+        <label class="form-label">${rqI18n.t('密码')}</label>
+        <input class="input input-lg" id="oauth-login-pass" type="password" placeholder="${rqI18n.t('密码')}" autocomplete="current-password">
       </div>
-      <button class="btn btn-primary btn-lg btn-block" id="oauth-login-submit" type="submit">登录并继续</button>
+      <button class="btn btn-primary btn-lg btn-block" id="oauth-login-submit" type="submit">${rqI18n.t('登录并继续')}</button>
     </form>
     <div id="oauth-login-dingtalk" style="display:none">
       <div id="oauth-ding-step-authorize">
         <div id="oauth-ding-oauth-list">
-          <button class="btn btn-primary btn-lg btn-block" id="oauth-ding-oauth-go" type="button">使用钉钉扫码 / 点击头像登录</button>
+          <button class="btn btn-primary btn-lg btn-block" id="oauth-ding-oauth-go" type="button">${rqI18n.t('使用钉钉扫码 / 点击头像登录')}</button>
         </div>
-        <div class="form-hint" style="margin:8px 0 4px">整页跳转钉钉授权：已登录钉钉点击头像即可完成，未登录则出二维码扫码；在钉钉客户端内打开会自动识别登录状态发起免登。</div>
+        <div class="form-hint" style="margin:8px 0 4px">${rqI18n.t('整页跳转钉钉授权：已登录钉钉点击头像即可完成，未登录则出二维码扫码；在钉钉客户端内打开会自动识别登录状态发起免登。')}</div>
         <details id="oauth-ding-manual" style="margin-top:12px">
-          <summary class="form-hint" style="cursor:pointer">手动输入授权码（演示/mock 备用）</summary>
+          <summary class="form-hint" style="cursor:pointer">${rqI18n.t('手动输入授权码（演示/mock 备用）')}</summary>
           <div style="text-align:center;padding:10px 0 6px">
             <div style="width:148px;height:148px;margin:0 auto;border-radius:14px;background:
               radial-gradient(100px 100px at 30% 25%, #e0e7ff, transparent),
               radial-gradient(100px 100px at 75% 80%, #ede9fe, transparent), #f8f9fb;
               border:1px solid var(--border);display:grid;place-items:center;position:relative">
               <div style="color:var(--brand-500)">${icon('fingerprint', 52)}</div>
-              <div style="position:absolute;bottom:10px;font-size:11px;color:var(--text-3)">使用钉钉扫码授权登录</div>
+              <div style="position:absolute;bottom:10px;font-size:11px;color:var(--text-3)">${rqI18n.t('使用钉钉扫码授权登录')}</div>
             </div>
           </div>
           <div class="form-item" style="margin-top:14px">
-            <label class="form-label">钉钉授权码</label>
-            <input class="input input-lg" id="oauth-ding-code" placeholder="请输入钉钉扫码授权码">
+            <label class="form-label">${rqI18n.t('钉钉授权码')}</label>
+            <input class="input input-lg" id="oauth-ding-code" placeholder="${rqI18n.t('请输入钉钉扫码授权码')}">
           </div>
           <div id="oauth-ding-actions">
-            <button class="btn btn-primary btn-lg btn-block" id="oauth-ding-submit">免密登录并继续</button>
+            <button class="btn btn-primary btn-lg btn-block" id="oauth-ding-submit">${rqI18n.t('免密登录并继续')}</button>
           </div>
         </details>
       </div>
       <div id="oauth-ding-step-pending" style="display:none">
         <div class="muted-box" style="display:flex;gap:8px;margin-bottom:14px">
-          ${icon('info', 15)}<span>首次使用该钉钉身份（<b id="oauth-ding-pending-name"></b>）。按「一人一号」原则，请绑定已有平台账号，或注册新账号。</span>
+          ${icon('info', 15)}<span>${rqI18n.t('首次使用该钉钉身份（')}<b id="oauth-ding-pending-name"></b>${rqI18n.t('）。按「一人一号」原则，请绑定已有平台账号，或注册新账号。')}</span>
         </div>
         <div class="tabs" style="margin-bottom:14px">
-          <div class="tab active" data-ptab="bind">绑定已有账号</div>
-          <div class="tab" data-ptab="register">注册新账号</div>
+          <div class="tab active" data-ptab="bind">${rqI18n.t('绑定已有账号')}</div>
+          <div class="tab" data-ptab="register">${rqI18n.t('注册新账号')}</div>
         </div>
         <div id="oauth-ding-bind-panel">
-          <div class="form-item"><label class="form-label">平台用户名</label><input class="input input-lg" id="oauth-ding-bind-username" placeholder="平台账号用户名"></div>
-          <div class="form-item"><label class="form-label">密码</label><input class="input input-lg" id="oauth-ding-bind-password" type="password" placeholder="平台账号密码"></div>
-          <button class="btn btn-primary btn-lg btn-block" id="oauth-ding-bind-submit">验证并绑定</button>
+          <div class="form-item"><label class="form-label">${rqI18n.t('平台用户名')}</label><input class="input input-lg" id="oauth-ding-bind-username" placeholder="${rqI18n.t('平台账号用户名')}"></div>
+          <div class="form-item"><label class="form-label">${rqI18n.t('密码')}</label><input class="input input-lg" id="oauth-ding-bind-password" type="password" placeholder="${rqI18n.t('平台账号密码')}"></div>
+          <button class="btn btn-primary btn-lg btn-block" id="oauth-ding-bind-submit">${rqI18n.t('验证并绑定')}</button>
         </div>
         <div id="oauth-ding-register-panel" style="display:none">
-          <div class="form-hint" style="margin-bottom:12px">将以三方身份自动注册平台账号（默认进入首个组织），并建立身份链接。</div>
-          <button class="btn btn-primary btn-lg btn-block" id="oauth-ding-register-submit">注册并继续</button>
+          <div class="form-hint" style="margin-bottom:12px">${rqI18n.t('将以三方身份自动注册平台账号（默认进入首个组织），并建立身份链接。')}</div>
+          <button class="btn btn-primary btn-lg btn-block" id="oauth-ding-register-submit">${rqI18n.t('注册并继续')}</button>
         </div>
-        <button class="btn btn-ghost btn-block" style="margin-top:8px" id="oauth-ding-pending-back">返回重试</button>
+        <button class="btn btn-ghost btn-block" style="margin-top:8px" id="oauth-ding-pending-back">${rqI18n.t('返回重试')}</button>
       </div>
       <div class="form-hint" id="oauth-ding-tip" style="margin-top:10px"></div>
     </div>`)
@@ -172,7 +172,7 @@ function renderLoginPanel(app, reqId, info) {
         username: app.querySelector('#oauth-login-user').value.trim(),
         password: app.querySelector('#oauth-login-pass').value,
       })
-      if (result.status !== 200 || !result.payload?.ok) throw new Error(result.payload?.error?.message ?? '登录失败')
+      if (result.status !== 200 || !result.payload?.ok) throw new Error(result.payload?.error?.message ?? rqI18n.t('登录失败'))
       session.save(result.payload.data.token, result.payload.data.user)
       if (result.payload.data.refreshToken) session.saveRefresh(result.payload.data.refreshToken)
       renderConsent(app, reqId, info)
@@ -203,10 +203,10 @@ function renderLoginPanel(app, reqId, info) {
     btn.classList.add('btn-loading')
     try {
       const code = app.querySelector('#oauth-ding-code').value.trim()
-      if (!code) throw new Error('请输入钉钉授权码（演示环境为工号，如 DD0002）')
+      if (!code) throw new Error(rqI18n.t('请输入钉钉授权码（演示环境为工号，如 DD0002）'))
       dingTip('')
-      const auth = unwrap(await rawJson('POST', '/api/auth/sso/authorize', { provider: 'dingtalk', scene: 'web_qr', ...(configId ? { configId } : {}) }), '钉钉登录暂不可用')
-      const data = unwrap(await rawJson('POST', '/api/auth/sso', { provider: 'dingtalk', code, state: auth.state }), '钉钉登录失败')
+      const auth = unwrap(await rawJson('POST', '/api/auth/sso/authorize', { provider: 'dingtalk', scene: 'web_qr', ...(configId ? { configId } : {}) }), rqI18n.t('钉钉登录暂不可用'))
+      const data = unwrap(await rawJson('POST', '/api/auth/sso', { provider: 'dingtalk', code, state: auth.state }), rqI18n.t('钉钉登录失败'))
       if (data.kind === 'pending') {
         dingTicket = data.pendingTicket
         app.querySelector('#oauth-ding-pending-name').textContent = data.profileName
@@ -237,14 +237,14 @@ function renderLoginPanel(app, reqId, info) {
   const startDingOauth = async (btn, configId, auto) => {
     btn.classList.add('btn-loading')
     try {
-      const auth = unwrap(await rawJson('POST', '/api/auth/sso/authorize', { provider: 'dingtalk', scene: 'web_qr', ...(configId ? { configId } : {}) }), '钉钉登录暂不可用')
+      const auth = unwrap(await rawJson('POST', '/api/auth/sso/authorize', { provider: 'dingtalk', scene: 'web_qr', ...(configId ? { configId } : {}) }), rqI18n.t('钉钉登录暂不可用'))
       if (auth.blocked) {
         // 授权页侧应用级拒绝（钉钉 900103「应用不存在」）：整页跳转只会落到错误页，
         // 就地提示并展开手动授权码兜底，授权流不中断。
-        showManualFallback(`钉钉扫码登录未就绪${auth.blocked.message ? `：${auth.blocked.message}` : ''}。请管理员在钉钉开发者后台「登录与分享」核对回调域名 ${location.host} 与 AppKey。`)
+        showManualFallback(`${rqI18n.t('钉钉扫码登录未就绪')}${auth.blocked.message ? `：${auth.blocked.message}` : ''}${rqI18n.t('。请管理员在钉钉开发者后台「登录与分享」核对回调域名')} ${location.host} ${rqI18n.t('与 AppKey。')}`)
         return
       }
-      if (!auth.authorizeUrl) throw new Error('身份源未返回授权地址（可能为 mock 模式），请手动输入授权码')
+      if (!auth.authorizeUrl) throw new Error(rqI18n.t('身份源未返回授权地址（可能为 mock 模式），请手动输入授权码'))
       try { localStorage.setItem(OIDC_REQ_KEY, JSON.stringify({ req: reqId, ts: Date.now() })) } catch { /* 忽略 */ }
       try { localStorage.setItem('heng_ops_last_sso_config', configId ?? '') } catch { /* 忽略 */ }
       // 必须整页跳转：弹窗/iframe 会被第三方 Cookie 策略拦截导致授权失败
@@ -268,9 +268,9 @@ function renderLoginPanel(app, reqId, info) {
     }
     const others = providers.filter((item) => (item.configId ?? '') !== preferredConfigId)
     holder.innerHTML = `
-      <button class="btn btn-primary btn-lg btn-block" id="oauth-ding-oauth-go" type="button">使用钉钉扫码 / 点击头像登录</button>
-      ${others.length ? `<div class="form-hint" style="margin-top:8px;text-align:center">其他已接入主体：${others.map((item, index) => `
-        <a class="fs-12" style="color:var(--brand-500);cursor:pointer;margin-left:${index ? 8 : 0}px" data-config-id="${esc(item.configId ?? '')}">${esc(item.name || item.corpId || '未命名主体')}</a>`).join('')}</div>` : ''}`
+      <button class="btn btn-primary btn-lg btn-block" id="oauth-ding-oauth-go" type="button">${rqI18n.t('使用钉钉扫码 / 点击头像登录')}</button>
+      ${others.length ? `<div class="form-hint" style="margin-top:8px;text-align:center">${rqI18n.t('其他已接入主体：')}${others.map((item, index) => `
+        <a class="fs-12" style="color:var(--brand-500);cursor:pointer;margin-left:${index ? 8 : 0}px" data-config-id="${esc(item.configId ?? '')}">${esc(item.name || item.corpId || rqI18n.t('未命名主体'))}</a>`).join('')}</div>` : ''}`
     holder.querySelector('#oauth-ding-oauth-go').onclick = (e) => void startDingOauth(e.currentTarget, preferredConfigId || undefined)
     holder.querySelectorAll('[data-config-id]').forEach((el) => {
       el.onclick = () => void startDingOauth(holder.querySelector('#oauth-ding-oauth-go'), el.dataset.configId || undefined)
@@ -309,7 +309,7 @@ function renderLoginPanel(app, reqId, info) {
         pendingTicket: dingTicket,
         username: app.querySelector('#oauth-ding-bind-username').value.trim(),
         password: app.querySelector('#oauth-ding-bind-password').value,
-      }), '绑定失败')
+      }), rqI18n.t('绑定失败'))
       finishSsoLogin(data)
     } catch (error) {
       dingTip(error.message)
@@ -322,7 +322,7 @@ function renderLoginPanel(app, reqId, info) {
     btn.classList.add('btn-loading')
     try {
       dingTip('')
-      const data = unwrap(await rawJson('POST', '/api/auth/sso/register', { pendingTicket: dingTicket }), '注册失败')
+      const data = unwrap(await rawJson('POST', '/api/auth/sso/register', { pendingTicket: dingTicket }), rqI18n.t('注册失败'))
       finishSsoLogin(data)
     } catch (error) {
       dingTip(error.message)
@@ -341,7 +341,7 @@ function renderConsent(app, reqId, info) {
   const user = session.user
   const scopes = String(info.scope ?? '').split(/\s+/).filter(Boolean)
   app.innerHTML = pageShell(`
-    <div class="oauth-sub">应用请求获得以下授权：</div>
+    <div class="oauth-sub">${rqI18n.t('应用请求获得以下授权：')}</div>
     <div class="oauth-app">
       <div class="oauth-app-ic">${info.appRef ? '✨' : '🔗'}</div>
       <div>
@@ -351,7 +351,7 @@ function renderConsent(app, reqId, info) {
     </div>
     <div class="oauth-scopes">
       ${scopes.map((scope) => `
-        <div class="oauth-scope">${icon('check', 15)}<span><b>${esc(scope)}</b>${esc(rqI18n.t(' · {label}', { label: rqI18n.t(SCOPE_LABEL[scope] ?? '自定义授权范围') }))}</span></div>`).join('')}
+        <div class="oauth-scope">${icon('check', 15)}<span><b>${esc(scope)}</b>${esc(rqI18n.t(' · {label}', { label: rqI18n.t(SCOPE_LABEL[scope] ?? rqI18n.t('自定义授权范围')) }))}</span></div>`).join('')}
     </div>
     <div class="oauth-user">
       <div class="avatar sm">${esc((user?.displayName ?? '?').slice(0, 1))}</div>
@@ -360,11 +360,11 @@ function renderConsent(app, reqId, info) {
     ${info.consentRequired ? `
     <label class="flex" style="gap:8px;font-size:13px;margin-bottom:14px;cursor:pointer">
       <input type="checkbox" id="oauth-consent-check" style="accent-color:var(--brand-500)">
-      <span>我已了解并同意向该应用提供上述信息</span>
+      <span>${rqI18n.t('我已了解并同意向该应用提供上述信息')}</span>
     </label>` : ''}
     <div class="oauth-actions">
       ${info.consentRequired ? `<button class="btn btn-default" id="oauth-deny">${esc(rqI18n.t('拒绝'))}</button>` : ''}
-      <button class="btn btn-primary" id="oauth-approve">${info.consentRequired ? '同意并授权' : '确认授权'}</button>
+      <button class="btn btn-primary" id="oauth-approve">${info.consentRequired ? rqI18n.t('同意并授权') : rqI18n.t('确认授权')}</button>
     </div>
     <div class="form-hint" id="oauth-consent-tip" style="margin-top:12px"></div>`)
   const approve = app.querySelector('#oauth-approve')
@@ -379,7 +379,7 @@ function renderConsent(app, reqId, info) {
           renderLoginPanel(app, reqId, info)
           return
         }
-        throw new Error(result.payload?.error_description ?? '授权失败，请从应用重新发起')
+        throw new Error(result.payload?.error_description ?? rqI18n.t('授权失败，请从应用重新发起'))
       }
       approve.textContent = consent ? rqI18n.t('已授权，正在跳转…') : rqI18n.t('已拒绝，正在跳转…')
       window.location.href = result.payload.location
@@ -409,16 +409,16 @@ export function renderOauthError(app, params) {
   const known = ERROR_LABEL[error]
   app.innerHTML = pageShell(`
     <div class="oauth-error-ic" style="color:#dc2626">${icon('alert', 24)}</div>
-    <div class="oauth-title" style="margin-bottom:8px">授权无法完成</div>
+    <div class="oauth-title" style="margin-bottom:8px">${rqI18n.t('授权无法完成')}</div>
     <div class="oauth-sub">
-      错误码：<code class="mono">${esc(error)}</code>
+      ${rqI18n.t('错误码：')}<code class="mono">${esc(error)}</code>
       ${known && typeof known === 'string' ? `<br>${esc(known)}` : ''}
       ${description ? `<div class="muted-box" style="margin-top:10px;font-size:12.5px">${esc(description)}</div>` : ''}
     </div>
     <div class="oauth-actions" style="margin-top:20px">
-      <a class="btn btn-default" href="#/dashboard" style="text-align:center">返回平台</a>
+      <a class="btn btn-default" href="#/dashboard" style="text-align:center">${rqI18n.t('返回平台')}</a>
     </div>
-    <div class="form-hint" style="margin-top:12px">请回到发起授权的应用重试；若反复出现，请联系应用负责人或平台管理员。</div>`)
+    <div class="form-hint" style="margin-top:12px">${rqI18n.t('请回到发起授权的应用重试；若反复出现，请联系应用负责人或平台管理员。')}</div>`)
 }
 
 // -- RP 发起登出中转页 ----------------------------------------------------------
@@ -426,7 +426,7 @@ export function renderOauthError(app, params) {
 export async function renderOauthLogout(app, params) {
   const postLogoutUri = params.get('post_logout_redirect_uri') ?? ''
   const state = params.get('state') ?? ''
-  const clientName = params.get('client') ?? '应用'
+  const clientName = params.get('client') ?? rqI18n.t('应用')
   app.innerHTML = pageShell(`
     <div class="oauth-title" style="margin-bottom:8px">${esc(rqI18n.t('正在退出平台会话…'))}</div>
     <div class="oauth-sub"><b>${esc(clientName)}</b>${esc(rqI18n.t('{client} 发起了登出请求。平台会话清除后将{dest}。', { client: '', dest: postLogoutUri ? rqI18n.t('跳回应用地址') : rqI18n.t('停留在平台') }))}</div>
@@ -439,7 +439,7 @@ export async function renderOauthLogout(app, params) {
     }
   } catch { /* 会话本就失效也继续完成登出跳转 */ }
   session.clear()
-  mark('平台会话已清除。')
+  mark(rqI18n.t('平台会话已清除。'))
   if (postLogoutUri) {
     setTimeout(() => {
       try {
@@ -447,11 +447,11 @@ export async function renderOauthLogout(app, params) {
         if (state) url.searchParams.set('state', state)
         window.location.href = url.toString()
       } catch {
-        mark('回跳地址非法，已阻止跳转。')
+        mark(rqI18n.t('回跳地址非法，已阻止跳转。'))
       }
     }, 600)
   } else {
-    mark('平台会话已清除。可重新登录平台。')
+    mark(rqI18n.t('平台会话已清除。可重新登录平台。'))
     setTimeout(() => { window.location.hash = '#/login' }, 1200)
   }
 }

@@ -24,16 +24,16 @@ async function mount(content, ctx) {
   if (data.fatal) {
     const box = h(`<div class="card card-pad"></div>`)
     box.appendChild(emptyState({
-      title: data.fatal.status === 403 ? '无模型网关读取权限' : '模型目录加载失败',
+      title: data.fatal.status === 403 ? rqI18n.t('无模型网关读取权限') : rqI18n.t('模型目录加载失败'),
       desc: data.fatal.status === 403
-        ? '模型目录接口需要 modelgw.read 权限（当前登录身份未授予）；如需查看请联系管理员开通。'
+        ? rqI18n.t('模型目录接口需要 modelgw.read 权限（当前登录身份未授予）；如需查看请联系管理员开通。')
         : rqI18n.t('{msg}（当前宿主可能未部署 modelgw 管理接口）', { msg: data.fatal.message }),
-      actionText: '重试', onAction: () => void mount(content, ctx), icon: 'plug',
+      actionText: rqI18n.t('重试'), onAction: () => void mount(content, ctx), icon: 'plug',
     }))
     content.innerHTML = ''
     content.appendChild(h(sectionHead({
-      label: 'MODEL GATEWAY', title: '模型接入网关',
-      extra: '统一模型接入 · 分级路由与渠道降级 · 预算熔断保护',
+      label: 'MODEL GATEWAY', title: rqI18n.t('模型接入网关'),
+      extra: rqI18n.t('统一模型接入 · 分级路由与渠道降级 · 预算熔断保护'),
     })))
     content.appendChild(box)
     return
@@ -56,51 +56,51 @@ async function mount(content, ctx) {
   content.innerHTML = `
     ${sectionHead({
       label: 'MODEL GATEWAY',
-      title: '模型接入网关',
+      title: rqI18n.t('模型接入网关'),
       extra: rqI18n.t('OpenAI 兼容真实转发 · 分级路由沿「主力 → 备用 → 兜底」降级链切换 · 预算熔断按内部成本参考口径'),
       actions: `
-        <button class="btn btn-default" id="gw-probe">${icon('zap', 14)} 渠道探测</button>
-        ${canAdmin ? `<button class="btn btn-primary" id="gw-model-add">${icon('plus', 14)} 登记 / 更新模型</button>` : ''}`,
+        <button class="btn btn-default" id="gw-probe">${icon('zap', 14)} ${rqI18n.t('渠道探测')}</button>
+        ${canAdmin ? `<button class="btn btn-primary" id="gw-model-add">${icon('plus', 14)} ${rqI18n.t('登记 / 更新模型')}</button>` : ''}`,
     })}
     <div class="stat-grid mb-20">
       ${statCard({
-        label: '30d 总消耗',
+        label: rqI18n.t('30d 总消耗'),
         value: usage.length ? `<span class="tnum">${fmtNum(totalTokens30d)}</span> <span style="font-size:13px;font-weight:400;color:var(--text-3)">tokens</span>` : '—',
-        sub: usage.length ? '近 30 天各路由实测 tokens 合计' : '30d 路由用量数据待接入（routes-usage）',
+        sub: usage.length ? rqI18n.t('近 30 天各路由实测 tokens 合计') : rqI18n.t('30d 路由用量数据待接入（routes-usage）'),
       })}
       ${statCard({
-        label: '路由数',
+        label: rqI18n.t('路由数'),
         value: `<span class="tnum">${models.length}</span>`,
         sub: rqI18n.t('在线 {a} · 离线 {b}', { a: onlineCount, b: models.length - onlineCount }),
       })}
       ${statCard({
-        label: '渠道数',
+        label: rqI18n.t('渠道数'),
         value: `<span class="tnum">${channelCount}</span>`,
-        sub: groups.length ? rqI18n.t('渠道组 {n} 个（主/备/兜底降级链）', { n: groups.length }) : '未配置渠道组（每路由单渠道直连）',
+        sub: groups.length ? rqI18n.t('渠道组 {n} 个（主/备/兜底降级链）', { n: groups.length }) : rqI18n.t('未配置渠道组（每路由单渠道直连）'),
       })}
       ${statCard({
-        label: '预算熔断',
-        value: enabledBudgets.length ? `<span class="tnum">${enabledBudgets.length}</span> <span style="font-size:13px;font-weight:400;color:var(--text-3)">条规则</span>` : '未配置',
+        label: rqI18n.t('预算熔断'),
+        value: enabledBudgets.length ? `<span class="tnum">${enabledBudgets.length}</span> <span style="font-size:13px;font-weight:400;color:var(--text-3)">${rqI18n.t('条规则')}</span>` : rqI18n.t('未配置'),
         sub: enabledBudgets.length
           ? rqI18n.t('熔断阻断 {b} 条 · 最高预警比 {w}% · 超限即{action}', { b: blockCount, w: warnPct ?? '—', action: blockCount ? rqI18n.t('熔断并告警') : rqI18n.t('告警') })
-          : '暂无预算规则：超限不拦截，仅计量统计',
+          : rqI18n.t('暂无预算规则：超限不拦截，仅计量统计'),
       })}
     </div>
     <div id="gw-routes"></div>
     <p class="fs-11 text-3" style="margin:14px 2px">
-      分级路由：按失败率自动沿「主力 → 备用 → 兜底」降级链切换；预算熔断按价格簿零价快照 + 内部成本参考口径计算（不对外呈现金额结算）。
+      ${rqI18n.t('分级路由：按失败率自动沿「主力 → 备用 → 兜底」降级链切换；预算熔断按价格簿零价快照 + 内部成本参考口径计算（不对外呈现金额结算）。')}
     </p>
     ${canConfig || canAdmin ? `
     <div class="card card-pad" style="margin-top:6px">
-      <div class="card-title" style="margin-bottom:4px">${icon('settings', 15)} 网关治理（管理员通道）</div>
-      <div class="fs-12 text-3" style="margin-bottom:12px">模型目录全量表与渠道组 / 预算编辑自财务视图迁入；全部写操作与审计留痕口径不变。</div>
+      <div class="card-title" style="margin-bottom:4px">${icon('settings', 15)} ${rqI18n.t('网关治理（管理员通道）')}</div>
+      <div class="fs-12 text-3" style="margin-bottom:12px">${rqI18n.t('模型目录全量表与渠道组 / 预算编辑自财务视图迁入；全部写操作与审计留痕口径不变。')}</div>
       ${canAdmin ? `
       <div class="card-title" style="margin:0 0 8px;font-size:13px">${icon('plug', 14)} ${esc(rqI18n.t('模型目录（{n}）', { n: models.length }))}</div>
       <div id="gw-model-table"></div>` : ''}
       ${canConfig ? `
-      <div class="card-title" style="margin:18px 0 8px;font-size:13px">${icon('gitBranch', 14)} 渠道组（主/备降级链）</div>
+      <div class="card-title" style="margin:18px 0 8px;font-size:13px">${icon('gitBranch', 14)} ${rqI18n.t('渠道组（主/备降级链）')}</div>
       <div id="gw-groups"></div>
-      <div class="card-title" style="margin:18px 0 8px;font-size:13px">${icon('coins', 14)} 预算（日/月限额与熔断）</div>
+      <div class="card-title" style="margin:18px 0 8px;font-size:13px">${icon('coins', 14)} ${rqI18n.t('预算（日/月限额与熔断）')}</div>
       <div id="gw-budgets"></div>` : ''}
     </div>` : ''}
   `
@@ -108,7 +108,7 @@ async function mount(content, ctx) {
   // ---- 路由卡列表 ----
   const routesHost = $('#gw-routes')
   if (!models.length) {
-    routesHost.innerHTML = emptyHint(canAdmin ? '模型目录为空——点击右上角「登记 / 更新模型」接入第一个模型' : '模型目录为空（登记入口需 modelgw.admin 权限）')
+    routesHost.innerHTML = emptyHint(canAdmin ? rqI18n.t('模型目录为空——点击右上角「登记 / 更新模型」接入第一个模型') : rqI18n.t('模型目录为空（登记入口需 modelgw.admin 权限）'))
   } else {
     for (const model of models) renderRouteCard(routesHost, model, { models, groups, budgets, usageMap, telemetry, canAdmin, ctx })
   }
@@ -188,10 +188,10 @@ const CH_KIND_STYLE = {
 function channelState(slug, models, telemetry) {
   const model = models.find((m) => m.slug === slug)
   const tel = telemetry.get(slug)
-  if (!model || model.status !== 'online') return { state: 'standby', dot: 'dot-off', label: model ? '待机' : '未登记', pulse: false }
-  if (tel?.degradedInvocations > 0) return { state: 'degraded', dot: 'dot-warn', label: '降级中', pulse: true }
-  if (tel && tel.invocations > 0) return { state: 'active', dot: 'dot-ok', label: '承接流量', pulse: false }
-  return { state: 'standby', dot: 'dot-off', label: '待机', pulse: false }
+  if (!model || model.status !== 'online') return { state: 'standby', dot: 'dot-off', label: model ? rqI18n.t('待机') : rqI18n.t('未登记'), pulse: false }
+  if (tel?.degradedInvocations > 0) return { state: 'degraded', dot: 'dot-warn', label: rqI18n.t('降级中'), pulse: true }
+  if (tel && tel.invocations > 0) return { state: 'active', dot: 'dot-ok', label: rqI18n.t('承接流量'), pulse: false }
+  return { state: 'standby', dot: 'dot-off', label: rqI18n.t('待机'), pulse: false }
 }
 
 function renderRouteCard(host, model, { models, groups, budgets, usageMap, telemetry, canAdmin, ctx }) {
@@ -212,7 +212,7 @@ function renderRouteCard(host, model, { models, groups, budgets, usageMap, telem
   const budget = enabled.find((b) => b.modelSlug === model.slug)
     ?? enabled.find((b) => b.modelSlug === '*')
     ?? enabled.find((b) => !b.modelSlug)
-  let budgetHtml = '<span class="fs-11 text-4">未设预算</span>'
+  let budgetHtml = rqI18n.t('<span class="fs-11 text-4">未设预算</span>')
   if (budget) {
     const limitYuan = (Number(budget.monthlyLimitCents) || 0) / 100
     const usedYuan = (Number(usage?.cost30d) || 0) / 100 // routes-usage 的 cost30d 为内部成本参考分（usage 事件聚合口径）
@@ -236,12 +236,12 @@ function renderRouteCard(host, model, { models, groups, budgets, usageMap, telem
           <span class="mono" style="background:var(--surface-2);border-radius:6px;padding:2px 7px;font-size:11px">${esc(model.slug)}</span>
           ${healthDot(health)}
           ${tel?.degradedInvocations > 0 ? `<span class="badge badge-warn no-dot">${icon('alert', 11)}${esc(rqI18n.t(' 30d 降级 {n} 次', { n: tel.degradedInvocations }))}</span>` : ''}
-          ${group && group.enabled === false ? '<span class="badge badge-muted no-dot">渠道组停用</span>' : ''}
+          ${group && group.enabled === false ? rqI18n.t('<span class="badge badge-muted no-dot">渠道组停用</span>') : ''}
         </div>
         <div class="fs-11-5 text-3" style="margin-top:3px">
           ${usage
             ? `30d <span class="tnum mono">${fmtNum(usage.tokens30d ?? 0)}</span> ${esc(rqI18n.t('tokens · 占比'))} <span class="tnum mono">${usage.share != null ? `${usage.share}%` : '—'}</span>`
-            : '30d 用量待接入（routes-usage 未返回该路由）'}
+            : rqI18n.t('30d 用量待接入（routes-usage 未返回该路由）')}
           ${tel?.availability != null ? ` ${esc(rqI18n.t('· 可用率'))} <span class="tnum mono">${Math.round(tel.availability * 100)}%</span>` : ''}
         </div>
       </div>
@@ -251,15 +251,15 @@ function renderRouteCard(host, model, { models, groups, budgets, usageMap, telem
       </div>
       ${canAdmin ? `
       <div style="display:flex;gap:6px;flex-shrink:0">
-        <button class="btn btn-default btn-sm stop" data-gw-toggle>${model.status === 'online' ? '下线' : '上线'}</button>
-        <button class="btn btn-danger-ghost btn-sm stop" data-gw-del title="删除模型">${icon('trash', 12)}</button>
+        <button class="btn btn-default btn-sm stop" data-gw-toggle>${model.status === 'online' ? rqI18n.t('下线') : rqI18n.t('上线')}</button>
+        <button class="btn btn-danger-ghost btn-sm stop" data-gw-del title="${rqI18n.t('删除模型')}">${icon('trash', 12)}</button>
       </div>` : ''}
     </div>
     <div style="margin-top:14px;display:flex;flex-wrap:wrap;align-items:stretch;gap:8px">
       ${chain.map((slug, index) => {
         const st = channelState(slug, models, telemetry)
         const tel2 = telemetry.get(slug)
-        const kind = index === 0 ? '主力' : index === 1 ? '备用' : '兜底'
+        const kind = index === 0 ? rqI18n.t('主力') : index === 1 ? rqI18n.t('备用') : rqI18n.t('兜底')
         const border = st.state === 'active' ? 'var(--ok-border, #a7f3d0)' : st.state === 'degraded' ? 'var(--warn-border, #fcd9a4)' : 'var(--border)'
         const bg = st.state === 'active' ? 'rgba(5,150,105,0.04)' : st.state === 'degraded' ? 'rgba(245,158,11,0.06)' : 'var(--surface-2)'
         return `
@@ -273,14 +273,14 @@ function renderRouteCard(host, model, { models, groups, budgets, usageMap, telem
             </div>
             <div style="margin-top:5px;display:flex;justify-content:space-between;font-size:10.5px;color:var(--text-3)">
               <span>${esc(rqI18n.t(st.label))}</span>
-              <span class="mono tnum">${tel2?.p50LatencyMs != null ? `P50 ${tel2.p50LatencyMs}ms` : '时延 —'}</span>
+              <span class="mono tnum">${tel2?.p50LatencyMs != null ? `P50 ${tel2.p50LatencyMs}ms` : rqI18n.t('时延 —')}</span>
             </div>
           </div>
           ${index < chain.length - 1 ? `<span style="color:var(--text-4)">${icon('chevronRight', 14)}</span>` : ''}
         </div>`
       }).join('')}
     </div>
-    ${chain.length === 1 ? `<div class="fs-11 text-4" style="margin-top:8px">该路由未配置渠道组：单渠道直连，失败不降级（可在下方「渠道组」为其配置主/备链）。</div>` : ''}
+    ${chain.length === 1 ? rqI18n.t('<div class="fs-11 text-4" style="margin-top:8px">该路由未配置渠道组：单渠道直连，失败不降级（可在下方「渠道组」为其配置主/备链）。</div>') : ''}
   </div>`)
   const toggleBtn = card.querySelector('[data-gw-toggle]')
   if (toggleBtn) toggleBtn.onclick = () => toggleModel(model, () => ctx.rerender())
@@ -311,7 +311,7 @@ async function toggleModel(model, onDone) {
 
 async function deleteModel(model, onDone) {
   const confirmed = await confirmDialog({
-    title: rqI18n.t('删除模型 · {slug}', { slug: model.slug }), danger: true, confirmText: '确认删除',
+    title: rqI18n.t('删除模型 · {slug}', { slug: model.slug }), danger: true, confirmText: rqI18n.t('确认删除'),
     message: rqI18n.t('将从模型目录删除「<b>{slug}</b>」，引用它的调用与渠道组会失去主/备路由，操作不可恢复。', { slug: esc(model.slug) }),
   })
   if (!confirmed) return
@@ -333,23 +333,23 @@ function mountModelTable(models, rerender) {
   host.innerHTML = `
     <div class="table-wrap">
       <table class="tbl">
-        <thead><tr><th>slug</th><th>显示名</th><th>provider</th><th>状态</th><th>数据密级</th><th style="text-align:right">成本（分/千tokens）</th><th style="text-align:right">${esc(rqI18n.t('输入成本（分/千tokens）'))}</th><th>endpoint</th><th>操作</th></tr></thead>
+        <thead><tr><th>slug</th><th>${rqI18n.t('显示名')}</th><th>provider</th><th>${rqI18n.t('状态')}</th><th>${rqI18n.t('数据密级')}</th><th style="text-align:right">${rqI18n.t('成本（分/千tokens）')}</th><th style="text-align:right">${esc(rqI18n.t('输入成本（分/千tokens）'))}</th><th>endpoint</th><th>${rqI18n.t('操作')}</th></tr></thead>
         <tbody>
           ${models.length ? models.map((m) => `
             <tr data-id="${esc(m.id ?? '')}" data-slug="${esc(m.slug)}">
               <td class="mono fs-12">${esc(m.slug)}</td>
               <td class="fs-12">${esc(m.displayName ?? m.display_name ?? '—')}</td>
               <td class="fs-12">${esc(m.provider ?? '—')}</td>
-              <td>${m.status === 'online' ? '<span class="badge badge-ok no-dot">在线</span>' : '<span class="badge badge-muted no-dot">离线</span>'}</td>
+              <td>${m.status === 'online' ? rqI18n.t('<span class="badge badge-ok no-dot">在线</span>') : rqI18n.t('<span class="badge badge-muted no-dot">离线</span>')}</td>
               <td class="fs-12">${esc(m.dataClassLimit ?? '—')}</td>
               <td class="col-num fs-12" style="text-align:right">${m.costCentsPerKTokens ?? m.cost_cents_per_k_tokens ?? '—'}</td>
               <td class="col-num fs-12" style="text-align:right">${m.inputCostCentsPerKTokens ?? m.input_cost_cents_per_k_tokens ?? '—'}</td>
               <td class="mono fs-11 text-3 ellipsis" style="max-width:200px" title="${esc(m.endpoint ?? '')}">${esc(m.endpoint ?? '—')}</td>
               <td><div class="flex" style="gap:6px">
-                <button class="btn btn-default btn-sm stop" data-mg-toggle="${esc(m.id ?? m.slug)}" data-next="${m.status === 'online' ? 'offline' : 'online'}">${m.status === 'online' ? '下线' : '上线'}</button>
+                <button class="btn btn-default btn-sm stop" data-mg-toggle="${esc(m.id ?? m.slug)}" data-next="${m.status === 'online' ? 'offline' : 'online'}">${m.status === 'online' ? rqI18n.t('下线') : rqI18n.t('上线')}</button>
                 <button class="btn btn-danger-ghost btn-sm stop" data-mg-del="${esc(m.id ?? '')}" data-slug="${esc(m.slug)}">${icon('trash', 12)}</button>
               </div></td>
-            </tr>`).join('') : emptyRow(9, '模型目录为空——登记第一个模型接入统一网关')}
+            </tr>`).join('') : emptyRow(9, rqI18n.t('模型目录为空——登记第一个模型接入统一网关'))}
         </tbody>
       </table>
     </div>`
@@ -379,7 +379,7 @@ function mountModelTable(models, rerender) {
   host.querySelectorAll('[data-mg-del]').forEach((btn) => {
     btn.onclick = async () => {
       const confirmed = await confirmDialog({
-        title: rqI18n.t('删除模型 · {slug}', { slug: btn.dataset.slug }), danger: true, confirmText: '确认删除',
+        title: rqI18n.t('删除模型 · {slug}', { slug: btn.dataset.slug }), danger: true, confirmText: rqI18n.t('确认删除'),
         message: rqI18n.t('将从模型目录删除「<b>{slug}</b>」，引用它的调用与渠道组会失去主/备路由，操作不可恢复。', { slug: esc(btn.dataset.slug) }),
       })
       if (!confirmed) return
@@ -395,25 +395,25 @@ function mountModelTable(models, rerender) {
 /** 登记/更新模型抽屉（POST /api/modelgw/models，同 slug 即更新；apiKey 提示 env:VAR_NAME 形式）——自 finops 迁入。 */
 function openModelForm(rerender) {
   const drawer = openDrawer({
-    title: '登记 / 更新模型',
-    sub: '统一网关按 slug 路由；重复 slug 提交即为更新',
+    title: rqI18n.t('登记 / 更新模型'),
+    sub: rqI18n.t('统一网关按 slug 路由；重复 slug 提交即为更新'),
     body: `
       <div class="form-grid">
-        ${field('slug', inputField('slug', { placeholder: '如 deepseek-v3 / qwen3-max' }), { required: true })}
-        ${field('显示名', inputField('displayName', { placeholder: '如 DeepSeek V3' }))}
-        ${field('provider', inputField('provider', { placeholder: '如 deepseek / openai / azure' }))}
+        ${field('slug', inputField('slug', { placeholder: rqI18n.t('如 deepseek-v3 / qwen3-max') }), { required: true })}
+        ${field(rqI18n.t('显示名'), inputField('displayName', { placeholder: rqI18n.t('如 DeepSeek V3') }))}
+        ${field('provider', inputField('provider', { placeholder: rqI18n.t('如 deepseek / openai / azure') }))}
         ${field('endpoint', inputField('endpoint', { placeholder: 'https://api.example.com/v1' }), { full: true })}
-        ${field('apiKey', inputField('apiKey', { placeholder: 'env:DEEPSEEK_API_KEY' }), { full: true, hint: '推荐 env:VAR_NAME 形式引用宿主环境变量，避免明文落库' })}
-        ${field('成本（分/千tokens）', `<input class="input" type="number" step="any" name="costCentsPerKTokens" placeholder="如 12 = ¥0.12/千tokens">`)}
+        ${field('apiKey', inputField('apiKey', { placeholder: 'env:DEEPSEEK_API_KEY' }), { full: true, hint: rqI18n.t('推荐 env:VAR_NAME 形式引用宿主环境变量，避免明文落库') })}
+        ${field(rqI18n.t('成本（分/千tokens）'), rqI18n.t('<input class="input" type="number" step="any" name="costCentsPerKTokens" placeholder="如 12 = ¥0.12/千tokens">'))}
         ${field(rqI18n.t('输入成本（分/千tokens）'), `<input class="input" type="number" step="any" name="inputCostCentsPerKTokens" placeholder="${esc(rqI18n.t('如 2 = ¥0.02/千tokens（#14 输入 token 单独计价）'))}">`)}
-        ${field('状态', selectField('status', [{ value: 'online', label: '在线' }, { value: 'offline', label: '离线' }]))}
-        ${field('数据密级上限', selectField('dataClassLimit', [
-          { value: 'public', label: 'public（仅公开数据）' },
-          { value: 'internal', label: 'internal（内部数据可用）' },
-          { value: 'secret', label: 'secret（可处理机密）' },
-        ]), { hint: '超出密级的数据类任务不会路由到该模型' })}
+        ${field(rqI18n.t('状态'), selectField('status', [{ value: 'online', label: rqI18n.t('在线') }, { value: 'offline', label: rqI18n.t('离线') }]))}
+        ${field(rqI18n.t('数据密级上限'), selectField('dataClassLimit', [
+          { value: 'public', label: rqI18n.t('public（仅公开数据）') },
+          { value: 'internal', label: rqI18n.t('internal（内部数据可用）') },
+          { value: 'secret', label: rqI18n.t('secret（可处理机密）') },
+        ]), { hint: rqI18n.t('超出密级的数据类任务不会路由到该模型') })}
       </div>`,
-    foot: `<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>保存</button>`,
+    foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>保存</button>'),
   })
   drawer.el.querySelector('[data-cancel]').onclick = () => drawer.close()
   drawer.el.querySelector('[data-ok]').onclick = async (e) => {
@@ -457,14 +457,14 @@ async function mountChannelGroups(models) {
     return
   }
   const slugOptions = (value) => [
-    { value: '', label: '（无）' },
+    { value: '', label: rqI18n.t('（无）') },
     ...models.map((m) => ({ value: m.slug, label: m.slug })),
   ].map((opt) => `<option value="${esc(opt.value)}" ${opt.value === (value ?? '') ? 'selected' : ''}>${esc(opt.label)}</option>`).join('')
 
   host.innerHTML = groups.length ? `
     <div class="table-wrap">
       <table class="tbl">
-        <thead><tr><th>渠道组</th><th>主通道</th><th>备 1</th><th>备 2</th><th>启用</th></tr></thead>
+        <thead><tr><th>${rqI18n.t('渠道组')}</th><th>${rqI18n.t('主通道')}</th><th>${rqI18n.t('备 1')}</th><th>${rqI18n.t('备 2')}</th><th>${rqI18n.t('启用')}</th></tr></thead>
         <tbody>
           ${groups.map((g, i) => `
             <tr data-i="${i}">
@@ -477,7 +477,7 @@ async function mountChannelGroups(models) {
         </tbody>
       </table>
     </div>
-    <div class="flex" style="justify-content:flex-end;margin-top:10px"><button class="btn btn-primary btn-sm" id="gw-groups-save">保存渠道组</button></div>` : `<div class="fs-12 text-4" style="padding:10px 0">暂无渠道组配置</div>`
+    <div class="flex" style="justify-content:flex-end;margin-top:10px"><button class="btn btn-primary btn-sm" id="gw-groups-save">${rqI18n.t('保存渠道组')}</button></div>` : rqI18n.t('<div class="fs-12 text-4" style="padding:10px 0">暂无渠道组配置</div>')
 
   host.querySelector('#gw-groups-save')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget
@@ -514,26 +514,26 @@ async function mountBudgets(rerender) {
   const yuan = (cents) => fmtCost((Number(cents ?? 0) || 0) / 100)
 
   host.innerHTML = `
-    <div class="flex" style="justify-content:flex-end;margin-bottom:8px"><button class="btn btn-default btn-sm" id="gw-budget-add">${icon('plus', 12)} 新增预算</button></div>
+    <div class="flex" style="justify-content:flex-end;margin-bottom:8px"><button class="btn btn-default btn-sm" id="gw-budget-add">${icon('plus', 12)} ${rqI18n.t('新增预算')}</button></div>
     <div class="table-wrap">
       <table class="tbl">
-        <thead><tr><th>组织</th><th>模型</th><th>主体</th><th style="text-align:right">日限额</th><th style="text-align:right">月限额</th><th>预警比</th><th>动作</th><th>状态</th><th>操作</th></tr></thead>
+        <thead><tr><th>${rqI18n.t('组织')}</th><th>${rqI18n.t('模型')}</th><th>${rqI18n.t('主体')}</th><th style="text-align:right">${rqI18n.t('日限额')}</th><th style="text-align:right">${rqI18n.t('月限额')}</th><th>${rqI18n.t('预警比')}</th><th>${rqI18n.t('动作')}</th><th>${rqI18n.t('状态')}</th><th>${rqI18n.t('操作')}</th></tr></thead>
         <tbody>
           ${budgets.length ? budgets.map((b) => `
             <tr data-id="${esc(b.id)}">
-              <td class="fs-12">${esc(b.orgId || '（平台级）')}</td>
+              <td class="fs-12">${esc(b.orgId || rqI18n.t('（平台级）'))}</td>
               <td class="mono fs-12">${esc(b.modelSlug || '*')}</td>
-              <td class="mono fs-11">${esc(b.subject || '（组织级）')}</td>
+              <td class="mono fs-11">${esc(b.subject || rqI18n.t('（组织级）'))}</td>
               <td class="col-num fs-12" style="text-align:right">${b.dailyLimitCents != null ? yuan(b.dailyLimitCents) : '—'}</td>
               <td class="col-num fs-12" style="text-align:right">${b.monthlyLimitCents != null ? yuan(b.monthlyLimitCents) : '—'}</td>
               <td class="col-num fs-12">${b.warnRatio != null ? `${Math.round(b.warnRatio * 100)}%` : '—'}</td>
-              <td>${b.action === 'block' ? '<span class="badge badge-danger no-dot">超额阻断</span>' : '<span class="badge badge-warn no-dot">超额告警</span>'}</td>
-              <td>${b.enabled ? '<span class="badge badge-ok no-dot">启用</span>' : '<span class="badge badge-muted no-dot">停用</span>'}${b.freezeAgent ? '<span class="badge badge-purple no-dot" style="margin-left:4px" title="超额时联动冻结相关 Agent">联动冻结</span>' : ''}</td>
+              <td>${b.action === 'block' ? rqI18n.t('<span class="badge badge-danger no-dot">超额阻断</span>') : rqI18n.t('<span class="badge badge-warn no-dot">超额告警</span>')}</td>
+              <td>${b.enabled ? rqI18n.t('<span class="badge badge-ok no-dot">启用</span>') : rqI18n.t('<span class="badge badge-muted no-dot">停用</span>')}${b.freezeAgent ? rqI18n.t('<span class="badge badge-purple no-dot" style="margin-left:4px" title="超额时联动冻结相关 Agent">联动冻结</span>') : ''}</td>
               <td><div class="flex" style="gap:6px">
                 <button class="btn btn-default btn-sm stop" data-bedit="${esc(b.id)}">${esc(rqI18n.t('编辑'))}</button>
                 <button class="btn btn-danger-ghost btn-sm stop" data-bdel="${esc(b.id)}">${icon('trash', 12)}</button>
               </div></td>
-            </tr>`).join('') : emptyRow(9, '暂无预算规则——为组织或 Agent 设置日/月限额与熔断动作')}
+            </tr>`).join('') : emptyRow(9, rqI18n.t('暂无预算规则——为组织或 Agent 设置日/月限额与熔断动作'))}
         </tbody>
       </table>
     </div>`
@@ -548,8 +548,8 @@ async function mountBudgets(rerender) {
   host.querySelectorAll('[data-bdel]').forEach((btn) => {
     btn.onclick = async () => {
       const confirmed = await confirmDialog({
-        title: '删除预算规则', danger: true, confirmText: '确认删除',
-        message: '删除后该维度的用量不再受限额约束（仅计费统计不受影响）。',
+        title: rqI18n.t('删除预算规则'), danger: true, confirmText: rqI18n.t('确认删除'),
+        message: rqI18n.t('删除后该维度的用量不再受限额约束（仅计费统计不受影响）。'),
       })
       if (!confirmed) return
       try {
@@ -569,30 +569,30 @@ async function openBudgetForm(budget, onSaved) {
     orgs = Array.isArray(data) ? data : (data?.orgs ?? [])
   } catch { /* 组织下拉失败时仍可手填 */ }
   const drawer = openDrawer({
-    title: budget ? '编辑预算' : '新增预算',
-    sub: '按组织 / 模型 / 主体三维度限定额度和超额动作',
+    title: budget ? rqI18n.t('编辑预算') : rqI18n.t('新增预算'),
+    sub: rqI18n.t('按组织 / 模型 / 主体三维度限定额度和超额动作'),
     body: `
       <div class="form-grid">
-        ${field('组织', selectField('orgId', [{ value: '', label: '（平台级 · 全组织）' }, ...orgs.map((o) => ({ value: o.id, label: o.name }))], { value: budget?.orgId ?? '' }), { full: true })}
-        ${field('模型 slug', inputField('modelSlug', { value: budget?.modelSlug, placeholder: '如 deepseek-v3' }), { hint: '留空 = 全模型；* 可作通配（如 team-*）' })}
-        ${field('主体 subject', inputField('subject', { value: budget?.subject, placeholder: '留空 = 组织级' }), { hint: 'Agent 级预算填 agent:AGENT_ID' })}
-        ${field('日限额（分）', `<input class="input" type="number" name="dailyLimitCents" min="0" value="${esc(budget?.dailyLimitCents ?? '')}" placeholder="如 1234">`, { hint: '按分录入，如 1234 = ¥12.34/日' })}
-        ${field('月限额（分）', `<input class="input" type="number" name="monthlyLimitCents" min="0" value="${esc(budget?.monthlyLimitCents ?? '')}" placeholder="如 30000">`, { hint: '按分录入，如 30000 = ¥300/月' })}
-        ${field('预警比', `<input class="input" type="number" step="0.01" min="0" max="1" name="warnRatio" value="${esc(budget?.warnRatio ?? 0.8)}">`, { hint: '用量/限额 ≥ 该比例发预算告警，0.8 = 80%' })}
-        ${field('超额动作', selectField('action', [
-          { value: 'warn', label: 'warn（告警，不拦截）' },
-          { value: 'block', label: 'block（熔断阻断调用）' },
+        ${field(rqI18n.t('组织'), selectField('orgId', [{ value: '', label: rqI18n.t('（平台级 · 全组织）') }, ...orgs.map((o) => ({ value: o.id, label: o.name }))], { value: budget?.orgId ?? '' }), { full: true })}
+        ${field(rqI18n.t('模型 slug'), inputField('modelSlug', { value: budget?.modelSlug, placeholder: rqI18n.t('如 deepseek-v3') }), { hint: rqI18n.t('留空 = 全模型；* 可作通配（如 team-*）') })}
+        ${field(rqI18n.t('主体 subject'), inputField('subject', { value: budget?.subject, placeholder: rqI18n.t('留空 = 组织级') }), { hint: rqI18n.t('Agent 级预算填 agent:AGENT_ID') })}
+        ${field(rqI18n.t('日限额（分）'), `<input class="input" type="number" name="dailyLimitCents" min="0" value="${esc(budget?.dailyLimitCents ?? '')}" placeholder="${rqI18n.t('如 1234')}">`, { hint: rqI18n.t('按分录入，如 1234 = ¥12.34/日') })}
+        ${field(rqI18n.t('月限额（分）'), `<input class="input" type="number" name="monthlyLimitCents" min="0" value="${esc(budget?.monthlyLimitCents ?? '')}" placeholder="${rqI18n.t('如 30000')}">`, { hint: rqI18n.t('按分录入，如 30000 = ¥300/月') })}
+        ${field(rqI18n.t('预警比'), `<input class="input" type="number" step="0.01" min="0" max="1" name="warnRatio" value="${esc(budget?.warnRatio ?? 0.8)}">`, { hint: rqI18n.t('用量/限额 ≥ 该比例发预算告警，0.8 = 80%') })}
+        ${field(rqI18n.t('超额动作'), selectField('action', [
+          { value: 'warn', label: rqI18n.t('warn（告警，不拦截）') },
+          { value: 'block', label: rqI18n.t('block（熔断阻断调用）') },
         ], { value: budget?.action ?? 'warn' }))}
       </div>
       <label class="flex" style="gap:8px;align-items:center;cursor:pointer;margin-bottom:8px">
         <input type="checkbox" name="enabled" ${budget?.enabled !== false ? 'checked' : ''} style="accent-color:var(--brand-500)">
-        <span class="fs-12 text-2">启用该预算</span>
+        <span class="fs-12 text-2">${rqI18n.t('启用该预算')}</span>
       </label>
       <label class="flex" style="gap:8px;align-items:center;cursor:pointer">
         <input type="checkbox" name="freezeAgent" ${budget?.freezeAgent ? 'checked' : ''} style="accent-color:var(--brand-500)">
-        <span class="fs-12 text-2">超额联动冻结相关 Agent（block 熔断时生效）</span>
+        <span class="fs-12 text-2">${rqI18n.t('超额联动冻结相关 Agent（block 熔断时生效）')}</span>
       </label>`,
-    foot: `<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>保存</button>`,
+    foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>保存</button>'),
   })
   drawer.el.querySelector('[data-cancel]').onclick = () => drawer.close()
   drawer.el.querySelector('[data-ok]').onclick = async (e) => {

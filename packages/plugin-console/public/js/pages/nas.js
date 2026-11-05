@@ -9,11 +9,11 @@ import {
 } from '../ui.js'
 
 const NAS_STATES = [
-  { key: '', label: '全部' },
-  { key: 'draft', label: '草稿' },
-  { key: 'online', label: '已上线' },
-  { key: 'offline', label: '已下线' },
-  { key: 'archived', label: '已归档' },
+  { key: '', label: rqI18n.t('全部') },
+  { key: 'draft', label: rqI18n.t('草稿') },
+  { key: 'online', label: rqI18n.t('已上线') },
+  { key: 'offline', label: rqI18n.t('已下线') },
+  { key: 'archived', label: rqI18n.t('已归档') },
 ]
 
 export async function renderNas(content, params, ctx) {
@@ -25,16 +25,16 @@ export async function renderNas(content, params, ctx) {
     <div class="page-head">
       <div>
         <div class="micro-label">NAS / FILES</div>
-        <div class="page-title">NAS 存储</div>
-        <div class="page-sub">FS 文件存储类资产：经 MCP 文件网关（地址 + Bearer 令牌 + X-NAS-IP 路由头）统一纳管，探活 → 上线 → 工具发现，文件操作全程审计留痕。</div>
+        <div class="page-title">${rqI18n.t('NAS 存储')}</div>
+        <div class="page-sub">${rqI18n.t('FS 文件存储类资产：经 MCP 文件网关（地址 + Bearer 令牌 + X-NAS-IP 路由头）统一纳管，探活 → 上线 → 工具发现，文件操作全程审计留痕。')}</div>
       </div>
       <div class="page-actions">
-        ${session.can('nas.write') ? `<button class="btn btn-default" id="nas-import">${icon('plug', 14)}导入 mcpServers JSON</button>` : ''}
-        ${session.can('nas.write') ? `<button class="btn btn-primary" id="nas-create">${icon('plus', 14)}新建 NAS 资产</button>` : ''}
+        ${session.can('nas.write') ? `<button class="btn btn-default" id="nas-import">${icon('plug', 14)}${rqI18n.t('导入 mcpServers JSON')}</button>` : ''}
+        ${session.can('nas.write') ? `<button class="btn btn-primary" id="nas-create">${icon('plus', 14)}${rqI18n.t('新建 NAS 资产')}</button>` : ''}
       </div>
     </div>
     <div class="filter-bar">
-      <div class="search-input">${icon('search')}<input class="input" id="nas-q" placeholder="搜索名称 / 描述 / IP" value="${esc(filter.q)}"></div>
+      <div class="search-input">${icon('search')}<input class="input" id="nas-q" placeholder="${rqI18n.t('搜索名称 / 描述 / IP')}" value="${esc(filter.q)}"></div>
       <div class="chips" id="nas-status">
         ${NAS_STATES.map((s) => `<span class="chip ${filter.status === s.key ? 'active' : ''}" data-s="${s.key}">${s.label}</span>`).join('')}
       </div>
@@ -51,9 +51,9 @@ export async function renderNas(content, params, ctx) {
     holder.innerHTML = ''
     if (!items.length) {
       holder.appendChild(emptyState({
-        title: '还没有 NAS 资产',
-        desc: '新建资产或粘贴 mcpServers JSON 一键纳管，网关可达即可上线并发现文件工具',
-        ...(session.can('nas.write') ? { actionText: '新建 NAS 资产', onAction: () => $('#nas-create').click() } : {}),
+        title: rqI18n.t('还没有 NAS 资产'),
+        desc: rqI18n.t('新建资产或粘贴 mcpServers JSON 一键纳管，网关可达即可上线并发现文件工具'),
+        ...(session.can('nas.write') ? { actionText: rqI18n.t('新建 NAS 资产'), onAction: () => $('#nas-create').click() } : {}),
         icon: 'server',
       }))
       return
@@ -61,19 +61,19 @@ export async function renderNas(content, params, ctx) {
     holder.appendChild(renderTable({
       columns: [
         {
-          title: '资产', render: (item) => `
+          title: rqI18n.t('资产'), render: (item) => `
             <div class="fs-13" style="font-weight:600">${esc(item.name)}</div>
             <div class="fs-11 text-4 mono">${esc(item.slug ?? item.id)}</div>`,
         },
-        { title: '状态', width: 90, render: (item) => statusBadge(item.status) },
-        { title: '健康', width: 130, render: (item) => healthCell(item.health) },
-        { title: '网关工具', width: 90, render: (item) => `<span class="col-num">${item.gatewayToolCount ?? 0}</span>` },
-        { title: '描述', render: (item) => `<span class="fs-12 text-3">${esc(item.attrs?.description ?? '—')}</span>` },
-        { title: '更新时间', width: 110, render: (item) => `<span class="fs-12 text-4">${timeAgo(item.updatedAt)}</span>` },
+        { title: rqI18n.t('状态'), width: 90, render: (item) => statusBadge(item.status) },
+        { title: rqI18n.t('健康'), width: 130, render: (item) => healthCell(item.health) },
+        { title: rqI18n.t('网关工具'), width: 90, render: (item) => `<span class="col-num">${item.gatewayToolCount ?? 0}</span>` },
+        { title: rqI18n.t('描述'), render: (item) => `<span class="fs-12 text-3">${esc(item.attrs?.description ?? '—')}</span>` },
+        { title: rqI18n.t('更新时间'), width: 110, render: (item) => `<span class="fs-12 text-4">${timeAgo(item.updatedAt)}</span>` },
       ],
       rows: items,
       onRowClick: (id) => openNasDetail(id, ctx, schema),
-      empty: '没有匹配的 NAS 资产',
+      empty: rqI18n.t('没有匹配的 NAS 资产'),
     }))
   }
 
@@ -103,7 +103,7 @@ function renderNasSchemaField(f, value) {
   // 编辑时令牌不回填（回显为脱敏值），留空 = 保持不变
   const isSecret = f.key === 'accessToken' && value !== undefined
   const text = value === undefined || value === null || isSecret ? '' : String(value)
-  const placeholder = isSecret ? '已保存，留空则保持不变' : f.placeholder
+  const placeholder = isSecret ? rqI18n.t('已保存，留空则保持不变') : f.placeholder
   if (f.type === 'enum') {
     return field(f.label, selectField(name, (f.options ?? []).map((o) => ({ value: o.value, label: o.hint ? `${o.label}（${o.hint}）` : o.label })), { value: text || String(f.defaultValue ?? '') }), { required: f.required, hint: f.hint })
   }
@@ -112,7 +112,7 @@ function renderNasSchemaField(f, value) {
   }
   if (f.type === 'tags') {
     const tagText = Array.isArray(value) ? value.join(', ') : text
-    return field(f.label, inputField(`tags_${f.key}`, { placeholder: '逗号分隔', value: tagText }), { hint: f.hint })
+    return field(f.label, inputField(`tags_${f.key}`, { placeholder: rqI18n.t('逗号分隔'), value: tagText }), { hint: f.hint })
   }
   return field(f.label, inputField(name, { placeholder, value: text || String(f.defaultValue ?? '') }), { required: f.required, hint: f.hint })
 }
@@ -129,17 +129,17 @@ function openNasForm({ title, hint, schema, initial, submitText, onSubmit }) {
     body: `
       ${hint ? `<div class="form-hint" style="margin-bottom:12px">${hint}</div>` : ''}
       <div class="form-grid">
-        ${field('资产名称', inputField('name', { placeholder: '如：研发文件服务器', value: initial?.name ?? '' }), { required: true })}
+        ${field(rqI18n.t('资产名称'), inputField('name', { placeholder: rqI18n.t('如：研发文件服务器'), value: initial?.name ?? '' }), { required: true })}
         ${initial
-          ? field('唯一标识', `<input class="input" value="${esc(initial.slug ?? initial.id)}" disabled>`, { hint: '标识创建后不可修改' })
-          : field('唯一标识', inputField('slug', { placeholder: '小写字母与中划线，留空自动生成' }))}
+          ? field(rqI18n.t('唯一标识'), `<input class="input" value="${esc(initial.slug ?? initial.id)}" disabled>`, { hint: rqI18n.t('标识创建后不可修改') })
+          : field(rqI18n.t('唯一标识'), inputField('slug', { placeholder: rqI18n.t('小写字母与中划线，留空自动生成') }))}
       </div>
       ${[...groupsByField.entries()].map(([group, fields]) => `
         <div class="card-title mb-8" style="margin-top:6px">${esc(groupLabels[group] ?? group)}</div>
         <div class="form-grid">
           ${fields.map((f) => renderNasSchemaField(f, initial?.attrs?.[f.key])).join('')}
         </div>`).join('')}`,
-    foot: `<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>${esc(submitText)}</button>`,
+    foot: `<button class="btn btn-default" data-cancel>${rqI18n.t('取消')}</button><button class="btn btn-primary" data-ok>${esc(submitText)}</button>`,
   })
   modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
   modal.el.querySelector('[data-ok]').onclick = async (e) => {
@@ -165,8 +165,8 @@ function openNasForm({ title, hint, schema, initial, submitText, onSubmit }) {
 
 function openNasCreate(schema, ctx) {
   openNasForm({
-    title: '新建 NAS 资产', schema, submitText: '创建',
-    hint: '必填最小集即可创建草稿；上线前需补全接入属性（网关地址 / 令牌 / 设备 IP）。',
+    title: rqI18n.t('新建 NAS 资产'), schema, submitText: rqI18n.t('创建'),
+    hint: rqI18n.t('必填最小集即可创建草稿；上线前需补全接入属性（网关地址 / 令牌 / 设备 IP）。'),
     onSubmit: async (data) => {
       await api.post('/api/nas', { name: data.name, slug: data.slug, attrs: data.attrs })
       toast(rqI18n.t('已创建（草稿），健康探活通过后可上线'))
@@ -178,8 +178,8 @@ function openNasCreate(schema, ctx) {
 /** 二次编辑：复用 schema 表单回填；留空字段保持不变（含令牌）。 */
 function openNasEdit(nas, schema, ctx) {
   openNasForm({
-    title: rqI18n.t('编辑 NAS 资产 · {name}', { name: nas.name }), schema, initial: nas, submitText: '保存',
-    hint: '留空的属性保持原值不变；接入属性（网关/令牌/设备 IP）变更后即时生效并触发重新探活。',
+    title: rqI18n.t('编辑 NAS 资产 · {name}', { name: nas.name }), schema, initial: nas, submitText: rqI18n.t('保存'),
+    hint: rqI18n.t('留空的属性保持原值不变；接入属性（网关/令牌/设备 IP）变更后即时生效并触发重新探活。'),
     onSubmit: async (data) => {
       await api.patch(`/api/nas/${nas.id}`, { name: data.name, attrs: data.attrs })
       toast(rqI18n.t('已保存'))
@@ -190,20 +190,20 @@ function openNasEdit(nas, schema, ctx) {
 
 // ---------- mcpServers JSON 导入 ----------
 function openNasImport(ctx) {
-  const example = JSON.stringify({ mcpServers: { 'synology-filestation': { url: 'http://192.168.0.7:3000/mcp', headers: { Authorization: 'Bearer 你的令牌', 'X-NAS-IP': '192.168.0.196' } } } }, null, 2)
+  const example = JSON.stringify({ mcpServers: { 'synology-filestation': { url: 'http://192.168.0.7:3000/mcp', headers: { Authorization: rqI18n.t('Bearer 你的令牌'), 'X-NAS-IP': '192.168.0.196' } } } }, null, 2)
   const modal = openModal({
-    title: '导入 mcpServers JSON', wide: true,
+    title: rqI18n.t('导入 mcpServers JSON'), wide: true,
     body: `
       <div class="muted-box mb-14" style="display:flex;gap:8px">
-        ${icon('info', 15)}<span>粘贴 Claude / Cursor 等工具通行的 mcpServers 配置：解析网关地址、Bearer 令牌与 X-NAS-IP 设备路由头 → 创建资产 → 探活 → 可达即自动上线并发现工具。</span>
+        ${icon('info', 15)}<span>${rqI18n.t('粘贴 Claude / Cursor 等工具通行的 mcpServers 配置：解析网关地址、Bearer 令牌与 X-NAS-IP 设备路由头 → 创建资产 → 探活 → 可达即自动上线并发现工具。')}</span>
       </div>
       <div class="form-grid">
-        ${field('资产名称（单条配置时可覆盖）', inputField('name', { placeholder: '留空使用配置中的服务名' }))}
-        ${field('描述', inputField('description', { placeholder: '留空自动生成' }))}
+        ${field(rqI18n.t('资产名称（单条配置时可覆盖）'), inputField('name', { placeholder: rqI18n.t('留空使用配置中的服务名') }))}
+        ${field(rqI18n.t('描述'), inputField('description', { placeholder: rqI18n.t('留空自动生成') }))}
       </div>
-      ${field('MCP 配置 JSON', `<textarea class="form-control" name="config" rows="10" style="font-family:var(--mono);font-size:12px" placeholder='${esc(example)}'></textarea>`, { required: true })}
+      ${field(rqI18n.t('MCP 配置 JSON'), `<textarea class="form-control" name="config" rows="10" style="font-family:var(--mono);font-size:12px" placeholder='${esc(example)}'></textarea>`, { required: true })}
       <div id="import-results"></div>`,
-    foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>导入并纳管</button>',
+    foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>导入并纳管</button>'),
   })
   modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
   modal.el.querySelector('[data-ok]').onclick = async (e) => {
@@ -224,7 +224,7 @@ function openNasImport(ctx) {
           <div class="card card-pad mb-8">
             <div class="flex-between">
               <span style="font-weight:600">${esc(item.name)}</span>
-              ${item.ok ? `<span class="badge badge-ok no-dot">已纳管</span>` : `<span class="badge badge-danger no-dot">失败</span>`}
+              ${item.ok ? rqI18n.t('<span class="badge badge-ok no-dot">已纳管</span>') : rqI18n.t('<span class="badge badge-danger no-dot">失败</span>')}
             </div>
             ${item.ok ? `
               <div class="fs-12 text-3 mt-8">
@@ -261,22 +261,22 @@ async function openNasDetail(id, ctx, schema) {
       </div>
 
       <div class="tabs" id="nas-tabs">
-        <div class="tab active" data-tab="overview">概览</div>
+        <div class="tab active" data-tab="overview">${rqI18n.t('概览')}</div>
         <div class="tab" data-tab="tools">${esc(rqI18n.t('网关工具 ({n})', { n: (nas.gatewayTools ?? []).length }))}</div>
-        <div class="tab" data-tab="fs">文件浏览</div>
-        <div class="tab" data-tab="audit">审计</div>
+        <div class="tab" data-tab="fs">${rqI18n.t('文件浏览')}</div>
+        <div class="tab" data-tab="audit">${rqI18n.t('审计')}</div>
       </div>
       <div id="nas-tab-body"></div>`,
     foot: `
-      <button class="btn btn-default" id="nas-health">${icon('wifi', 14)}健康探活</button>
-      ${canWrite && nas.status !== 'archived' ? `<button class="btn btn-default" id="nas-edit">${icon('edit', 14)}编辑</button>` : ''}
-      ${canWrite ? `<button class="btn btn-default" id="nas-sync-tools">${icon('refresh', 14)}同步网关工具</button>` : ''}
+      <button class="btn btn-default" id="nas-health">${icon('wifi', 14)}${rqI18n.t('健康探活')}</button>
+      ${canWrite && nas.status !== 'archived' ? `<button class="btn btn-default" id="nas-edit">${icon('edit', 14)}${rqI18n.t('编辑')}</button>` : ''}
+      ${canWrite ? `<button class="btn btn-default" id="nas-sync-tools">${icon('refresh', 14)}${rqI18n.t('同步网关工具')}</button>` : ''}
       ${canWrite ? (nas.availableTransitions ?? []).map((t) => {
         const tone = t.action === 'online' ? 'btn-primary' : t.action === 'offline' ? 'btn-danger-ghost' : 'btn-default'
         const ic = t.action === 'online' ? 'play' : t.action === 'offline' ? 'alert' : 'box'
         return `<button class="btn ${tone}" data-action="${esc(t.action)}">${icon(ic, 14)}${esc(t.label)}</button>`
       }).join('') : ''}
-      ${canWrite && ['draft', 'archived'].includes(nas.status) ? `<button class="btn btn-danger-ghost" id="nas-delete">${icon('trash', 14)}删除</button>` : ''}`,
+      ${canWrite && ['draft', 'archived'].includes(nas.status) ? `<button class="btn btn-danger-ghost" id="nas-delete">${icon('trash', 14)}${rqI18n.t('删除')}</button>` : ''}`,
   })
 
   const tabBody = drawer.body.querySelector('#nas-tab-body')
@@ -284,27 +284,27 @@ async function openNasDetail(id, ctx, schema) {
     if (tab === 'overview') {
       const attrs = nas.attrs ?? {}
       tabBody.innerHTML = `
-        <div class="muted-box mb-14">${esc(attrs.description ?? '暂无描述')}</div>
-        <div class="card-title mb-8">基本属性</div>
+        <div class="muted-box mb-14">${esc(attrs.description ?? rqI18n.t('暂无描述'))}</div>
+        <div class="card-title mb-8">${rqI18n.t('基本属性')}</div>
         <div class="desc-grid mb-14">
-          <div class="desc-item"><span class="k">资产 ID</span><span class="v mono">${esc(nas.id)}</span></div>
-          <div class="desc-item"><span class="k">标识</span><span class="v mono">${esc(nas.slug)}</span></div>
-          <div class="desc-item"><span class="k">厂商/型号</span><span class="v">${esc(attrs.vendor ?? '—')}</span></div>
-          <div class="desc-item"><span class="k">容量</span><span class="v">${esc(attrs.capacity ?? '—')}</span></div>
-          <div class="desc-item"><span class="k">数据密级</span><span class="v">${dataClassLabel(attrs.dataClass)}</span></div>
-          <div class="desc-item"><span class="k">创建时间</span><span class="v">${fmtTime(nas.createdAt)}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('资产 ID')}</span><span class="v mono">${esc(nas.id)}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('标识')}</span><span class="v mono">${esc(nas.slug)}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('厂商/型号')}</span><span class="v">${esc(attrs.vendor ?? '—')}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('容量')}</span><span class="v">${esc(attrs.capacity ?? '—')}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('数据密级')}</span><span class="v">${dataClassLabel(attrs.dataClass)}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('创建时间')}</span><span class="v">${fmtTime(nas.createdAt)}</span></div>
         </div>
-        <div class="card-title mb-8">接入属性</div>
+        <div class="card-title mb-8">${rqI18n.t('接入属性')}</div>
         <div class="desc-grid">
-          <div class="desc-item"><span class="k">MCP 网关地址</span><span class="v mono">${esc(attrs.gatewayUrl ?? '未配置')}</span></div>
-          <div class="desc-item"><span class="k">访问令牌</span><span class="v mono">${esc(attrs.accessToken ?? '未配置')}<span class="fs-11 text-4">（已脱敏）</span></span></div>
-          <div class="desc-item"><span class="k">NAS 设备 IP</span><span class="v mono">${esc(attrs.nasIp ?? '未配置')}</span></div>
-          <div class="desc-item"><span class="k">授权根路径</span><span class="v mono">${esc(attrs.rootPath ?? '/')}</span></div>
-          <div class="desc-item"><span class="k">上传中转目录</span><span class="v mono">${esc(attrs.stagingDir ?? '默认 <dataDir>/nas-staging')}</span></div>
-          <div class="desc-item"><span class="k">最近探活</span><span class="v">${nas.health?.lastProbeAt ? timeAgo(nas.health.lastProbeAt) : '—'}${nas.health?.serverName ? ` · ${esc(nas.health.serverName)}` : ''}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('MCP 网关地址')}</span><span class="v mono">${esc(attrs.gatewayUrl ?? rqI18n.t('未配置'))}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('访问令牌')}</span><span class="v mono">${esc(attrs.accessToken ?? rqI18n.t('未配置'))}<span class="fs-11 text-4">${rqI18n.t('（已脱敏）')}</span></span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('NAS 设备 IP')}</span><span class="v mono">${esc(attrs.nasIp ?? rqI18n.t('未配置'))}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('授权根路径')}</span><span class="v mono">${esc(attrs.rootPath ?? '/')}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('上传中转目录')}</span><span class="v mono">${esc(attrs.stagingDir ?? rqI18n.t('默认 <dataDir>/nas-staging'))}</span></div>
+          <div class="desc-item"><span class="k">${rqI18n.t('最近探活')}</span><span class="v">${nas.health?.lastProbeAt ? timeAgo(nas.health.lastProbeAt) : '—'}${nas.health?.serverName ? ` · ${esc(nas.health.serverName)}` : ''}</span></div>
         </div>
-        <div class="card-title mb-8" style="margin-top:14px">NAS 资源概览</div>
-        <div id="nas-res-overview"><div class="fs-12 text-4" style="padding:6px 0">加载中…</div></div>`
+        <div class="card-title mb-8" style="margin-top:14px">${rqI18n.t('NAS 资源概览')}</div>
+        <div id="nas-res-overview"><div class="fs-12 text-4" style="padding:6px 0">${rqI18n.t('加载中…')}</div></div>`
       void loadResourceOverview(tabBody.querySelector('#nas-res-overview'))
     }
     if (tab === 'tools') {
@@ -315,11 +315,11 @@ async function openNasDetail(id, ctx, schema) {
             <span class="mono" style="font-weight:600">${esc(tool.name)}</span>
           </div>
           ${tool.description ? `<div class="fs-12 text-3 mt-8">${esc(tool.description)}</div>` : ''}
-        </div>`).join('') : '<span class="text-4 fs-12">尚未发现工具：上线后自动发现，或点击底部「同步网关工具」</span>'
+        </div>`).join('') : rqI18n.t('<span class="text-4 fs-12">尚未发现工具：上线后自动发现，或点击底部「同步网关工具」</span>')
     }
     if (tab === 'fs') {
       if (!online) {
-        tabBody.innerHTML = `<div class="muted-box" style="display:flex;gap:8px">${icon('info', 15)}<span>仅「已上线」资产可执行文件操作，请先上线该 NAS。</span></div>`
+        tabBody.innerHTML = `<div class="muted-box" style="display:flex;gap:8px">${icon('info', 15)}<span>${rqI18n.t('仅「已上线」资产可执行文件操作，请先上线该 NAS。')}</span></div>`
         return
       }
       tabBody.innerHTML = '<div id="fs-browser"></div>'
@@ -336,7 +336,7 @@ async function openNasDetail(id, ctx, schema) {
               <div class="timeline-time">${timeAgo(log.createdAt)} · ${esc(log.actorName ?? '')}</div>
               ${log.detail ? `<div class="timeline-body">${esc(log.detail)}</div>` : ''}
             </div>`).join('')}
-        </div>` : '<span class="text-4 fs-12">暂无审计记录</span>'
+        </div>` : rqI18n.t('<span class="text-4 fs-12">暂无审计记录</span>')
     }
   }
   drawer.body.querySelectorAll('#nas-tabs .tab').forEach((el) => {
@@ -352,7 +352,7 @@ async function openNasDetail(id, ctx, schema) {
   async function loadResourceOverview(host) {
     if (!host) return
     if (!online) {
-      host.innerHTML = `<div class="muted-box" style="display:flex;gap:8px">${icon('info', 15)}<span>仅「已上线」资产可实时查看 NAS 资源，请先上线。</span></div>`
+      host.innerHTML = `<div class="muted-box" style="display:flex;gap:8px">${icon('info', 15)}<span>${rqI18n.t('仅「已上线」资产可实时查看 NAS 资源，请先上线。')}</span></div>`
       return
     }
     try {
@@ -368,7 +368,7 @@ async function openNasDetail(id, ctx, schema) {
       host.innerHTML = `
         <div class="fs-12 text-3 mb-8">${esc(rqI18n.t('共享文件夹（{n}）· 点击跳转文件浏览：', { n: shares.length }))}</div>
         <div class="flex" style="gap:6px;flex-wrap:wrap">
-          ${shares.length ? shares.map((s) => `<span class="chip" data-share="${esc(s.name)}" style="cursor:pointer">${icon('box', 12)} ${esc(s.name)}</span>`).join('') : '<span class="fs-12 text-4">未查询到共享文件夹</span>'}
+          ${shares.length ? shares.map((s) => `<span class="chip" data-share="${esc(s.name)}" style="cursor:pointer">${icon('box', 12)} ${esc(s.name)}</span>`).join('') : rqI18n.t('<span class="fs-12 text-4">未查询到共享文件夹</span>')}
         </div>
         ${infoItems.length ? `
           <div class="fs-12 text-3 mt-14 mb-8">${esc(rqI18n.t('授权根路径 {path} 详情：', { path: rootPath }))}</div>
@@ -388,8 +388,8 @@ async function openNasDetail(id, ctx, schema) {
   const deleteBtn = drawer.el.querySelector('#nas-delete')
   if (deleteBtn) deleteBtn.onclick = async () => {
     const result = await confirmDialog({
-      title: rqI18n.t('删除 NAS · {name}', { name: nas.name }), requireReason: true, danger: true, confirmText: '确认删除',
-      message: '将永久删除该资产台账（含健康档案与工具发现缓存），操作不可恢复，审计数据保留。',
+      title: rqI18n.t('删除 NAS · {name}', { name: nas.name }), requireReason: true, danger: true, confirmText: rqI18n.t('确认删除'),
+      message: rqI18n.t('将永久删除该资产台账（含健康档案与工具发现缓存），操作不可恢复，审计数据保留。'),
     })
     if (!result) return
     try {
@@ -423,8 +423,8 @@ async function openNasDetail(id, ctx, schema) {
     btn.onclick = async () => {
       if (transition.action === 'offline') {
         const result = await confirmDialog({
-          title: rqI18n.t('下线 NAS · {name}', { name: nas.name }), requireReason: true, danger: true, confirmText: '确认下线',
-          message: `下线后该 NAS 的全部文件操作（含 Skill 包存储）将立即不可用，审计数据保留。`,
+          title: rqI18n.t('下线 NAS · {name}', { name: nas.name }), requireReason: true, danger: true, confirmText: rqI18n.t('确认下线'),
+          message: rqI18n.t('下线后该 NAS 的全部文件操作（含 Skill 包存储）将立即不可用，审计数据保留。'),
         })
         if (!result) return
         try {
@@ -435,8 +435,8 @@ async function openNasDetail(id, ctx, schema) {
       }
       if (transition.action === 'archive') {
         const result = await confirmDialog({
-          title: rqI18n.t('归档 NAS · {name}', { name: nas.name }), danger: true, confirmText: '确认归档',
-          message: `归档为终态操作：资产转为只读台账，不再参与健康巡检与文件操作。`,
+          title: rqI18n.t('归档 NAS · {name}', { name: nas.name }), danger: true, confirmText: rqI18n.t('确认归档'),
+          message: rqI18n.t('归档为终态操作：资产转为只读台账，不再参与健康巡检与文件操作。'),
         })
         if (!result) return
         try {
@@ -466,15 +466,15 @@ function mountFsBrowser(host, nas, ctx) {
     host.innerHTML = `
       <div class="flex mb-8" style="gap:8px;flex-wrap:wrap;align-items:center">
         <div class="grow fs-13" style="min-width:0">
-          <span class="chip" data-crumb="" style="cursor:pointer">共享文件夹</span>
+          <span class="chip" data-crumb="" style="cursor:pointer">${rqI18n.t('共享文件夹')}</span>
           ${segments.map((seg, i) => `
             <span class="text-4" style="margin:0 2px">/</span><span class="chip" data-crumb="${esc('/' + segments.slice(0, i + 1).join('/'))}" style="cursor:pointer">${esc(seg)}</span>`).join('')}
         </div>
-        ${canWrite && currentPath ? `<button class="btn btn-default btn-sm" id="fs-mkdir">${icon('plus', 13)}新建文件夹</button>` : ''}
-        ${canWrite && currentPath ? `<button class="btn btn-default btn-sm" id="fs-upload">${icon('arrowUp', 13)}上传</button>` : ''}
-        <button class="btn btn-default btn-sm" id="fs-search">${icon('search', 13)}搜索</button>
-        ${session.can('nas.authz.read') ? `<button class="btn btn-default btn-sm" id="fs-links">${icon('link', 13)}链接管理</button>` : ''}
-        <button class="btn btn-ghost btn-sm" id="fs-reload" title="刷新">${icon('refresh', 13)}</button>
+        ${canWrite && currentPath ? `<button class="btn btn-default btn-sm" id="fs-mkdir">${icon('plus', 13)}${rqI18n.t('新建文件夹')}</button>` : ''}
+        ${canWrite && currentPath ? `<button class="btn btn-default btn-sm" id="fs-upload">${icon('arrowUp', 13)}${rqI18n.t('上传')}</button>` : ''}
+        <button class="btn btn-default btn-sm" id="fs-search">${icon('search', 13)}${rqI18n.t('搜索')}</button>
+        ${session.can('nas.authz.read') ? `<button class="btn btn-default btn-sm" id="fs-links">${icon('link', 13)}${rqI18n.t('链接管理')}</button>` : ''}
+        <button class="btn btn-ghost btn-sm" id="fs-reload" title="${rqI18n.t('刷新')}">${icon('refresh', 13)}</button>
       </div>
       <div id="fs-table"></div>`
     host.querySelectorAll('[data-crumb]').forEach((el) => {
@@ -494,28 +494,28 @@ function mountFsBrowser(host, nas, ctx) {
     tableHost.appendChild(renderTable({
       columns: [
         {
-          title: '名称', render: (entry) => `
+          title: rqI18n.t('名称'), render: (entry) => `
             <span class="flex" style="gap:8px">
               <span style="color:var(--${entry.isDir ? 'brand-500' : 'text-4)'})">${icon(entry.isDir ? 'box' : 'file', 15)}</span>
               <span class="fs-13" style="${entry.isDir ? 'font-weight:600;cursor:pointer' : ''}" data-open="${entry.isDir ? '1' : ''}">${esc(entry.name)}</span>
             </span>`,
         },
-        { title: '大小', width: 100, render: (entry) => `<span class="col-num fs-12">${entry.isDir ? '—' : fmtBytes(entry.size)}</span>` },
-        { title: '修改时间', width: 130, render: (entry) => `<span class="fs-12 text-4">${fmtEntryTime(entry.mtime)}</span>` },
+        { title: rqI18n.t('大小'), width: 100, render: (entry) => `<span class="col-num fs-12">${entry.isDir ? '—' : fmtBytes(entry.size)}</span>` },
+        { title: rqI18n.t('修改时间'), width: 130, render: (entry) => `<span class="fs-12 text-4">${fmtEntryTime(entry.mtime)}</span>` },
         {
-          title: '操作', width: 230, render: (entry) => `
+          title: rqI18n.t('操作'), width: 230, render: (entry) => `
             <span class="flex" style="gap:4px">
-              ${!entry.isDir ? `<button class="btn btn-ghost btn-sm stop" data-download title="下载到本机">${icon('download', 12)}</button>
-              <button class="btn btn-ghost btn-sm stop" data-copylink title="复制下载链接">${icon('link', 12)}</button>` : ''}
-              ${canWrite ? `<button class="btn btn-ghost btn-sm stop" data-rename title="重命名">${icon('edit', 12)}</button>` : ''}
-              ${canWrite ? `<button class="btn btn-ghost btn-sm stop" data-delete title="删除" style="color:var(--danger)">${icon('trash', 12)}</button>` : ''}
+              ${!entry.isDir ? `<button class="btn btn-ghost btn-sm stop" data-download title="${rqI18n.t('下载到本机')}">${icon('download', 12)}</button>
+              <button class="btn btn-ghost btn-sm stop" data-copylink title="${rqI18n.t('复制下载链接')}">${icon('link', 12)}</button>` : ''}
+              ${canWrite ? `<button class="btn btn-ghost btn-sm stop" data-rename title="${rqI18n.t('重命名')}">${icon('edit', 12)}</button>` : ''}
+              ${canWrite ? `<button class="btn btn-ghost btn-sm stop" data-delete title="${rqI18n.t('删除')}" style="color:var(--danger)">${icon('trash', 12)}</button>` : ''}
             </span>`,
         },
       ],
       rows: entries,
       rowKey: (entry, i) => entry.name ?? i,
       onRowClick: (name, entry) => { if (entry?.isDir) { currentPath = joinPath(currentPath, entry.name); void load() } },
-      empty: currentPath ? '空目录' : '未查询到共享文件夹',
+      empty: currentPath ? rqI18n.t('空目录') : rqI18n.t('未查询到共享文件夹'),
     }))
     tableHost.querySelectorAll('tbody tr').forEach((tr, i) => {
       const entry = entries[i]
@@ -551,8 +551,8 @@ function mountFsBrowser(host, nas, ctx) {
         e.stopPropagation()
         const modal = openModal({
           title: rqI18n.t('重命名 · {name}', { name: entry.name }),
-          body: field('新名称', inputField('newName', { value: entry.name }), { required: true }),
-          foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>重命名</button>',
+          body: field(rqI18n.t('新名称'), inputField('newName', { value: entry.name }), { required: true }),
+          foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>重命名</button>'),
         })
         modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
         modal.el.querySelector('[data-ok]').onclick = async () => {
@@ -568,7 +568,7 @@ function mountFsBrowser(host, nas, ctx) {
       if (deleteBtn) deleteBtn.onclick = async (e) => {
         e.stopPropagation()
         const result = await confirmDialog({
-          title: rqI18n.t('删除 · {name}', { name: entry.name }), danger: true, confirmText: '确认删除',
+          title: rqI18n.t('删除 · {name}', { name: entry.name }), danger: true, confirmText: rqI18n.t('确认删除'),
           message: rqI18n.t('将从 NAS 删除 <b>{path}</b>{dir}，操作将写入审计日志。', { path: esc(path), dir: entry.isDir ? rqI18n.t('（含目录内全部内容）') : '' }),
         })
         if (!result) return
@@ -581,7 +581,7 @@ function mountFsBrowser(host, nas, ctx) {
   }
 
   const load = async () => {
-    host.querySelector('#fs-table')?.replaceChildren(h('<div class="fs-12 text-4" style="padding:18px">加载中…</div>'))
+    host.querySelector('#fs-table')?.replaceChildren(h(rqI18n.t('<div class="fs-12 text-4" style="padding:18px">加载中…</div>')))
     try {
       const raw = currentPath ? await api.get(`/api/nas/${nas.id}/fs` + api.qs({ path: currentPath })) : await api.get(`/api/nas/${nas.id}/fs`)
       entries = normalizeEntries(raw, !currentPath)
@@ -594,8 +594,8 @@ function mountFsBrowser(host, nas, ctx) {
   const openMkdir = () => {
     const modal = openModal({
       title: rqI18n.t('新建文件夹 · {path}', { path: currentPath }),
-      body: field('文件夹名称', inputField('folder', { placeholder: '如：skill-packages' }), { required: true }),
-      foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>创建</button>',
+      body: field(rqI18n.t('文件夹名称'), inputField('folder', { placeholder: rqI18n.t('如：skill-packages') }), { required: true }),
+      foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>创建</button>'),
     })
     modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
     modal.el.querySelector('[data-ok]').onclick = async () => {
@@ -614,18 +614,18 @@ function mountFsBrowser(host, nas, ctx) {
       body: `
         <div class="form-grid">
           <div>
-            <div class="form-label">本地文件（可多选）</div>
+            <div class="form-label">${rqI18n.t('本地文件（可多选）')}</div>
             <input class="input" type="file" name="files" multiple>
-            <div class="form-hint">多个文件将依次上传到当前目录。</div>
+            <div class="form-hint">${rqI18n.t('多个文件将依次上传到当前目录。')}</div>
           </div>
           <div>
-            <div class="form-label">或选择文件夹（保留目录结构）</div>
+            <div class="form-label">${rqI18n.t('或选择文件夹（保留目录结构）')}</div>
             <input class="input" type="file" name="dirs" webkitdirectory directory multiple>
-            <div class="form-hint">支持文件夹内嵌套子目录。仅 Chromium 内核生效。</div>
+            <div class="form-hint">${rqI18n.t('支持文件夹内嵌套子目录。仅 Chromium 内核生效。')}</div>
           </div>
         </div>
         <div id="upload-list" style="margin-top:14px"></div>`,
-      foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>开始上传</button>',
+      foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>开始上传</button>'),
     })
     modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
     const fileInput = modal.body.querySelector('input[name=files]')
@@ -649,7 +649,7 @@ function mountFsBrowser(host, nas, ctx) {
       const items = collectItems()
       const totalBytes = items.reduce((s, it) => s + it.file.size, 0)
       listHost.innerHTML = items.length === 0
-        ? '<div class="muted-box">暂未选择文件</div>'
+        ? rqI18n.t('<div class="muted-box">暂未选择文件</div>')
         : `<div class="fs-12 text-3 mb-8">${esc(rqI18n.t('待上传 <b>{n}</b> 项 · 共 {size}（点击「开始上传」执行）', { n: items.length, size: fmtBytes(totalBytes) }))}</div>
            <div style="max-height:200px;overflow:auto;border:1px solid var(--border);border-radius:6px">
              ${items.map((it, i) => `<div class="flex" style="padding:6px 10px;border-bottom:1px solid var(--border);font-size:12px">
@@ -689,7 +689,7 @@ function mountFsBrowser(host, nas, ctx) {
           failed = result.failed.length
           upd.textContent = String(done)
           upf.textContent = String(failed)
-          if (result.failed.length > 0) console.warn('upload-many 失败明细', result.failed)
+          if (result.failed.length > 0) console.warn(rqI18n.t('upload-many 失败明细'), result.failed)
         } else {
           for (const item of items) {
             try {
@@ -699,7 +699,7 @@ function mountFsBrowser(host, nas, ctx) {
               done++
             } catch (error) {
               failed++
-              console.warn(`上传 ${item.relativePath} 失败`, error)
+              console.warn(`${rqI18n.t('上传')} ${item.relativePath} ${rqI18n.t('失败')}`, error)
             }
             upd.textContent = String(done + failed)
             upf.textContent = String(failed)
@@ -725,11 +725,11 @@ function mountFsBrowser(host, nas, ctx) {
 
   const openSearch = () => {
     const modal = openModal({
-      title: '搜索文件', wide: true,
+      title: rqI18n.t('搜索文件'), wide: true,
       body: `
-        ${field('匹配模式', inputField('pattern', { placeholder: '如：report 或 *.zip' }), { required: true, hint: currentPath ? rqI18n.t('搜索范围：{path}', { path: currentPath }) : rqI18n.t('搜索范围：全部共享文件夹（根路径）') })}
+        ${field(rqI18n.t('匹配模式'), inputField('pattern', { placeholder: rqI18n.t('如：report 或 *.zip') }), { required: true, hint: currentPath ? rqI18n.t('搜索范围：{path}', { path: currentPath }) : rqI18n.t('搜索范围：全部共享文件夹（根路径）') })}
         <div id="fs-search-results"></div>`,
-      foot: '<button class="btn btn-default" data-cancel>关闭</button><button class="btn btn-primary" data-ok>搜索</button>',
+      foot: rqI18n.t('<button class="btn btn-default" data-cancel>关闭</button><button class="btn btn-primary" data-ok>搜索</button>'),
     })
     modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
     modal.el.querySelector('[data-ok]').onclick = async (e) => {
@@ -748,7 +748,7 @@ function mountFsBrowser(host, nas, ctx) {
                 <span style="color:var(--text-4)">${icon(item.isDir ? 'box' : 'file', 14)}</span>
                 <span class="mono fs-12" style="word-break:break-all">${esc(item.path)}</span>
               </div>`).join('')}
-          </div>` : '<div class="fs-12 text-4 mt-14">无匹配结果</div>'
+          </div>` : rqI18n.t('<div class="fs-12 text-4 mt-14">无匹配结果</div>')
       } catch (error) {
         toast(error.message, 'error')
       } finally {
@@ -776,17 +776,17 @@ async function openShareLinkModal(nas, path, entry) {
   const modal = openModal({
     title: rqI18n.t('复制下载链接 · {name}', { name: entry.name }),
     body: `
-      <div class="form-hint mb-14">链接可贴到聊天/邮件等任意场景，打开即下载（无需登录）；取流时按<b>签发人当时的数据权限</b>实时复核，权限回收后链接即失效，也可在「链接管理」中随时吊销。</div>
-      <div class="form-label">有效期</div>
+      <div class="form-hint mb-14">${rqI18n.t('链接可贴到聊天/邮件等任意场景，打开即下载（无需登录）；取流时按')}<b>${rqI18n.t('签发人当时的数据权限')}</b>${rqI18n.t('实时复核，权限回收后链接即失效，也可在「链接管理」中随时吊销。')}</div>
+      <div class="form-label">${rqI18n.t('有效期')}</div>
       <div class="chips" id="share-tier" style="flex-wrap:wrap">
-        <span class="chip" data-t="1h" style="cursor:pointer">1 小时</span>
-        <span class="chip active" data-t="24h" style="cursor:pointer">24 小时</span>
-        <span class="chip" data-t="7d" style="cursor:pointer">7 天</span>
-        <span class="chip" data-t="30d" style="cursor:pointer">30 天</span>
+        <span class="chip" data-t="1h" style="cursor:pointer">${rqI18n.t('1 小时')}</span>
+        <span class="chip active" data-t="24h" style="cursor:pointer">${rqI18n.t('24 小时')}</span>
+        <span class="chip" data-t="7d" style="cursor:pointer">${rqI18n.t('7 天')}</span>
+        <span class="chip" data-t="30d" style="cursor:pointer">${rqI18n.t('30 天')}</span>
         <span class="chip" data-t="permanent" style="cursor:pointer;${permanentReason ? 'opacity:.45' : ''}" ${permanentHint ? `title="${esc(permanentHint)}"` : ''}>${esc(rqI18n.t('永久'))}${permanentReason ? esc(rqI18n.t('（{reason}）', { reason: permanentReason })) : ''}</span>
       </div>
-      <div class="fs-11 text-4" style="margin-top:8px">默认 24 小时；30 天与永久为显式选择——永久链接在权限回收前长期有效，签发前请确认文件适合长期分享。${permanentHint ? `<br><span style="color:var(--warn)">${esc(permanentHint)}</span>` : ''}</div>`,
-    foot: '<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>复制链接</button>',
+      <div class="fs-11 text-4" style="margin-top:8px">${rqI18n.t('默认 24 小时；30 天与永久为显式选择——永久链接在权限回收前长期有效，签发前请确认文件适合长期分享。')}${permanentHint ? `<br><span style="color:var(--warn)">${esc(permanentHint)}</span>` : ''}</div>`,
+    foot: rqI18n.t('<button class="btn btn-default" data-cancel>取消</button><button class="btn btn-primary" data-ok>复制链接</button>'),
   })
   let tier = '24h'
   modal.body.querySelectorAll('#share-tier .chip').forEach((chip) => {
@@ -802,8 +802,8 @@ async function openShareLinkModal(nas, path, entry) {
     const btn = e.currentTarget
     if (tier === 'permanent') {
       const ok = await confirmDialog({
-        title: '签发永久链接', danger: true, confirmText: '确认签发',
-        message: `永久链接在<b>权限回收或手动吊销前长期有效</b>，被转发即等同于交付文件本身，请确认此文件适合长期分享。<br><span class="fs-12 text-3">签发后可在 NAS 文件浏览 →「链接管理」中随时吊销。</span>`,
+        title: rqI18n.t('签发永久链接'), danger: true, confirmText: rqI18n.t('确认签发'),
+        message: rqI18n.t('永久链接在<b>权限回收或手动吊销前长期有效</b>，被转发即等同于交付文件本身，请确认此文件适合长期分享。<br><span class="fs-12 text-3">签发后可在 NAS 文件浏览 →「链接管理」中随时吊销。</span>'),
       })
       if (!ok) return
     }
@@ -824,8 +824,8 @@ async function openShareLinksManager(nas) {
   const canRevoke = session.can('nas.authz.write')
   const modal = openModal({
     title: rqI18n.t('链接管理 · {name}', { name: nas.name }), wide: true,
-    body: '<div id="share-links-list"><div class="fs-12 text-4" style="padding:12px 0">加载中…</div></div>',
-    foot: '<button class="btn btn-default" data-cancel>关闭</button>',
+    body: rqI18n.t('<div id="share-links-list"><div class="fs-12 text-4" style="padding:12px 0">加载中…</div></div>'),
+    foot: rqI18n.t('<button class="btn btn-default" data-cancel>关闭</button>'),
   })
   modal.el.querySelector('[data-cancel]').onclick = () => modal.close()
   const load = async () => {
@@ -835,28 +835,28 @@ async function openShareLinksManager(nas) {
       const items = result.items ?? []
       host.innerHTML = ''
       if (!items.length) {
-        host.innerHTML = '<div class="muted-box">尚未签发分享链接：在文件浏览中点击文件的「复制下载链接」即可签发。</div>'
+        host.innerHTML = rqI18n.t('<div class="muted-box">尚未签发分享链接：在文件浏览中点击文件的「复制下载链接」即可签发。</div>')
         return
       }
       host.appendChild(renderTable({
         columns: [
-          { title: '文件', render: (item) => `<span class="mono fs-12" style="word-break:break-all">${esc(item.path)}</span>` },
-          { title: '签发人', width: 100, render: (item) => `<span class="fs-12">${esc(item.userName)}</span>` },
-          { title: '状态 / 有效期', width: 170, render: (item) => shareStatusBadge(item) },
-          { title: '使用', width: 60, render: (item) => `<span class="col-num fs-12">${item.useCount}</span>` },
-          { title: '签发时间', width: 110, render: (item) => `<span class="fs-12 text-4">${timeAgo(item.createdAt)}</span>` },
+          { title: rqI18n.t('文件'), render: (item) => `<span class="mono fs-12" style="word-break:break-all">${esc(item.path)}</span>` },
+          { title: rqI18n.t('签发人'), width: 100, render: (item) => `<span class="fs-12">${esc(item.userName)}</span>` },
+          { title: rqI18n.t('状态 / 有效期'), width: 170, render: (item) => shareStatusBadge(item) },
+          { title: rqI18n.t('使用'), width: 60, render: (item) => `<span class="col-num fs-12">${item.useCount}</span>` },
+          { title: rqI18n.t('签发时间'), width: 110, render: (item) => `<span class="fs-12 text-4">${timeAgo(item.createdAt)}</span>` },
           { title: '', width: 80, render: (item) => (!item.revokedAt && canRevoke
-            ? `<button class="btn btn-ghost btn-sm stop" data-revoke="${esc(item.id)}" style="color:var(--danger)">吊销</button>` : '') },
+            ? `<button class="btn btn-ghost btn-sm stop" data-revoke="${esc(item.id)}" style="color:var(--danger)">${rqI18n.t('吊销')}</button>` : '') },
         ],
         rows: items,
         rowKey: (item) => item.id,
-        empty: '没有分享链接',
+        empty: rqI18n.t('没有分享链接'),
       }))
       host.querySelectorAll('[data-revoke]').forEach((btn) => {
         btn.onclick = async () => {
           const ok = await confirmDialog({
-            title: '吊销分享链接', danger: true, confirmText: '确认吊销',
-            message: '吊销后该链接立即失效（访问被拒绝），操作实时生效并写入审计日志。',
+            title: rqI18n.t('吊销分享链接'), danger: true, confirmText: rqI18n.t('确认吊销'),
+            message: rqI18n.t('吊销后该链接立即失效（访问被拒绝），操作实时生效并写入审计日志。'),
           })
           if (!ok) return
           try {
@@ -874,10 +874,10 @@ async function openShareLinksManager(nas) {
 }
 
 function shareStatusBadge(item) {
-  if (item.revokedAt) return `<span class="badge badge-danger no-dot">已吊销</span><span class="fs-11 text-4" style="margin-left:4px">${timeAgo(item.revokedAt)}</span>`
-  if (item.status === 'expired') return '<span class="badge badge-muted no-dot">已过期</span>'
-  if (item.expiresAt === null) return '<span class="badge badge-warn no-dot">永久有效</span>'
-  return `<span class="badge badge-ok no-dot">有效</span><span class="fs-11 text-4" style="margin-left:4px">${esc(rqI18n.t('剩 {time}', { time: shareRemaining(item.remainingSec) }))}</span>`
+  if (item.revokedAt) return `<span class="badge badge-danger no-dot">${rqI18n.t('已吊销')}</span><span class="fs-11 text-4" style="margin-left:4px">${timeAgo(item.revokedAt)}</span>`
+  if (item.status === 'expired') return rqI18n.t('<span class="badge badge-muted no-dot">已过期</span>')
+  if (item.expiresAt === null) return rqI18n.t('<span class="badge badge-warn no-dot">永久有效</span>')
+  return `<span class="badge badge-ok no-dot">${rqI18n.t('有效')}</span><span class="fs-11 text-4" style="margin-left:4px">${esc(rqI18n.t('剩 {time}', { time: shareRemaining(item.remainingSec) }))}</span>`
 }
 
 function shareRemaining(sec) {
@@ -946,11 +946,11 @@ function healthCell(health) {
 }
 
 function healthText(status) {
-  return { healthy: '健康', degraded: '降级', down: '不可用', unknown: '未知' }[status] ?? status
+  return { healthy: rqI18n.t('健康'), degraded: rqI18n.t('降级'), down: rqI18n.t('不可用'), unknown: rqI18n.t('未知') }[status] ?? status
 }
 
 function dataClassLabel(cls) {
-  return { public: '公开', internal: '内部', confidential: '机密', secret: '绝密' }[cls] ?? (cls ?? '—')
+  return { public: rqI18n.t('公开'), internal: rqI18n.t('内部'), confidential: rqI18n.t('机密'), secret: rqI18n.t('绝密') }[cls] ?? (cls ?? '—')
 }
 
 function fmtBytes(value) {

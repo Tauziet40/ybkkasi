@@ -12,9 +12,9 @@ import {
 } from '../ui.js'
 
 const TTL_OPTIONS = [
-  { hours: 168, label: '7 天' },
-  { hours: 720, label: '30 天（默认）' },
-  { hours: 2160, label: '90 天' },
+  { hours: 168, label: rqI18n.t('7 天') },
+  { hours: 720, label: rqI18n.t('30 天（默认）') },
+  { hours: 2160, label: rqI18n.t('90 天') },
 ]
 // 模块级常量保持中文原文（键=原文）；渲染时经 rqI18n.t 翻译
 const ttlLabel = (label) => rqI18n.t(label)
