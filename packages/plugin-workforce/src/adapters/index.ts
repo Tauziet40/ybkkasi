@@ -1,9 +1,9 @@
 /**
- * 资源适配器注册表（契约 AdapterRegistry；adapters/* 六个内建适配器在此装配）。
+ * Registre des adaptateurs de ressources (contrat AdapterRegistry ; les six adaptateurs intégrés de adapters/* sont assemblés ici).
  *
- * 适配器职责：把受控调用映射到既有网关（mcpRegistry/connectorHub/modelGateway/
- * skillHub/nasRegistry），网关原有授权链一项不少（两层授权取交集，§9.5）；
- * 缺席能力返回未支持，不以空实现冒充成功。
+ * Responsabilité des adaptateurs : mapper l'appel contrôlé vers les passerelles existantes (mcpRegistry/connectorHub/modelGateway/
+ * skillHub/nasRegistry), sans retirer un seul maillon de la chaîne d'autorisation d'origine des passerelles (intersection des deux couches d'autorisation, §9.5) ;
+ * une capacité absente renvoie non pris en charge, sans faire passer une implémentation vide pour un succès.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -26,8 +26,8 @@ export class AdapterRegistryService extends Service implements AdapterRegistry {
 
   constructor(ctx: Context) {
     super(ctx, 'workforceAdapters')
-    // 六个内建适配器（ctx 以结构化探测面传入，适配器不依赖具体服务类；
-    // 探测面形状即各适配器文件内的 Probe 接口——网关 additive 扩展由组4/5 落地）
+    // Les six adaptateurs intégrés (ctx passé sous forme d'une face de sondage structurée, les adaptateurs ne dépendent pas des classes de service concrètes ;
+    // la forme de la face de sondage est l'interface Probe de chaque fichier d'adaptateur — les extensions additives des passerelles seront livrées par les groupes 4/5)
     const probeCtx = ctx as unknown as {
       mcpRegistry?: Parameters<typeof createMcpAdapter>[0]['mcpRegistry']
       connectorHub?: Parameters<typeof createConnectorAdapter>[0]['connectorHub']

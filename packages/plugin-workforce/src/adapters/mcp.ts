@@ -1,12 +1,12 @@
 /**
- * MCP 资源适配器（§4.2/D.3：数字员工访问业务系统的受控工具出口）。
+ * Adaptateur de ressources MCP (§4.2/D.3 : sortie d'outils contrôlée par laquelle l'employé numérique accède aux systèmes métier).
  *
- * probeGrant：结构化探测 mcpRegistry.authorize(caller, serviceId, toolName)（真实签名）
- * 对 grant 的每个 action 逐一探测——真实生效以网关权限组为准，不做 UI 勾选假设；
- * 权限组引用经 permGroups 结构化探测回填，拿不到则 ref='probe:authorize-only'。
- * invoke：调 mcpRegistry.invoke 走网关原有授权链（两层授权取交集，§9.5），并经第 5 形参
- * workRef 把工作引用（permit/run）透传给网关工作闸门与调用记录（D1 修复：组4 additive
- * 已落地；网关仍不回传调用 ID/usage 事件 ID——gatewayRef 诚实降级记录，不伪造证据）。
+ * probeGrant : sondage structuré mcpRegistry.authorize(caller, serviceId, toolName) (signature réelle)
+ * pour chaque action du grant — l'effectivité réelle fait foi des groupes de permissions de la passerelle, pas des suppositions de cases cochées dans l'UI ;
+ * la référence de groupe de permissions est reconstituée par sondage structuré permGroups, à défaut ref='probe:authorize-only'.
+ * invoke : appelle mcpRegistry.invoke en passant par la chaîne d'autorisation d'origine de la passerelle (intersection des deux couches d'autorisation, §9.5), et via le 5e paramètre
+ * workRef transmet la référence de travail (permit/run) à la barrière de travail de la passerelle et aux enregistrements d'appel (correctif D1 : l'additive du groupe 4
+ * est livré ; la passerelle ne renvoie toujours pas l'ID d'appel/l'ID d'événement usage — gatewayRef enregistre la dégradation honnêtement, sans preuve fabriquée).
  */
 import { sha256Hex } from '../../../platform-core/src/ids.ts'
 import { t } from '../../../platform-i18n/src/index.ts'
@@ -19,7 +19,7 @@ import type {
 import type { IdentityResolution, ResourceGrantSpec } from '../contract.ts'
 import type { WorkExecutionContext, WorkRefIndex } from '../../../platform-core/src/workforce-port.ts'
 
-/** mcpRegistry 结构化探测面（真实签名见 plugin-mcp/src/index.ts McpService）。 */
+/** Face de sondage structurée de mcpRegistry (signature réelle dans plugin-mcp/src/index.ts McpService). */
 interface McpRegistryProbe {
   authorize?: (caller: { type: 'user' | 'agent' | 'app'; id: string; name: string }, serviceId: string, toolName: string) =>
     { ok: true; readOnly: boolean } | { ok: false; reason: string }
@@ -33,7 +33,7 @@ export function createMcpAdapter(ctx: {
 }): ResourceAdapter {
   const registry = (): McpRegistryProbe => ctx.mcpRegistry ?? {}
 
-  /** 员工机器主体 → 网关 InvokeCaller（绑定 Agent 反查，不接受参数传入身份）。 */
+  /** Sujet machine de l'employé → InvokeCaller de la passerelle (recherche inverse de l'Agent lié, identité non acceptée en paramètre). */
   const gatewayCaller = (resolution: IdentityResolution): { type: 'agent'; id: string; name: string } => ({
     type: 'agent',
     id: resolution.binding.agentId || resolution.employee.primaryAgentId || resolution.employee.id,
@@ -55,7 +55,7 @@ export function createMcpAdapter(ctx: {
           return { ok: false, message: t('MCP 授权探针未通过（{handle}）：{reason}', { handle: `${spec.registryId}.${action}`, reason: verdict.reason }) }
         }
       }
-      // 权限组证据：结构化探测 permGroups；拿不到则诚实记录 authorize-only
+      // Preuve du groupe de permissions : sondage structuré permGroups ; à défaut, enregistrement honnête authorize-only
       try {
         if (typeof hub.permGroups === 'function') {
           const agentId = caller.id
@@ -66,7 +66,7 @@ export function createMcpAdapter(ctx: {
           if (groupIds.length > 0) return { ok: true, ref: `permgroup:${groupIds.join(',')}` }
         }
       } catch {
-        // 权限组查询缺席 → 降级记录
+        // requête de groupes de permissions absente → enregistrement dégradé
       }
       return { ok: true, ref: 'probe:authorize-only' }
     },
@@ -82,10 +82,10 @@ export function createMcpAdapter(ctx: {
         id: work.agentId || work.principalId,
         name: t('数字员工:{id}', { id: work.employeeId }),
       }
-      // 工作引用索引（§10.4 / D1 修复）：网关工作闸门按 permitId 核验工作级授权（V28），
-      // 并把 permit/run/employee 关联进网关调用记录与 usage（D11）。仅作索引透传，
-      // 授权事实（permit/租约/清单/参数范围）一律由网关侧服务端回查。stepKey 不在
-      // WorkExecutionContext（账本层唯一约束承载步骤幂等），故不透传。
+      // Index de référence de travail (§10.4 / correctif D1) : la barrière de travail de la passerelle vérifie l'autorisation au niveau travail par permitId (V28),
+      // et relie permit/run/employee aux enregistrements d'appel de la passerelle et à l'usage (D11). Simple transmission d'index,
+      // les faits d'autorisation (permit/bail/inventaire/périmètre de paramètres) sont toujours revérifiés côté serveur de la passerelle. stepKey n'est pas dans
+      // WorkExecutionContext (l'idempotence d'étape repose sur la contrainte d'unicité de la couche registre), donc non transmis.
       const workRef: WorkRefIndex = {
         permitId: work.permitId,
         ...(work.runId ? { runId: work.runId } : {}),
@@ -94,7 +94,7 @@ export function createMcpAdapter(ctx: {
       }
       const result = await hub.invoke(caller, input.tool.registryId, input.tool.action, input.args, workRef)
       if (result.ok) {
-        // 网关暂未回传调用 ID/usage 事件 ID（组4 additive 前诚实缺省，不伪造）
+        // la passerelle ne renvoie pas encore l'ID d'appel/l'ID d'événement usage (défaut honnête avant l'additive du groupe 4, pas de fabrication)
         return {
           ok: true,
           value: result.result,
@@ -111,7 +111,7 @@ export function createMcpAdapter(ctx: {
       return {
         ok: false,
         message: result.error ?? t('MCP 网关拒绝或调用失败'),
-        // denied/breaker_open＝资源级拒绝（停止，不换入口重试）；error＝执行失败
+        // denied/breaker_open = refus au niveau ressource (arrêt, pas de nouvelle tentative par une autre entrée) ; error = échec d'exécution
         gatewayRef: {
           status: result.status,
           version: result.version,

@@ -1,15 +1,15 @@
 /**
- * NasAuthzService —— NAS 数据权限决策服务（PDP，dev-plan-nas-authz §2.1/§2.3）。
+ * NasAuthzService — service de décision des permissions de données NAS (PDP, dev-plan-nas-authz §2.1/§2.3).
  *
- * 分层约束（O8）：判定逻辑全部在纯函数模块 ./authz/engine.ts（不依赖容器、无 IO），
- * 本 Service 只做 IO 装配：取数（IAM 组织树/身份映射 + NAS 资产 + 规则快照）→ 调引擎 → 落留痕。
+ * Contrainte de couches (O8) : toute la logique de jugement est dans le module de fonctions pures ./authz/engine.ts (sans conteneur, sans IO),
+ * ce Service ne fait que l'assemblage IO : prise de données (arbre d'organisations IAM/cartographie d'identités + actif NAS + instantané de règles) → appel du moteur → inscription des traces.
  *
- * 硬性约束：
- * - 身份一律经 X-On-Behalf-User 请求头/入参 userId 解析（支持平台 userId 与钉钉 userId 反查
- *   identityLinks），绝不进网关工具参数（P0-2 教训）；
- * - rules 单例带 version 字段，PUT 必须携带 ifVersion 乐观锁，冲突抛 RulesVersionConflictError（409）；
- * - fail-closed：无法解析用户/NAS/作用域一律 deny；判定留痕异步化（fire-and-forget 进 bus），
- *   普通记录 90 天滚动清理，delete/share/admin 高危留痕永久保留。
+ * Contraintes dures :
+ * - l'identité passe toujours par l'en-tête X-On-Behalf-User/le paramètre userId (prise en charge du userId plateforme et de la recherche inverse du userid DingTalk
+ *   dans identityLinks), jamais dans les paramètres d'outils de la passerelle (leçon P0-2) ;
+ * - rules est un singleton à champ version ; le PUT doit porter le verrou optimiste ifVersion, conflit = RulesVersionConflictError (409) ;
+ * - fail-closed : utilisateur/NAS/périmètre irrésoluble = toujours deny ; l'inscription des traces est asynchrone (fire-and-forget vers le bus),
+ *   les enregistrements ordinaires sont nettoyés glissamment à 90 jours, les traces des opérations à haut risque delete/share/admin sont conservées à vie.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -24,13 +24,13 @@ import {
 } from './authz/engine.ts'
 
 // ---------------------------------------------------------------------------
-// 数据模型
+// Modèle de données
 // ---------------------------------------------------------------------------
 
 /**
- * 签名分享链接档位策略（2026-09-21 决策 ②③；挂在规则单例上与数据权限治理面同源）。
- * 缺省字段由 NasShareLinkService.policy() 按默认值兜底：上限 30 天 / 永久默认关 /
- * 永久限 nas.authz.write。
+ * Politique de paliers des liens de partage signés (décisions ②③ du 2026-09-21 ; accrochée au singleton de règles, même source que la face de gouvernance des permissions de données).
+ * Les champs absents sont rattrapés par défaut via NasShareLinkService.policy() : plafond 30 jours / permanent fermé par défaut /
+ * permanent limité à nas.authz.write.
  */
 export interface ShareLinkPolicy {
   maxTtlSec: number
@@ -38,15 +38,15 @@ export interface ShareLinkPolicy {
   permanentPermission: string
 }
 
-/** 规则配置单例（nas:authzRules；version 乐观锁，PUT 携带 ifVersion）。 */
+/** Singleton de configuration de règles (nas:authzRules ; verrou optimiste version, le PUT porte ifVersion). */
 export interface AuthzRulesRecord extends RecordBase {
   id: 'singleton'
   version: number
-  /** 多租户预留：本期固定 t_default。 */
+  /** Réserve multi-tenant : fixé à t_default dans cette itération. */
   tenantId: string
   matrixOverrides?: Partial<Record<AuthzRole, Partial<Record<AuthzOp, boolean>>>>
   exceptions: AuthzException[]
-  /** C 角色关联的动态用户组 id（导入支持按组名解析）。 */
+  /** Ids des groupes d'utilisateurs dynamiques associés au rôle C (l'import prend en charge la résolution par nom de groupe). */
   cGroups: string[]
   externalReadPaths: Array<{ nasId: string; path: string }>
   observeOnly: boolean
@@ -55,7 +55,7 @@ export interface AuthzRulesRecord extends RecordBase {
   updatedBy?: string
 }
 
-/** 判定留痕（nas:authzDecisions）：高危 op 与全部 deny 落痕；异步写入。 */
+/** Trace de jugement (nas:authzDecisions) : trace pour les opérations à haut risque et tous les deny ; écriture asynchrone. */
 export interface AuthzDecisionRecord extends RecordBase {
   nasId: string
   userId: string
@@ -71,11 +71,11 @@ export interface AuthzDecisionRecord extends RecordBase {
   override: boolean
   observeOnly: boolean
   highRisk: boolean
-  /** 平台统一决策表达（W3-T5 契约 §11，additive）：既有引擎结论经 wrapPolicyDecision 包装的决策 id。 */
+  /** Expression de décision unifiée de la plateforme (contrat W3-T5 §11, additive) : id de décision obtenu en enveloppant la conclusion du moteur via wrapPolicyDecision. */
   decisionId?: string
 }
 
-/** 版本乐观锁冲突（REST 层映射 409）。 */
+/** Conflit de verrou optimiste de version (mappé 409 par la couche REST). */
 export class RulesVersionConflictError extends Error {
   readonly currentVersion: number
   constructor(currentVersion: number, expected: number) {
@@ -86,15 +86,15 @@ export class RulesVersionConflictError extends Error {
 }
 
 /**
- * 文件所有权登记（2026-09-17 新增）：上传者对自有文档默认全权（判定序 ③b）。
- * 仅登记文件精确路径（目录不登记，避免建目录者获得子树删权）；删除/重命名/移动随生命周期维护。
+ * Enregistrement de propriété de fichiers (ajout 2026-09-17) : l'uploadeur dispose par défaut de tous les droits sur ses propres documents (ordre de jugement ③b).
+ * Seuls les chemins exacts de fichiers sont enregistrés (pas les répertoires, pour éviter qu'un créateur de répertoire n'obtienne le droit de suppression du sous-arbre) ; suppression/renommage/déplacement maintenus au fil du cycle de vie.
  */
 export interface NasOwnershipRecord extends RecordBase {
   nasId: string
   path: string
   userId: string
   userName?: string
-  /** 登记来源：upload=平台上传链路、gateway:upload/gateway:copy=网关上报（hermes/直连 MCP） */
+  /** Source de l'enregistrement : upload = chaîne d'upload de la plateforme, gateway:upload/gateway:copy = rapport de passerelle (hermes/MCP direct) */
   source: string
   createdAt: string
   updatedAt: string
@@ -105,16 +105,16 @@ const DENIED_ALERT_THRESHOLD = 10
 const DECISION_RETENTION_DAYS = 90
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 export class NasAuthzService extends Service {
   static readonly provide = 'nasAuthz'
 
   /**
-   * Service 级依赖（cordis 惰性解析）：iam=组织树/身份映射/动态组（外部插件依赖），
-   * nasRegistry=同插件文件网关客户端（对账 job 枚举目录用）。插件级 inject 不自引用，
-   * 同插件服务经 Service.inject 声明，避免插件装载期自依赖死锁。
+   * Dépendances au niveau Service (résolution paresseuse cordis) : iam = arbre d'organisations/cartographie d'identités/groupes dynamiques (dépendance externe),
+   * nasRegistry = client de passerelle de fichiers du même plugin (énumération de répertoires pour le job de réconciliation). L'inject au niveau extension ne se référence pas soi-même,
+   * les services du même plugin se déclarent via Service.inject, contre l'impasse d'auto-dépendance au chargement de l'extension.
    */
   static readonly inject = ['iam', 'nasRegistry']
 
@@ -123,7 +123,7 @@ export class NasAuthzService extends Service {
 
   constructor(ctx: Context) {
     super(ctx, 'nasAuthz')
-    // 判定留痕异步化（R2）：check 只发事件不落库，订阅侧兜住全部存储异常
+    // Inscription de trace asynchrone (R2) : check n'émet qu'un événement sans écrire, la souscription absorbe toutes les anomalies de stockage
     ctx.platformBus.on('nas.authz.decision', (payload) => {
       try {
         const record = payload as Omit<AuthzDecisionRecord, 'id' | 'createdAt' | 'updatedAt'>
@@ -132,7 +132,7 @@ export class NasAuthzService extends Service {
         this.ctx.logger('nasAuthz').warn('判定留痕落库失败', error)
       }
     })
-    // C 组漂移告警（R5）：IAM 动态组重算漂移 → 平台告警中心
+    // Alerte de dérive du groupe C (R5) : dérive au recalcul des groupes dynamiques IAM → centre d'alertes de la plateforme
     ctx.platformBus.on('nas.authz.cGroupDrift', (payload) => {
       const p = payload as { groupId: string; groupName: string; addedCount: number; removedCount: number; threshold: number }
       this.ctx.audit.fire({
@@ -143,16 +143,16 @@ export class NasAuthzService extends Service {
         resourceId: p.groupId,
       })
     })
-    // 每日组织↔目录对账 job（R1）+ 留痕滚动清理；unref 不阻断进程退出
+    // Job quotidien de réconciliation organisations↔répertoires (R1) + nettoyage glissant des traces ; unref pour ne pas bloquer la sortie du processus
     const daily: ReturnType<typeof setInterval> = setInterval(() => {
       void this.dailyReconcile().catch((error) => this.ctx.logger('nasAuthz').warn('对账 job 失败', error))
     }, 24 * 60 * 60_000)
     daily.unref?.()
-    // share 审批执行器：审批通过自动写入 7 天 share 例外（§2.7 闭环）
+    // Exécuteur d'approbation share : approbation accordée = écriture automatique d'une exception share de 7 jours (boucle fermée §2.7)
     this.registerShareExecutor()
   }
 
-  // -- 集合 ---------------------------------------------------------------
+  // -- Collections ---------------------------------------------------------------
 
   rulesCollection(): Collection<AuthzRulesRecord> {
     return this.ctx.opsStorage.collection<AuthzRulesRecord>('nas:authzRules')
@@ -166,9 +166,9 @@ export class NasAuthzService extends Service {
     return this.ctx.opsStorage.collection<NasOwnershipRecord>('nas:ownership')
   }
 
-  // -- 文件所有权（上传者默认全权，2026-09-17 新增） -------------------------
+  // -- Propriété de fichiers (l'uploadeur tout-puissant par défaut, ajout 2026-09-17) -------------------------
 
-  /** 登记所有权（上传/复制成功后调用）：按 (nasId, path) upsert，最后写入者持有。用户不可解析则忽略（匿名/机器写不登记）。 */
+  /** Enregistre la propriété (appelé après upload/copie réussi) : upsert par (nasId, path), le dernier écrivain détient. Utilisateur irrésoluble = ignoré (écriture anonyme/machine non enregistrée). */
   recordOwnership(input: { nasId: string; path: string; userId: string; source?: string }): NasOwnershipRecord | undefined {
     const user = this.resolveUser(input.userId)
     if (!user) return undefined
@@ -190,7 +190,7 @@ export class NasAuthzService extends Service {
     return this.ownershipCollection().insert({ id: newId('own'), nasId, path, userId: user.id, userName: user.displayName, source: input.source ?? 'upload', createdAt: now, updatedAt: now })
   }
 
-  /** 移除所有权（删除成功后调用，含子树）。返回移除条数。 */
+  /** Retire la propriété (appelé après suppression réussie, sous-arbre inclus). Renvoie le nombre de retraits. */
   removeOwnershipFor(nasIdInput: string, paths: string[]): number {
     const nas = this.nasDescriptor(nasIdInput)
     const nasId = nas?.id ?? nasIdInput
@@ -206,7 +206,7 @@ export class NasAuthzService extends Service {
     return removed
   }
 
-  /** 改写所有权路径（重命名/移动成功后调用，含子树前缀改写）。返回改写条数。 */
+  /** Réécrit les chemins de propriété (appelé après renommage/déplacement réussi, réécriture des préfixes de sous-arbre incluse). Renvoie le nombre de réécritures. */
   rewriteOwnershipFor(nasIdInput: string, fromPath: string, toPath: string): number {
     const nas = this.nasDescriptor(nasIdInput)
     const nasId = nas?.id ?? nasIdInput
@@ -243,7 +243,7 @@ export class NasAuthzService extends Service {
     })
   }
 
-  /** check 用：请求用户在这些路径上持有的所有权（精确路径匹配，身份经平台/钉钉双解析）。 */
+  /** Pour check : les propriétés détenues par l'utilisateur demandeur sur ces chemins (correspondance de chemin exact, identité résolue doublement plateforme/DingTalk). */
   private ownedPathsFor(nasIdInput: string, rawUserId: string, paths: string[]): string[] {
     const user = this.resolveUser(rawUserId)
     if (!user) return []
@@ -254,7 +254,7 @@ export class NasAuthzService extends Service {
     return this.ownershipCollection().find((item) => item.nasId === nasId && item.userId === user.id && wanted.has(item.path)).map((item) => item.path)
   }
 
-  // -- 规则 -----------------------------------------------------------------
+  // -- Règles -----------------------------------------------------------------
 
   getRules(): AuthzRulesRecord {
     const existing = this.rulesCollection().get('singleton')
@@ -273,9 +273,9 @@ export class NasAuthzService extends Service {
   }
 
   /**
-   * 更新规则（乐观锁）：ifVersion 必须等于当前 version，否则抛 RulesVersionConflictError。
-   * cGroups 支持按动态组名引用（与导入一致，消除部署间 ID 耦合；解析不到的名称直接报错）。
-   * 变更落审计（调用方 changeLog 由 REST 层补记）；C 组引用变化回写 iam 组标记（drift 联动）。
+   * Met à jour les règles (verrou optimiste) : ifVersion doit égaler le version courant, sinon jette RulesVersionConflictError.
+   * cGroups accepte les références par nom de groupe dynamique (comme l'import, supprimant le couplage d'IDs entre déploiements ; un nom irrésoluble = erreur directe).
+   * Le changement tombe dans l'audit (changeLog de l'appelant complété par la couche REST) ; la variation des références aux groupes C réécrit la marque du groupe iam (couplage drift).
    */
   updateRules(patch: {
     matrixOverrides?: Partial<Record<AuthzRole, Partial<Record<AuthzOp, boolean>>>>
@@ -315,8 +315,8 @@ export class NasAuthzService extends Service {
   }
 
   /**
-   * 种子导入（幂等）：与 hermes_nas_rbac_rules.json 等价的规则快照。
-   * cGroups 支持按动态组名解析；内容与现规则一致时不升版本（幂等）。
+   * Import de graines (idempotent) : instantané de règles équivalent à hermes_nas_rbac_rules.json.
+   * cGroups prend en charge la résolution par nom de groupe dynamique ; contenu identique aux règles courantes = pas de montée de version (idempotent).
    */
   importRules(seed: {
     matrixOverrides?: Partial<Record<AuthzRole, Partial<Record<AuthzOp, boolean>>>>
@@ -353,7 +353,7 @@ export class NasAuthzService extends Service {
     return { changed: true, version: saved.version, unresolvedGroups: unresolved }
   }
 
-  /** 追加例外（share 审批产物 / 运维手工授权），自动升版本。 */
+  /** Ajoute une exception (produit d'approbation share / autorisation manuelle d'exploitation), montée de version automatique. */
   addException(exception: Omit<AuthzException, 'id' | 'createdAt'> & { id?: string }, actor: string): AuthzException {
     const current = this.getRules()
     const record: AuthzException = {
@@ -369,11 +369,11 @@ export class NasAuthzService extends Service {
     return this.getRules().exceptions
   }
 
-  // -- 判定 -----------------------------------------------------------------
+  // -- Jugement -----------------------------------------------------------------
 
   /**
-   * 五步判定（入口）：身份解析（平台 userId / 钉钉 userId 反查）→ 取数装配 → 纯函数引擎 → 留痕。
-   * fail-closed：任何取数失败（用户不存在/NAS 不存在/作用域未命中）都产出带理由的 deny。
+   * Jugement en cinq étapes (entrée) : résolution d'identité (userId plateforme / recherche inverse userid DingTalk) → assemblage des données → moteur de fonctions pures → trace.
+   * fail-closed : tout échec de prise de données (utilisateur inexistant/NAS inexistant/périmètre non atteint) produit un deny motivé.
    */
   check(input: { nasId: string; userId: string; paths: string[]; op: AuthzOp; override?: boolean; caller?: string }): EngineDecision & { userName?: string; nasName?: string } {
     const caller = input.caller ?? 'unknown'
@@ -393,8 +393,8 @@ export class NasAuthzService extends Service {
     if (!op) return { ...base, reasons: [unsupportedReason], perPath: paths.map((path) => ({ path, decision: 'deny' as const, reasons: [unsupportedReason] })) }
     const user = this.resolveUser(input.userId)
     const nas = this.nasDescriptor(input.nasId)
-    // 网关回调以 NAS IP 充当 nasId（其天然只知 IP）：统一收敛到平台资产 ID，
-    // 保证例外/规则的 nasId 按键一致命中（否则 IP 字面量 ≠ 资产 ID，显式授权永不生效）。
+    // Le rappel de passerelle sert de nasId à l'IP NAS (elle ne connaît naturellement que l'IP) : convergence uniforme vers l'ID d'actif plateforme,
+    // pour garantir que les nasId des exceptions/règles atteignent la clé (sinon l'IP littérale ≠ ID d'actif, l'autorisation explicite ne prend jamais effet).
     const canonicalNasId = nas?.id ?? input.nasId
     const orgIndex = this.orgIndex()
     const ownedPaths = this.ownedPathsFor(canonicalNasId, input.userId, paths)
@@ -413,10 +413,10 @@ export class NasAuthzService extends Service {
       },
     )
     const enriched = { ...decision, ...(user ? { userName: user.displayName } : {}), ...(nas?.name ? { nasName: nas.name } : {}) }
-    // 统一决策表达（W3-T5 契约 §11）：引擎结论经 wrapPolicyDecision 包装取 decisionId，
-    // 随既有判定留痕（nas.authz.decision → nas:authzDecisions）落账——不重写引擎，决策可回查
+    // Expression de décision unifiée (contrat W3-T5 §11) : la conclusion du moteur enveloppée par wrapPolicyDecision prend un decisionId,
+    // inscrit avec la trace de jugement existante (nas.authz.decision → nas:authzDecisions) — sans réécrire le moteur, la décision reste consultable
     const policyDecision = wrapPolicyDecision(decision.decision === 'allow', decision.reasons)
-    // 留痕与告警（fire-and-forget；deny 全量、高危 op 全量留痕）
+    // Trace et alerte (fire-and-forget ; tous les deny, toutes les opérations à haut risque tracés)
     const highRisk = HIGH_RISK_OPS.has(op)
     if (decision.decision === 'deny' || highRisk) {
       this.ctx.platformBus.emit('nas.authz.decision', {
@@ -438,7 +438,7 @@ export class NasAuthzService extends Service {
     return enriched
   }
 
-  /** scope 查询（hermes/控制台收敛 list/search 枚举范围；亦是网关降级快照的数据源）。 */
+  /** Requête scope (hermes/console resserrent le périmètre d'énumération list/search ; aussi la source de données de l'instantané de repli de la passerelle). */
   scopeOf(nasId: string, userId: string): { role?: AuthzRole; special?: string; cTag: boolean; scope: string[]; matrix: Record<AuthzRole, Record<AuthzOp, boolean>>; observeOnly: boolean; degradeAllToReadonly: boolean; reasons: string[]; nasName?: string; userName?: string } {
     const rules = this.getRules()
     const user = this.resolveUser(userId)
@@ -471,9 +471,9 @@ export class NasAuthzService extends Service {
     }
   }
 
-  // -- 治理：负责人悬空 / 组织目录对账 / share 审批 ------------------------------
+  // -- Gouvernance : responsable vacant / réconciliation organisation-répertoire / approbation share ------------------------------
 
-  /** 负责人悬空扫描：leaderUserIds 为空（限挂了账号的组织）→ leaderVacant 事件 + 告警。 */
+  /** Scan des responsables vacants : leaderUserIds vide (limité aux organisations portant des comptes) → événement leaderVacant + alerte. */
   scanLeaderVacancy(): Array<{ orgId: string; orgName: string }> {
     const iam = this.ctx.iam
     const withUsers = new Set(iam.users().all().map((user) => user.orgId))
@@ -492,7 +492,7 @@ export class NasAuthzService extends Service {
     return vacant.map((org) => ({ orgId: org.id, orgName: org.name }))
   }
 
-  /** 组织↔目录对账（每日 job；亦由 REST 手动触发）：对在线 NAS 比对一级目录与组织树。 */
+  /** Réconciliation organisations↔répertoires (job quotidien ; aussi déclenchement manuel REST) : compare les répertoires de premier niveau et l'arbre d'organisations pour les NAS en ligne. */
   async dailyReconcile(): Promise<Array<{ nasId: string; nasName: string; findings: ReturnType<typeof reconcileOrgDirs>; error?: string }>> {
     const report: Array<{ nasId: string; nasName: string; findings: ReturnType<typeof reconcileOrgDirs>; error?: string }> = []
     const orgIndex = this.orgIndex()
@@ -527,8 +527,8 @@ export class NasAuthzService extends Service {
   }
 
   /**
-   * share 申请（dev-plan-nas-authz §2.7）：成员 T/M share 被拒后经 hermes/控制台发起，
-   * 审批人自动路由 = 沿申请者组织链向上找最近非空负责人，找不到升级 resource_admin 兜底。
+   * Demande share (dev-plan-nas-authz §2.7) : initiée via hermes/console après refus du share d'un membre T/M,
+   * le routage automatique de l'approbateur remonte la chaîne d'organisations du demandeur vers le premier responsable non vide, sinon escalade au repli resource_admin.
    */
   async requestShareApproval(input: { nasId: string; userId: string; path: string; reason?: string; requesterName?: string }): Promise<{ approvalId: string; approverSuggestion: { orgId?: string; orgName?: string; leaderUserIds: string[] }; escalated: boolean }> {
     const iam = this.ctx.iam
@@ -551,7 +551,7 @@ export class NasAuthzService extends Service {
     const nas = this.ctx.resourceCore.get('nas', input.nasId)
     const approval = this.ctx.audit.createApproval({
       kind: 'nas.share',
-      // WP-10/L1（QA A-06）：L4 高危统一高风险——通过需二次确认 + 公司级终审标记
+      // WP-10/L1 (QA A-06) : L4 haut risque unifié — l'approbation exige double confirmation + marqueur de revue finale société
       riskLevel: 'high',
       title: t('NAS 分享申请：{user} → {nas} {path}', { user: user.displayName, nas: nas?.name ?? input.nasId, path: input.path }),
       payload: {
@@ -565,7 +565,7 @@ export class NasAuthzService extends Service {
     return { approvalId: approval.id, approverSuggestion, escalated }
   }
 
-  /** 注册 share 审批执行器：审批通过 → 写入 7 天有效 share allow 例外（事由留痕）。 */
+  /** Enregistre l'exécuteur d'approbation share : approbation accordée → écriture d'une exception allow share valide 7 jours (motif tracé). */
   registerShareExecutor(): () => void {
     return this.ctx.audit.registerExecutor('nas.share', async (payload) => {
       const { nasId, path, userId, userName, reason } = payload as { nasId: string; path: string; userId: string; userName?: string; reason?: string }
@@ -584,9 +584,9 @@ export class NasAuthzService extends Service {
     })
   }
 
-  // -- 内部装配 -------------------------------------------------------------
+  // -- Assemblage interne -------------------------------------------------------------
 
-  /** 身份解析：平台 userId 优先，其次钉钉等三方 userId 反查 identityLinks（事实源）。 */
+  /** Résolution d'identité : userId plateforme prioritaire, sinon recherche inverse du userid tierce (DingTalk, etc.) dans identityLinks (source de fait). */
   private resolveUser(userId: string): { id: string; displayName: string; orgId: string; primaryOrgId?: string; accountType?: string; status: string } | undefined {
     const iam = this.ctx.iam
     const direct = iam.users().get(userId)
@@ -603,8 +603,8 @@ export class NasAuthzService extends Service {
     return buildOrgIndex(iam.orgs().all().map((org) => ({ id: org.id, name: org.name, parentId: org.parentId, leaderUserIds: iam.leadersOf(org.id) })))
   }
 
-  /** NAS 引擎描述符：rootPath/orgRoot/orgPathOverrides（access 组属性；映射表为 JSON 文本或对象）。
-   *  nasId 兼容两种形态：平台资产 ID，或网关侧天然持有的 NAS IP（按 attrs.nasIp 反查）。 */
+  /** Descripteur NAS pour le moteur : rootPath/orgRoot/orgPathOverrides (attributs du groupe access ; la table de correspondance est texte ou objet JSON).
+   *  nasId admet deux formes : ID d'actif plateforme, ou IP NAS naturellement détenue côté passerelle (recherche inverse par attrs.nasIp). */
   private nasDescriptor(nasId: string): EngineNas | undefined {
     let entity = this.ctx.resourceCore.get('nas', nasId)
     if (!entity && /\d+(\.\d+){3}$/.test(nasId.trim())) {
@@ -650,12 +650,12 @@ export class NasAuthzService extends Service {
     times.push(now)
     this.denyWindows.set(userId, times)
     if (times.length > DENIED_ALERT_THRESHOLD) {
-      // evaluateAlerts 对自定义 metric 统一读 context.value（count 同步提供便于告警文案）
+            // evaluateAlerts lit uniformément context.value pour une métrique personnalisée (count fournisynchroneement pour faciliter le libellé d'alerte)
       this.ctx.audit.evaluateAlerts('nas_authz_denied', { value: times.length, count: times.length, userId, ...context, resourceType: 'nas', resourceId: context.nasId })
     }
   }
 
-  /** 留痕保留策略：普通记录 90 天滚动清理；delete/share/admin 高危永久保留。节流每小时一次。 */
+  /** Politique de conservation des traces : enregistrements ordinaires nettoyés glissamment à 90 jours ; delete/share/admin à haut risque conservés à vie. Throttle horaire. */
   private pruneDecisionsIfNeeded(): void {
     const now = Date.now()
     if (now - this.lastDecisionPruneAt < 60 * 60_000) return
@@ -680,7 +680,7 @@ export class NasAuthzService extends Service {
       }
       if (exception.expiresAt !== undefined && Number.isNaN(Date.parse(exception.expiresAt))) throw new Error(t('例外 expiresAt 非法：{value}', { value: String(exception.expiresAt) }))
     }
-    // 合并语义：同 id 覆盖、新增追加、未出现在补丁中的既有例外保留（幂等导入靠内容比对）
+    // Sémantique de fusion : même id écrasé, ajouts apposés, les exceptions existantes absentes du patch conservées (import idempotent par comparaison de contenu)
     const byId = new Map(current.exceptions.map((exception) => [exception.id, exception]))
     for (const exception of exceptions) {
       byId.set(exception.id, { ...byId.get(exception.id), ...exception, createdBy: byId.get(exception.id)?.createdBy ?? actor })
@@ -688,7 +688,7 @@ export class NasAuthzService extends Service {
     return [...byId.values()]
   }
 
-  /** C 组名 → 组 id 解析（导入/更新按名引用，消除部署间 ID 耦合）。 */
+  /** Résolution nom de groupe C → id de groupe (référence par nom à l'import/mise à jour, supprimant le couplage d'IDs entre déploiements). */
   private resolveCGroupNames(names: string[]): { ids: string[]; unresolved: string[] } {
     const iam = this.ctx.iam
     const ids: string[] = []
@@ -709,7 +709,7 @@ export class NasAuthzService extends Service {
     return { ids, unresolved }
   }
 
-  /** 回写动态组 authzRoleC 标记（drift 告警联动：C 关联组任何漂移都告警）。 */
+  /** Réécrit la marque authzRoleC du groupe dynamique (couplage d'alerte drift : toute dérive d'un groupe associé C alerte). */
   private syncCGroupFlags(cGroups: string[]): void {
     const iam = this.ctx.iam
     const referenced = new Set(cGroups)
@@ -720,7 +720,7 @@ export class NasAuthzService extends Service {
     }
   }
 
-  /** 从网关 fs_list_shares 响应提取一级目录名（容错：content 块数组 / JSON 文本 / 对象）。 */
+  /** Extrait les noms de répertoires de premier niveau de la réponse fs_list_shares de la passerelle (tolérant : tableau de blocs content / texte JSON / objet). */
   private extractDirNames(payload: unknown): string[] {
     const collect = (input: unknown): Array<{ name?: string; path?: string }> => {
       if (typeof input === 'string') {
@@ -742,7 +742,7 @@ export class NasAuthzService extends Service {
 }
 
 // ---------------------------------------------------------------------------
-// 插件
+// Extension
 // ---------------------------------------------------------------------------
 
 declare module '@deepseek-ai/cordis' {

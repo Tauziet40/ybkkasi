@@ -1,23 +1,23 @@
 /**
- * @ybkk/plugin-panel-core —— 部门面板域服务（review-dsh-agent-panel-v2 Phase 1/2）。
+ * @ybkk/plugin-panel-core — service de domaine du panneau départemental (review-dsh-agent-panel-v2 Phase 1/2).
  *
- * 数据面（opsStorage 集合，全平台此前没有 channel/message 模型，这里是最大缺口之一的落点）：
- *   panel:deptConfigs   部门↔主题/协作模式/Agent 阵容/KPI/widget 布局（数据驱动皮肤，一套骨架五种皮肤）
- *   panel:channels      协作频道
- *   panel:messages      消息（四类气泡 + Agent 操作卡片 + 钉钉同步状态；uniqueKey 支撑桥接去重）
- *   panel:tasks         任务泳道状态机（todo/doing/review/done，卡片动作落点）
- *   panel:artifacts     部门知识（Agent 产出物沉淀，引用复用）
- *   panel:readCursors   未读游标
- *   panel:activations   行业激活（org×行业，active/locked 两态落库；pending=审批中心在办）
+ * Plan de données (collections opsStorage ; la plateforme n'avait pas auparavant de modèle channel/message, l'une des plus grosses lacunes atterrit ici) :
+ *   panel:deptConfigs   département↔thème/mode de collaboration/ligne-up d'Agents/KPI/disposition widget (habillage piloté par les données, un squelette, cinq habillages)
+ *   panel:channels      canaux de collaboration
+ *   panel:messages      messages (quatre classes de bulles + carte d'opération Agent + état de synchronisation DingTalk ; uniqueKey soutient la déduplication du pont)
+ *   panel:tasks         machine à états des couloirs de tâches (todo/doing/review/done, point d'atterrissage des actions de carte)
+ *   panel:artifacts     savoir départemental (dépôt des productions d'Agent, réutilisation par référence)
+ *   panel:readCursors   curseurs de non-lu
+ *   panel:activations   activation de secteur (org×secteur, deux états active/locked en base ; pending = dossier en cours au centre d'approbations)
  *
- * panelAgentRuntime（MVP 单轮，review Phase 1 第 8 条）：@Agent 唤起 → 读 Agent 资产
- * （model/systemPrompt）→ modelgw.invoke 单轮 → 产出写 messages/artifacts → usage 计量
- * （panel:<dept>.<行业code>，D1 裁决键格式）→ emit panel.message.created。
- * 模型取向：对话框显式切换（modelOverride）优先，否则跟随 Agent 资产的 model 属性；
- * 模型网关未配置时诚实降级（转人工任务），不造假 completion（对齐 modelgw 原则）。
+ * panelAgentRuntime (MVP tour unique, review Phase 1 item 8) : @Agent invoqué → lit l'actif Agent
+ * (model/systemPrompt) → modelgw.invoke en tour unique → la production écrite dans messages/artifacts → metering usage
+ * (panel:<dept>.<code secteur>, format de clé de l'arbitrage D1) → émet panel.message.created.
+ * Orientation du modèle : la bascule explicite de la boîte de dialogue (modelOverride) prime, sinon suit l'attribut model de l'actif Agent ;
+ * passerelle de modèles non configurée = dégradation honnête (tâche escaladée à l'humain), pas de completion fabriquée (aligné sur les principes de modelgw).
  *
- * widget 求值 resolveWidgetSource：connector/mcp/manual/mock 四源适配，逐 widget 独立降级
- * （照抄 portal.board() 范式）；来源徽标（连接器/手工/模拟）是治理硬性 DoD。
+ * Évaluation des widgets resolveWidgetSource : adaptation aux quatre sources connector/mcp/manual/mock, dégradation indépendante par widget
+ * (recopie du paradigme portal.board()) ; le badge de source (connecteur/manuel/simulé) est un DoD dur de gouvernance.
  */
 import { createHash } from 'node:crypto'
 import { Service } from '@deepseek-ai/cordis'
@@ -31,43 +31,43 @@ import { resolvePanelModelGateway } from './llm-bridge.ts'
 import type { AuditLogRecord } from '../../plugin-audit/src/index.ts'
 
 /**
- * V16/D08 问答分型标注（additive）：面板/A2A 的模型单轮调用是「问答」，不构成任务执行。
- * 目标 Agent 命中受管数字员工（workforce 端口服务端反查）时随应答返回本字段；
- * 端口未就绪/未命中时不出现（legacy 语义，消费方向后兼容）。
+ * Annotation de typage question-réponse V16/D08 (additive) : l'appel de modèle en tour unique du panneau/A2A est une « question-réponse », il ne constitue pas une exécution de tâche.
+ * Quand l'Agent cible atteint un employé numérique géré (recherche inverse serveur du port workforce), ce champ accompagne la réponse ;
+ * port non prêt/non atteint = absent (sémantique legacy, consommateur rétrocompatible).
  */
 export interface PanelWorkforceNotice {
   managed: true
   employeeId: string
-  /** 固定口径文案：问答结果不构成任务执行或交付验收（问答与执行彻底分型）。 */
+  /** Libellé de référentiel fixe : un résultat de question-réponse ne constitue ni exécution de tâche ni acceptance de livrable (typage intégral question-réponse vs exécution). */
   notice: string
 }
 
-/** V16/D08 技能证据化加载（D09 关联，additive）：直调成功即随应答返回本次实际加载的技能版本指纹。 */
+/** Chargement probant des skills V16/D08 (lien D09, additive) : un appel direct réussi renvoie avec la réponse l'empreinte de version du skill réellement chargé. */
 export interface PanelSkillLoad {
   skillId: string
   version: string
-  /** 当前版本指令内容摘要（sha256 hex）：安装版本、加载摘要与实际使用可对账（D09）。 */
+  /** Résumé du contenu d'instructions de la version courante (sha256 hex) : version installée, résumé de chargement et usage réel sont réconciliables (D09). */
   contentHash?: string
 }
 
 // ---------------------------------------------------------------------------
-// 记录模型
+// Modèle d'enregistrements
 // ---------------------------------------------------------------------------
 
 export interface DeptAgent {
-  /** 面板展示名（@唤起的键）。 */
+  /** Nom d'affichage du panneau (clé d'invocation @). */
   name: string
   desc: string
   icon: string
   busy?: boolean
-  /** 绑定的 Agent 资产引用（agent:<idOrSlug>）；缺省=未纳管，运行时诚实降级。 */
+  /** Référence de l'actif Agent lié (agent:<idOrSlug>) ; défaut = non géré, dégradation honnête à l'exécution. */
   agentRef?: string
 }
 
 export interface DeptKpi {
   label: string
   value: string
-  /** 来源徽标（治理 DoD）：manual 手工 / mock 演示 / connector 业务连接器。 */
+  /** Badge de source (DoD de gouvernance) : manual manuel / mock démo / connector connecteur métier. */
   source: 'manual' | 'mock' | 'connector'
 }
 
@@ -78,11 +78,11 @@ export interface DeptWidget {
   type: WidgetType
   title: string
   live?: boolean
-  /** 来源徽标（治理 DoD）：connector/mcp/manual/mock 四源。 */
+  /** Badge de source (DoD de gouvernance) : quatre sources connector/mcp/manual/mock. */
   source: 'manual' | 'mock' | 'connector' | 'mcp'
-  /** connector/mcp 源的引用（连接器 action / MCP 工具名）；v1 业务连接器缺位时求值降级。 */
+  /** Référence de la source connector/mcp (action de connecteur / nom d'outil MCP) ; v1, en l'absence de connecteur métier, l'évaluation se dégrade. */
   ref?: string
-  /** 行数据（五型各自的结构，与前端渲染契约一致）。 */
+  /** Données de lignes (structure propre à chacun des cinq types, cohérente avec le contrat de rendu du front). */
   rows: unknown[][]
 }
 
@@ -92,15 +92,15 @@ export interface DeptConfigRecord extends RecordBase {
   icon: string
   theme: string
   collab: string
-  /** 挂载的业务活动键（场景图谱 ACT 映射，如 mfg 部门挂 mfg+scm）。 */
+  /** Clé d'activité métier montée (cartographie ACT du scénario, ex. le département mfg monte mfg+scm). */
   acts: string[]
   colors: { accent: string; soft: string; deep: string }
   agents: DeptAgent[]
   kpis: DeptKpi[]
   widgets: DeptWidget[]
   /**
-   * 绑定的平台组织（账号组织打通）：设置后部门范围权限生效——仅该组织子树内的成员
-   * （及 '*' 管理员、机器凭证）可访问本部门面板；缺省=对持 panel.read 者开放。
+   * Organisation de la plateforme liée (interconnexion comptes-organisations) : posée, les permissions de périmètre départemental prennent effet — seuls les membres
+   * du sous-arbre de cette organisation (et l'admin '*', les identifiants machine) peuvent accéder au panneau du département ; défaut = ouvert aux détenteurs de panel.read.
    */
   orgId?: string
 }
@@ -116,11 +116,11 @@ export interface MessageCardOp {
   id: string
   label: string
   style?: 'primary' | 'dd' | 'plain'
-  /** 按钮行为：task.create 建任务 / task.transition 泳道迁移 / approval.request 走审批链 / dd.push 推钉钉 / ack 仅留痕。 */
+  /** Comportement du bouton : task.create crée une tâche / task.transition migre de couloir / approval.request passe la chaîne d'approbation / dd.push pousse DingTalk / ack trace seulement. */
   action?: 'task.create' | 'task.transition' | 'approval.request' | 'dd.push' | 'ack'
-  /** task.transition 的目标泳道。 */
+  /** Couloir cible de task.transition. */
   lane?: 'todo' | 'doing' | 'review' | 'done'
-  /** approval.request 的风险级（high=审批中心强制二次确认）。 */
+  /** Niveau de risque d'approval.request (high = double confirmation forcée au centre d'approbations). */
   risk?: 'high' | 'medium' | 'low'
 }
 
@@ -131,17 +131,17 @@ export interface MessageRecord extends RecordBase {
   senderId?: string
   senderName: string
   senderIcon?: string
-  /** 文本（白名单渲染在前端：esc 后仅放行 <b> 与 @mention span）。 */
+  /** Texte (rendu en liste blanche côté front : après échappement, seuls <b> et le span @mention passent). */
   text: string
   mentions: string[]
   card?: { title: string; ops: MessageCardOp[]; done: string[] }
-  /** 钉钉同步态：none 未开 / pending 待桥接投递 / sent 已投递 / failed 失败 / origin 来自钉钉。 */
+  /** État de synchronisation DingTalk : none fermé / pending en attente de livraison par le pont / sent livré / failed échec / origin venant de DingTalk. */
   ddSync: 'none' | 'pending' | 'sent' | 'failed' | 'origin'
   agentName?: string
-  /** Agent 回包实际使用的模型 slug（对话框切换或 Agent 资产解析结果）；人发消息无此字段。 */
+  /** Slug du modèle réellement utilisé par la réponse de l'Agent (bascule de la boîte de dialogue ou résolution de l'actif Agent) ; absent des messages humains. */
   model?: string
   sceneCode?: string
-  /** 桥接入向去重键（sender 提供时引擎级唯一）。 */
+  /** Clé de déduplication entrante du pont (unique au niveau moteur quand le sender la fournit). */
   uniqueKey?: string
 }
 
@@ -155,19 +155,19 @@ export interface TaskRecord extends RecordBase {
   sceneCode?: string
   messageId?: string
   createdBy: string
-  /** ── 执行中枢血缘（DSH issue#3 additive，2026-10-29）：面板=执行中枢投影，不复制权威状态 ── */
-  /** 关联的 exec-hub 任务（exec:issues.id）；携带即「面板泳道迁移镜像回写 exec-hub」。 */
+  /** ── Lignée du centre d'exécution (additive DSH issue#3, 2026-10-29) : panneau = projection du centre d'exécution, pas de copie de l'état d'autorité ── */
+  /** Tâche exec-hub liée (exec:issues.id) ; portée = « la migration de couloir du panneau se ré-écrit en miroir vers exec-hub ». */
   execIssueId?: string
-  /** 血缘根目标（exec:goals.id，随 execIssueId 冗余下发免二次反查）。 */
+  /** Objectif racine de lignée (exec:goals.id, délivré redondamment avec execIssueId pour éviter une seconde recherche inverse). */
   goalId?: string
-  /** 证据包引用（NAS/审批/审计产物 URI 数组，验收对账用）。 */
+  /** Références du paquet de preuves (tableau d'URI produits NAS/approbation/audit, pour la réconciliation d'acceptance). */
   evidenceRefs?: string[]
-  /** 验收结论：accepted=签认关闭 / rework=打回返工（面板签认动作落点，镜像回写 exec-hub）。 */
+  /** Conclusion d'acceptance : accepted = fermeture signée / rework = renvoi reprise (point d'atterrissage de l'action de signature du panneau, ré-écriture en miroir vers exec-hub). */
   verdict?: 'accepted' | 'rework'
   verdictBy?: string
   verdictAt?: string
   verdictOpinion?: string
-  /** 返工血缘（本任务由哪个任务打回产生）。 */
+  /** Lignée de renvoi (de quelle tâche provient la présente tâche renvoyée). */
   reworkOf?: string
 }
 
@@ -197,7 +197,7 @@ export interface ActivationRecord extends RecordBase {
   activatedBy?: string
 }
 
-/** 未激活行业的登记项（图形包缺位=即使误激活也无可渲染图谱，fail-closed）。 */
+/** Enregistrement d'un secteur non activé (paquet de cartographie absent = même activation erronée sans cartographie rendable, fail-closed). */
 export interface IndustryRegistryEntry {
   code: string
   name: string
@@ -206,9 +206,9 @@ export interface IndustryRegistryEntry {
 }
 
 /**
- * 内置行业登记（2026-09-11 IAW 改版）：工信部《参考指引（2025 版）》14 个重点行业全量登记，
- * 编码与行业场景图谱包（scenegraphs/*.json）一一对应。QB01/YB01/JB01 图谱包随平台分发；
- * 其余行业包同样内置，激活走宿主平台授权链（审批 + usage 计量 + audit 留痕）。
+ * Enregistrement intégré des secteurs (refonte IAW 2026-09-11) : les 14 secteurs prioritaires du « référentiel (édition 2025) » du ministère de l'Industrie tous enregistrés,
+ * codes en correspondance un-un avec les paquets de cartographie de scénarios (scenegraphs/*.json). Les paquets QB01/YB01/JB01 sont distribués avec la plateforme ;
+ * les autres paquets sont également intégrés, l'activation passe par la chaîne d'autorisation de la plateforme hôte (approbation + metering usage + trace d'audit).
  */
 export const INDUSTRY_REGISTRY: IndustryRegistryEntry[] = [
   { code: 'YB01', name: '钢铁行业', icon: '🏭', sub: '铁前/炼铁/炼钢/轧钢 · 一图四清单 · 98 场景' },
@@ -232,7 +232,7 @@ export type TaskLane = (typeof TASK_LANES)[number]
 export const LANE_LABELS: Record<TaskLane, string> = { todo: '待办', doing: '进行中', review: '待审', done: '完成' }
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 export class PanelService extends Service {
@@ -246,17 +246,17 @@ export class PanelService extends Service {
   }
 
   /**
-   * 可选宿主服务软读（plan-gate01 Phase 2 瘦身）：cordis 4.x 无 optional inject 语法，
-   * 未声明键的 ctx.<key> 访问在激活插件内硬抛 without inject（spike 定稿）——9 个可选键
-   * （iam/authn/audit/usage/modelGateway/resourceCore/behavior/mcpRegistry/skillHub）统一走
-   * ctx.reflect.get(key, false)：有提供者=实例（全量形态语义不变），无=undefined
-   * （01门演示态两级降级：记录类空记录 / 能力类诚实降级），绝不裸访问。
+   * Lecture douce des services d'hôte optionnels (amincissement plan-gate01 Phase 2) : cordis 4.x n'a pas de syntaxe d'inject optionnel,
+   * l'accès ctx.<clé> à une clé non déclarée jette durement sans inject dans un plugin activé (entériné par le spike) — les 9 clés optionnelles
+   * (iam/authn/audit/usage/modelGateway/resourceCore/behavior/mcpRegistry/skillHub) passent uniformément par
+   * ctx.reflect.get(clé, false) : avec fournisseur = instance (sémantique de la forme complète inchangée), sans = undefined
+   * (dégradation à deux niveaux de l'état démo porte 01 : enregistrement nul pour les types registre / dégradation honnête pour les types capacité), jamais d'accès nu.
    */
   soft<T = any>(key: string): T | undefined {
     return this.ctx.reflect.get(key, false) as T | undefined
   }
 
-  // -- 集合 -----------------------------------------------------------------
+  // -- Collections -----------------------------------------------------------------
 
   deptConfigs(): Collection<DeptConfigRecord> {
     return this.ctx.opsStorage.collection<DeptConfigRecord>('panel:deptConfigs')
@@ -290,7 +290,7 @@ export class PanelService extends Service {
     return this.ctx.opsStorage.collection<ActivationRecord>('panel:activations')
   }
 
-  // -- 部门与行业 ------------------------------------------------------------
+  // -- Départements et secteurs ------------------------------------------------------------
 
   dept(dept: string): DeptConfigRecord {
     const config = this.deptConfigs().get(dept)
@@ -298,7 +298,7 @@ export class PanelService extends Service {
     return config
   }
 
-  /** 计量/激活用的组织主键：登录人所属组织（org 树根归一由调用方保证存在）。 */
+  /** Clé primaire d'organisation pour metering/activation : organisation de la personne connectée (la normalisation vers la racine de l'arbre org est garantie existante par l'appelant). */
   activeIndustry(orgId: string): { code: string; name: string } | undefined {
     const activation = this.activations().findOne((item) => item.orgId === orgId && item.status === 'active')
     if (!activation) return undefined
@@ -306,9 +306,9 @@ export class PanelService extends Service {
     return { code: activation.code.toLowerCase(), name: registry?.name ?? activation.code }
   }
 
-  // -- 账号组织打通：部门 ↔ 平台组织 -----------------------------------------
+  // -- Interconnexion comptes-organisations : département ↔ organisation de la plateforme ---------------------------------
 
-  /** 组织子树包含判定（orgId 沿 parentId 上溯到 rootId）。组织目录缺失（演示态）fail-closed。 */
+  /** Jugement d'inclusion de sous-arbre d'organisation (orgId remonte parentId jusqu'à rootId). Catalogue d'organisations absent (état démo) = fail-closed. */
   orgSubtreeContains(rootId: string, orgId: string): boolean {
     const iam = this.soft('iam')
     if (!iam) return false
@@ -321,7 +321,7 @@ export class PanelService extends Service {
     return false
   }
 
-  /** 绑定组织信息（名称实时解析，组织改名不落陈旧数据）。组织目录缺失时诚实显示未绑定。 */
+  /** Informations de l'organisation liée (nom résolu en temps réel, le renommage d'organisation ne laisse pas de données périmées). Catalogue absent = affichage honnête non lié. */
   deptOrg(dept: DeptConfigRecord): { id: string; name: string } | undefined {
     if (!dept.orgId) return undefined
     const org = this.soft('iam')?.orgs().get(dept.orgId)
@@ -329,9 +329,9 @@ export class PanelService extends Service {
   }
 
   /**
-   * 部门范围权限（权限控制 × 组织归属双通道）：'*' 管理员与机器凭证（经 scope 授权的集成面）
-   * 直通；绑定组织后，人必须属于该组织子树；未绑定部门对所有 panel.read 持有者开放。
-   * org_admin 角色跨部门治理豁免（与 iam.* 的治理语义一致）。
+   * Permissions de périmètre départemental (double canal contrôle d'accès × rattachement d'organisation) : l'admin '*' et les identifiants machine (face d'intégration autorisée via scope)
+   * passent direct ; après liaison d'organisation, l'humain doit appartenir au sous-arbre ; département non lié = ouvert à tous les détenteurs de panel.read.
+   * Le rôle org_admin bénéficie d'une exemption de gouvernance inter-départements (cohérente avec la sémantique de gouvernance de iam.*).
    */
   deptScopeAllowed(exchangeCaller: { kind: string; userId?: string; permissions: string[] }, dept: DeptConfigRecord): boolean {
     if (exchangeCaller.permissions.includes('*')) return true
@@ -349,7 +349,7 @@ export class PanelService extends Service {
     return false
   }
 
-  /** 部门名册：绑定组织（或全组织兜底）子树内的成员（最小 PII：姓名/职务/组织名）。组织目录缺失（演示态）→ 空名册。 */
+  /** Registre du département : membres du sous-arbre de l'organisation liée (ou repli toutes organisations) (PII minimales : nom/fonction/nom d'organisation). Catalogue absent (état démo) → registre vide. */
   deptMembers(dept: DeptConfigRecord, limit = 50): Array<{ id: string; name: string; title?: string; orgName?: string }> {
     const iam = this.soft('iam')
     if (!iam) return []
@@ -363,26 +363,26 @@ export class PanelService extends Service {
       .map((user) => ({ id: user.id, name: user.displayName, ...(user.title ? { title: user.title } : {}), orgName: orgName(user.orgId) }))
   }
 
-  /** 计量键（D1 裁决）：panel:<dept>.<行业code 小写>；无激活行业回落 panel:<dept>.core。 */
+  /** Clé de metering (arbitrage D1) : panel:<dept>.<code secteur en minuscules> ; sans secteur activé, repli panel:<dept>.core. */
   meterResource(dept: string, orgId: string): string {
     const industry = this.activeIndustry(orgId)
     return `panel:${dept}.${industry?.code ?? 'core'}`
   }
 
-  /** 行业三态（选择器）：active 激活 / pending 审批在办 / locked 待授权。 */
+  /** Trois états de secteur (sélecteur) : active activé / pending approbation en cours / locked en attente d'autorisation. */
   industryStates(orgId: string, pendingCodes: string[]): Array<IndustryRegistryEntry & { state: 'active' | 'pending' | 'locked'; graphLoaded: boolean }> {
     return INDUSTRY_REGISTRY.map((entry) => {
       const active = this.activations().findOne((item) => item.orgId === orgId && item.code === entry.code && item.status === 'active')
       const graphLoaded = this.ctx.scenegraphs.get(entry.code) !== undefined
-      // 已激活但图谱包缺位（如被移除）→ 仍显示 active 但 graphLoaded=false，场景页诚实降级
+      // Activé mais paquet de cartographie absent (ex. retiré) → toujours affiché active mais graphLoaded=false, la page de scénario se dégrade honnêtement
       const pending = !active && pendingCodes.includes(entry.code)
       return { ...entry, state: active ? 'active' : pending ? 'pending' : 'locked', graphLoaded }
     })
   }
 
   /**
-   * 行业激活执行器（audit approvals executor）：审批通过 → 置 active + grantCapabilities + 事件。
-   * review D6 裁决：复用审批链 + 能力授权，license 签发链路（Ed25519 平台私钥）留待 Phase 4。
+   * Exécuteur d'activation de secteur (exécuteur d'approbations audit) : approbation accordée → pose active + grantCapabilities + événement.
+   * Arbitrage review D6 : réutilisation de la chaîne d'approbation + autorisation de capacités ; la chaîne d'émission de licence (clé privée Ed25519 de la plateforme) attend Phase 4.
    */
   buildActivationExecutor(): (payload: Record<string, unknown>, approverId: string) => Promise<unknown> {
     return async (payload, approverId) => {
@@ -398,13 +398,13 @@ export class PanelService extends Service {
       }
       try {
         this.soft('usage')?.grantCapabilities(`org:${orgId}`, [`panel:${code.toLowerCase()}`], 'industry-activation')
-      } catch { /* 计量运行期故障不阻断激活（计费面独立降级） */ }
+      } catch { /* une panne de metering à l'exécution ne bloque pas l'activation (dégradation indépendante du plan de facturation) */ }
       this.ctx.platformBus.emit(PlatformEvents.PanelIndustryActivated, { code, orgId, activatedBy: approverId })
       return { code, orgId, status: 'active' }
     }
   }
 
-  /** Agent 阵容 × Agent 资产联动：绑定资产的存在性与生命周期状态实时解析（宿主数字员工在线面）。资产目录缺失（演示态）→ 未绑定展示。 */
+  /** Ligne-up d'Agents × interconnexion avec les actifs Agent : l'existence et l'état de cycle de vie de l'actif lié sont résolus en temps réel (face en ligne des employés numériques hôtes). Catalogue d'actifs absent (état démo) → affichage non lié. */
   agentWithAsset(agentCard: DeptAgent): DeptAgent & { asset?: { id: string; slug?: string; name: string; status: string; model?: string } } {
     const ref = agentCard.agentRef?.replace(/^agent:/, '') ?? ''
     if (!ref) return { ...agentCard }
@@ -420,15 +420,15 @@ export class PanelService extends Service {
     }
   }
 
-  // -- widget 求值（照抄 portal.board() 的逐源独立降级范式） -------------------
+  // -- Évaluation des widgets (recopie du paradigme de dégradation indépendante par source de portal.board()) -------------------
 
   resolveWidgetSource(widget: DeptWidget): { rows: unknown[][]; degraded: boolean; sourceLabel: string } {
     const labels = { manual: '手工登记', mock: '模拟数据', connector: '连接器', mcp: 'MCP' }
     if (widget.source === 'manual' || widget.source === 'mock') {
       return { rows: widget.rows, degraded: false, sourceLabel: labels[widget.source] }
     }
-    // v1 业务连接器生态缺位（评审 C 节：演示期 100% 走 manual/mock + 来源徽标），
-    // connector/mcp 源 widget 显式降级，绝不拿假数据冒充真实业务面
+    // v1, écosystème de connecteurs métier absent (revue section C : en période de démo, 100% manual/mock + badge de source),
+    // les widgets de source connector/mcp se dégradent explicitement, jamais de fausses données se faisant passer pour une vraie face métier
     return {
       rows: [],
       degraded: true,
@@ -436,7 +436,7 @@ export class PanelService extends Service {
     }
   }
 
-  /** 部门看板聚合：全部 widget 独立求值降级（单块故障不拖垮整板）。 */
+  /** Agrégat du tableau de bord départemental : tous les widgets évalués avec dégradation indépendante (une tuile en panne ne coule pas le tableau). */
   board(dept: DeptConfigRecord): Array<{ id: string; type: WidgetType; title: string; live?: boolean; source: string; degraded: boolean; rows: unknown[][] }> {
     return dept.widgets.map((widget) => {
       try {
@@ -448,9 +448,9 @@ export class PanelService extends Service {
     })
   }
 
-  // -- 消息与频道 --------------------------------------------------------------
+  // -- Messages et canaux --------------------------------------------------------------
 
-  /** 未读数：频道内 lastReadAt 之后的非本人消息数。 */
+  /** Non-lus : nombre de messages d'autrui postérieurs au lastReadAt du canal. */
   unreadCount(userId: string, channelId: string): number {
     const cursor = this.readCursors().findOne((item) => item.userId === userId && item.channelId === channelId)
     const since = cursor?.at ?? ''
@@ -465,8 +465,8 @@ export class PanelService extends Service {
   }
 
   /**
-   * 发消息：落库 → 游标推进 → 事件（钉钉桥接订阅投递）→ @Agent 唤起。
-   * 返回落库消息；Agent 回包异步追加（调用方随后拉取即可）。
+   * Envoi d'un message : inscription → avance du curseur → événement (le pont DingTalk souscrit et livre) → invocation @Agent.
+   * Renvoie le message inscrit ; la réponse de l'Agent s'ajoute en asynchrone (l'appelant tire ensuite).
    */
   async sendMessage(input: {
     dept: string
@@ -479,11 +479,11 @@ export class PanelService extends Service {
     card?: MessageRecord['card']
     sceneCode?: string
     uniqueKey?: string
-    /** 对话框模型切换：本次会话指定模型（缺省跟随各 Agent 资产的 model 属性）。 */
+    /** Bascule de modèle de la boîte de dialogue : modèle spécifié pour cette session (défaut : suit l'attribut model de chaque actif Agent). */
     modelOverride?: string
-    /** 技能斜杠直调留痕用：只落消息不触发 @Agent 唤起（同一条文本不重复走 Agent 通道）。 */
+    /** Pour la trace de l'appel direct slash de skill : n'inscrit que le message sans invoquer @Agent (le même texte ne repasse pas par le canal Agent). */
     skipAgentDispatch?: boolean
-    /** agent 型回包的展示字段（senderIcon/agentName/实际使用模型），仅 senderType='agent' 携带。 */
+    /** Champs d'affichage de la réponse de type agent (senderIcon/agentName/modèle réellement utilisé), portés seulement si senderType='agent'. */
     senderIcon?: string
     agentName?: string
     replyModel?: string
@@ -519,20 +519,20 @@ export class PanelService extends Service {
   }
 
   /**
-   * panelAgentRuntime MVP（单轮）：@Agent 唤起 → Agent 资产 → modelgw 单轮 → 回包落库。
-   * 模型取向：对话框显式指定的 modelOverride 优先，否则跟随 Agent 资产的 model 属性。
-   * 未绑定资产/无模型可用 → 诚实降级消息 + 转人工待办，不造假回复。
+   * panelAgentRuntime MVP (tour unique) : @Agent invoqué → actif Agent → modelgw en tour unique → réponse inscrite.
+   * Orientation du modèle : le modelOverride explicitement spécifié dans la boîte de dialogue prime, sinon suit l'attribut model de l'actif Agent.
+   * Pas d'actif lié/aucun modèle disponible → message de dégradation honnête + à-faire escaladé à l'humain, pas de réponse fabriquée.
    */
   async dispatchAgentMentions(message: MessageRecord, modelOverride?: string): Promise<void> {
     const dept = this.dept(message.dept)
     for (const agentCard of dept.agents) {
-      // 按名册全名匹配（Agent 名常含空格，如「质量分析 Agent」），通用 regex 兜不了
+      // Correspondance par nom complet du registre (le nom d'Agent contient souvent des espaces, ex. « Agent d'analyse qualité »), une regex générique ne suffit pas
       if (!message.text.includes(`@${agentCard.name}`)) continue
       await this.invokeAgent(dept, agentCard, message, modelOverride)
     }
   }
 
-  /** Agent 应答落库 + 事件广播（invokeAgent / streamAgentReply 共用；V16/D08 分型标注随事件透传）。 */
+  /** Inscription de la réponse de l'Agent + diffusion d'événement (partagé invokeAgent / streamAgentReply ; l'annotation de typage V16/D08 transparaît avec l'événement). */
   private async insertAgentReply(
     dept: DeptConfigRecord, agentCard: DeptAgent, trigger: MessageRecord, text: string,
     card?: MessageRecord['card'], usedModel?: string, workforce?: PanelWorkforceNotice,
@@ -547,16 +547,16 @@ export class PanelService extends Service {
     this.ctx.platformBus.emit(PlatformEvents.PanelMessageCreated, {
       messageId: record.id, dept: dept.id, channelId: trigger.channelId,
       senderName: agentCard.name, text, ddSync: 'none', card: record.card, title: record.card?.title ?? '',
-      // V16/D08 additive 分型标注（命中受管员工才出现；面板 SSE 扇出原样透传，前端按需消费）
+      // Annotation de typage additive V16/D08 (n'apparaît qu'en cas d'employé géré atteint ; l'éventail SSE du panneau transmet tel quel, le front consomme au besoin)
       ...(workforce ? { workforce } : {}),
     })
     return record
   }
 
   /**
-   * Agent 调用前置解析（invokeAgent / streamAgentReply 共用）：资产绑定 → 模型取向 →
-   * 频道上下文 + 部门场景图谱摘要组装。返回 ok:false 时 reason 为可展示的诚实降级文案；
-   * ok 载荷携带 asset（审计 resourceId 与 V16/D08 分型探测的依据）。
+   * Résolution préalable de l'appel d'Agent (partagée invokeAgent / streamAgentReply) : liaison d'actif → orientation de modèle →
+   * assemblage du contexte de canal + résumé de cartographie de scénario du département. Quand ok:false, reason est un libellé de dégradation honnête affichable ;
+   * la charge ok porte asset (base du resourceId d'audit et de la détection de typage V16/D08).
    */
   private prepareAgentInvocation(
     dept: DeptConfigRecord,
@@ -569,10 +569,10 @@ export class PanelService extends Service {
     const ref = agentCard.agentRef?.replace(/^agent:/, '') ?? ''
     const asset = ref ? this.soft('resourceCore')?.list('agent').find((item) => item.id === ref || item.slug === ref || item.name === ref) : undefined
     if (!asset) return { ok: false, reason: '未绑定 Agent 资产（请在控制台「Agent 本体」登记并在此配置 agentRef）' }
-    // 模型取向（2026-09-11 放宽）：对话框显式切换 > Agent 资产 model 属性 > 目录首个在线模型。
-    // 放宽动因：资产 schema 的模型枚举（deepseek 系）与实际可用目录（MiniMax / dsh 桥 provider:model）
-    // 常常对不上——原逻辑直接判「未配置模型」转人工，@数字同事 永远无回复。回落不会造假：
-    // 回包按实际使用的模型标注（model 字段 + 前端 🧠 徽标），目录为空时保持原诚实拒绝。
+    // Orientation du modèle (relâchement 2026-09-11) : bascule explicite de la boîte de dialogue > attribut model de l'actif Agent > premier modèle en ligne du catalogue.
+    // Motif du relâchement : l'énumération de modèles du schéma d'actif (série deepseek) et le catalogue réellement disponible (MiniMax / provider:model du pont dsh)
+    // s'accordent rarement — l'ancienne logique jugeait directement « modèle non configuré » et escaladait à l'humain, @collègue numérique restait sans réponse. Le repli ne fabrique rien :
+    // la réponse est annotée du modèle réellement utilisé (champ model + badge 🧠 du front), catalogue vide = refus honnête d'origine maintenu.
     const preferred = modelOverride ?? String((asset.attrs as Record<string, unknown> | undefined)?.model ?? '')
     const resolved = resolvePanelModelGateway(this.ctx)
     const catalog = resolved?.gateway.models?.().all?.() ?? []
@@ -580,10 +580,10 @@ export class PanelService extends Service {
     let model = preferred
     if (!model || !catalog.some((item: { slug: string }) => item.slug === model)) {
       if (online.length > 0) model = online[0]!.slug
-      else if (resolved?.kind === 'dsh') model = 'default' // dsh 桥惰性目录：default 跟随 dsh 配置解析
+      else if (resolved?.kind === 'dsh') model = 'default' // catalogue paresseux du pont DSH : default suit la résolution de la configuration dsh
     }
     if (!model) return { ok: false, reason: 'Agent 资产未配置模型（model 属性为空），且本次会话未指定模型' }
-    // 组装频道上下文（最近 8 条）+ 部门场景图谱摘要
+    // Assemble le contexte de canal (8 derniers messages) + résumé de cartographie de scénario du département
     const recent = this.messages().find((m) => m.channelId === trigger.channelId).slice(-8)
     const contextText = recent.map((m) => `${m.senderName}: ${m.text}`).join('\n')
     const sceneSummary = this.sceneSummaryForDept(dept)
@@ -596,7 +596,7 @@ export class PanelService extends Service {
     return { ok: true, model, systemPrompt, userText: trigger.text, asset: { id: asset.id } }
   }
 
-  /** Agent 调用后的协作计量（D1 裁决键格式；org 兜底链解析失败才跳过，计量失败不阻塞协作面）。 */
+  /** Metering de collaboration post-appel de l'Agent (format de clé de l'arbitrage D1 ; saute seulement si la chaîne de repli org échoue à résoudre, un échec de metering ne bloque pas la face collaboration). */
   private meterAgentCall(dept: DeptConfigRecord, trigger: MessageRecord, agentCard: DeptAgent): void {
     const orgId = this.resolveOrgId(trigger.senderId, dept).orgId
     if (!orgId) return
@@ -609,7 +609,7 @@ export class PanelService extends Service {
         meters: [{ key: 'calls', value: 1, unit: 'call' }],
         idempotency_key: `panel:agent:${trigger.id}:${agentCard.name}`,
       })
-    } catch { /* 计量失败不阻塞回包 */ }
+    } catch { /* échec de metering ne bloque pas la réponse */ }
   }
 
   async invokeAgent(dept: DeptConfigRecord, agentCard: DeptAgent, trigger: MessageRecord, modelOverride?: string): Promise<void> {
@@ -625,9 +625,9 @@ export class PanelService extends Service {
     }
     const prepared = this.prepareAgentInvocation(dept, agentCard, trigger, modelOverride)
     if (!prepared.ok) return void fallbackToHuman(prepared.reason)
-    // V16/D08 问答分型探测：命中受管员工 → 事件与审计 additive 标注（问答 ≠ 任务执行）
+    // Détection de typage question-réponse V16/D08 : employé géré atteint → annotation additive de l'événement et de l'audit (question-réponse ≠ exécution de tâche)
     const workforce = await this.managedWorkforceOf(prepared.asset.id)
-    // #17：组织兜底链（caller→dept.orgId→根组织）——机器主体/外部通道无用户归属时不再空串打穿计量
+    // #17 : chaîne de repli d'organisation (caller→dept.orgId→organisation racine) — un principal machine/canal externe sans rattachement utilisateur ne perce plus le metering avec une chaîne vide
     const { orgId, orgSource } = this.resolveOrgId(trigger.senderId, dept)
     try {
       const gateway = resolvePanelModelGateway(this.ctx)?.gateway
@@ -645,7 +645,7 @@ export class PanelService extends Service {
       this.auditSafe({
         type: 'invoke', actorType: 'machine', actorId: `agent:${agentCard.name}`, actorName: agentCard.name,
         action: 'panel.agent.invoke', resourceType: 'agent', resourceId: prepared.asset.id, resourceName: agentCard.name,
-        // V16：审计口径=问答/协作（panel.agent.invoke 非执行链）；受管员工命中时随 detail 留分型标注
+        // V16 : référentiel d'audit = question-réponse/collaboration (panel.agent.invoke n'est pas une chaîne d'exécution) ; employé géré atteint = annotation de typage dans detail
         result: 'ok', detail: `model=${result.model} tokens=${result.inputTokens}/${result.outputTokens} org=${orgSource}${workforce ? `；workforce=受管员工(${workforce.employeeId})，${workforce.notice}` : ''}`,
         ...(trigger.sceneCode ? { sceneCode: trigger.sceneCode } : {}),
       })
@@ -664,10 +664,10 @@ export class PanelService extends Service {
   }
 
   /**
-   * Agent 流式应答（2026-09-11 用户需求：频道内 @数字同事 → SSE 增量卡片）：
-   * onEvent 收 {type:'start'|'delta'|'done'|'fallback'}；dsh 模型桥走原生 text-delta 流，
-   * modelgw（单轮 invoke）整段作为单个 delta 下发——通道能力不同，流式语义一致。
-   * 完成后照常落库 + 广播（其他端经 SSE 收到持久消息）；降级与转人工语义与 invokeAgent 一致。
+   * Réponse en flux de l'Agent (besoin utilisateur 2026-09-11 : @collègue numérique dans le canal → carte incrémentale SSE) :
+   * onEvent reçoit {type:'start'|'delta'|'done'|'fallback'} ; le pont de modèles dsh suit le flux natif text-delta,
+   * modelgw (invoke en tour unique) envoie le segment entier comme delta unique — capacités de canal différentes, sémantique de flux identique.
+   * Une fois terminé, inscription et diffusion comme d'habitude (les autres bouts reçoivent le message persistant par SSE) ; dégradation et escalade humaine identiques à invokeAgent.
    */
   async streamAgentReply(
     dept: DeptConfigRecord,
@@ -689,7 +689,7 @@ export class PanelService extends Service {
     }
     const prepared = this.prepareAgentInvocation(dept, agentCard, trigger, modelOverride)
     if (!prepared.ok) return void fallback(prepared.reason)
-    // V16/D08 问答分型探测 + #17 组织兜底链（与 invokeAgent 同规）
+    // Détection de typage question-réponse V16/D08 + chaîne de repli d'organisation #17 (même règle qu'invokeAgent)
     const workforce = await this.managedWorkforceOf(prepared.asset.id)
     const { orgId, orgSource } = this.resolveOrgId(trigger.senderId, dept)
     try {
@@ -722,7 +722,7 @@ export class PanelService extends Service {
           }
         }
       } else {
-        // modelgw 单轮形态：整段作为单个 delta（不造假流式动画，通道能力如实呈现）
+        // Forme modelgw en tour unique : le segment entier comme delta unique (pas de fausse animation de flux, la capacité du canal est présentée telle quelle)
         const result = await gateway.invoke({
           model: prepared.model,
           orgId,
@@ -766,7 +766,7 @@ export class PanelService extends Service {
     return user?.orgId ?? ''
   }
 
-  /** 平台首个根组织（无父组织）；组织树未播种（01门演示态）时为 undefined。 */
+  /** Première organisation racine de la plateforme (sans organisation parente) ; undefined si l'arbre d'organisations n'est pas ensemencé (état démo porte 01). */
   private rootOrgId(): string | undefined {
     try {
       return this.soft('iam')?.orgs().all().find((org: { parentId?: string | null }) => !org.parentId)?.id
@@ -776,9 +776,9 @@ export class PanelService extends Service {
   }
 
   /**
-   * 组织归属解析兜底链（#17，2026-10-29 回植自底座）：调用方用户组织 → 部门绑定组织（R11）→ 平台根组织。
-   * 机器主体 / 外部工具通道没有用户归属，此前 orgId 空串直达 modelgw——模型应答后在计量落账处
-   * 抛「usage 事件 org 必填」，先花钱后报错；现在调用前即解析出真实归属，orgSource 随审计留痕。
+   * Chaîne de repli de résolution du rattachement d'organisation (#17, replanté du socle 2026-10-29) : organisation de l'utilisateur appelant → organisation liée du département (R11) → organisation racine de la plateforme.
+   * Principaux machine / canaux d'outils externes sans rattachement utilisateur : auparavant orgId chaîne vide allait droit à modelgw — après réponse du modèle, à l'inscription du metering,
+    * l'erreur « org obligatoire dans l'événement usage », payer d'abord erreur ensuite ; désormais le vrai rattachement est résolu avant l'appel, orgSource tracé dans l'audit.
    */
   private resolveOrgId(userId: string | undefined, dept?: { id: string; orgId?: string }): { orgId: string; orgSource: string } {
     const caller = this.callerOrgId(userId)
@@ -791,10 +791,10 @@ export class PanelService extends Service {
   }
 
   /**
-   * V16/D08 受管数字员工结构化探测：按目标 agentId 经 workforce 窄端口服务端反查
-   * （ctx.workforcePolicy.port()?.describeManagedAgent）。端口未就绪 → undefined（保持 legacy
-   * 现状）；未命中 → undefined；端口执行异常 → undefined（问答面 fail-open，治理端口故障
-   * 不阻塞面板应答）。判定只依据服务端反查，与请求是否携带任何 work 上下文无关（冻结契约）。
+   * Détection structurée V16/D08 de l'employé numérique géré : recherche inverse serveur de l'agentId cible via le port étroit workforce
+   * (ctx.workforcePolicy.port()?.describeManagedAgent). Port non prêt → undefined (statu quo legacy),
+   * non atteint → undefined ; exception d'exécution du port → undefined (face question-réponse fail-open, une panne du port de gouvernance
+   * ne bloque pas la réponse du panneau). Le jugement ne se fonde que sur la recherche inverse serveur, indépendamment de la présence d'un contexte work dans la requête (contrat gelé).
    */
   private async managedWorkforceOf(agentId: string): Promise<PanelWorkforceNotice | undefined> {
     try {
@@ -810,9 +810,9 @@ export class PanelService extends Service {
   }
 
   /**
-   * 面板 Agent 点名问答（M3：panel_agent_invoke 工具的服务原语——dsh 标准对话协作主通道）。
-   * 与 invokeAgent 共享资产解析/模型取向/场景摘要组装，但同步返回应答文本、不落频道消息
-   * （调用方决定是否经 panel_msg_send 留痕）。失败诚实返回 ok:false + reason，不造假回复。
+   * Question-réponse nominative à l'Agent du panneau (M3 : primitive de service de l'outil panel_agent_invoke — canal principal de collaboration du dialogue standard dsh).
+   * Partage avec invokeAgent la résolution d'actif/l'orientation de modèle/l'assemblage du résumé de scénario, mais renvoie synchroniquement le texte de réponse, sans inscrire de message de canal
+   * (l'appelant décide de tracer via panel_msg_send). Un échec renvoie honnêtement ok:false + reason, sans réponse fabriquée.
    */
   async askAgent(
     deptId: string,
@@ -831,10 +831,10 @@ export class PanelService extends Service {
     if (!asset) return { ok: false, reason: `Agent「${agentName}」未绑定 Agent 资产（agentRef），无法自主应答` }
     const model = options.modelOverride ?? String((asset.attrs as Record<string, unknown> | undefined)?.model ?? '')
     if (!model) return { ok: false, reason: `Agent「${agentName}」未配置模型（model 属性为空），且本次未指定模型` }
-    // V16/D08 问答分型探测：命中受管员工 → 应答 additive 携带 workforce 标注（问答 ≠ 任务执行）；
-    // 不新建 run、不改任务状态（问答与执行彻底分型）。
+    // Détection de typage question-réponse V16/D08 : employé géré atteint → la réponse porte additive l'annotation workforce (question-réponse ≠ exécution de tâche) ;
+    // pas de création de run, pas de changement d'état de tâche (typage intégral question-réponse vs exécution).
     const workforce = await this.managedWorkforceOf(asset.id)
-    // #17：组织兜底链（caller→dept.orgId→根组织），机器主体点名不再空串打穿计量
+    // #17 : chaîne de repli d'organisation (caller→dept.orgId→organisation racine), l'appel nominatif machine ne perce plus le metering avec une chaîne vide
     const { orgId, orgSource } = this.resolveOrgId(options.userId, dept)
     const sceneSummary = this.sceneSummaryForDept(dept)
     const systemPrompt = [
@@ -855,13 +855,13 @@ export class PanelService extends Service {
       this.auditSafe({
         type: 'invoke', actorType: 'machine', actorId: `agent:${agentName}`, actorName: agentName,
         action: 'panel.agent.invoke', resourceType: 'agent', resourceId: asset.id, resourceName: agentName,
-        // V16：审计口径=问答/协作；受管员工命中时随 detail 留分型标注
+        // V16 : référentiel d'audit = question-réponse/collaboration ; employé géré atteint = annotation de typage dans detail
         result: 'ok', detail: `model=${result.model}（askAgent 直答）org=${orgSource}${workforce ? `；workforce=受管员工(${workforce.employeeId})，${workforce.notice}` : ''}`,
         ...(options.sceneCode ? { sceneCode: options.sceneCode } : {}),
       })
       return {
         ok: true, reply: stripThink(result.content), model: result.model,
-        // V16/D08 additive 分型字段：命中受管数字员工才出现（legacy 路径无此键）
+        // Champ de typage additive V16/D08 : n'apparaît qu'en cas d'employé numérique géré atteint (le chemin legacy n'a pas cette clé)
         ...(workforce ? { workforce } : {}),
       } as { ok: true; reply: string; model: string; workforce?: PanelWorkforceNotice }
     } catch (error) {
@@ -874,7 +874,7 @@ export class PanelService extends Service {
       })
       return { ok: false, reason: `模型网关调用失败（${message}）` }
     } finally {
-      // 与 invokeAgent 同风格的协作计量（org 主键缺省跳过；失败不阻塞应答）
+      // Metering de collaboration au même style qu'invokeAgent (clé primaire org absente = saut ; un échec ne bloque pas la réponse)
       if (orgId) {
         try {
           this.soft('usage')?.record({
@@ -885,17 +885,17 @@ export class PanelService extends Service {
             meters: [{ key: 'calls', value: 1, unit: 'call' }],
             idempotency_key: `panel:ask:${dept.id}:${agentName}:${newId('ask')}`,
           })
-        } catch { /* 计量失败不阻塞问答 */ }
+        } catch { /* échec de metering ne bloque pas le jeu de questions-réponses */ }
       }
     }
   }
 
-  // -- 技能直调（C1-2 / J1 消费面：对话框 @技能名/斜杠命令主通道） ----------------------------
+  // -- Appel direct de skill (C1-2 / face consommatrice J1 : canal principal @nom-de-skill/commande slash de la boîte de dialogue) ----------------------------
 
   /**
-   * 面板可直调的已上架技能清单（skillhub published + 调用人组织可见）。
-   * 与 skillhub.search 同一套可见性口径（visibility=orgs 时按调用人组织过滤）；
-   * 仅 published 可直调（deprecated/offline 不给面板点名）。
+   * Liste des skills publiés directement appelables par le panneau (skillhub published + visibles par l'organisation de l'appelant).
+   * Même référentiel de visibilité que skillhub.search (visibility=orgs filtre par l'organisation de l'appelant) ;
+   * seuls les published sont directement appelables (deprecated/offline ne se laissent pas citer nominativement par le panneau).
    */
   listInvokeableSkills(viewerOrgId?: string): Array<{ id: string; name: string; slug: string; summary: string; category: string; version: string }> {
     const hub = this.soft('skillHub')
@@ -916,10 +916,10 @@ export class PanelService extends Service {
   }
 
   /**
-   * 面板技能点名直调（C1-2：panel_skill_invoke 工具与面板对话框共享的服务原语）。
-   * 语义：skillhub 已上架（published）技能 → 取当前版本内容作为指令上下文 → 模型网关单轮应答。
-   * 失败诚实返回 ok:false + reason（不存在/未上架/不可见/无内容/网关失败），不造假回复、不静默。
-   * 与 askAgent 同风格：不落频道消息，调用方决定是否经 sendMessage 留痕。
+   * Appel direct nominatif de skill du panneau (C1-2 : primitive de service partagée par l'outil panel_skill_invoke et la boîte de dialogue du panneau).
+   * Sémantique : skill publié (published) de skillhub → prend le contenu de la version courante comme contexte d'instructions → réponse en tour unique de la passerelle de modèles.
+   * Un échec renvoie honnêtement ok:false + reason (inexistant/non publié/invisible/sans contenu/échec de passerelle), sans réponse fabriquée, sans silence.
+   * Même style qu'askAgent : pas d'inscription de message de canal, l'appelant décide de tracer via sendMessage.
    */
   async invokeSkill(
     skillName: string,
@@ -928,12 +928,12 @@ export class PanelService extends Service {
   ): Promise<{ ok: true; reply: string; model: string; skill: { name: string; version: string }; skillLoad?: PanelSkillLoad } | { ok: false; reason: string }> {
     const name = skillName.trim()
     if (!name) return { ok: false, reason: '技能名为空（用 /技能名 或 panel_skill_invoke 点名）' }
-    // #17：根组织只用于计量归属（PR #18 安全修复）；没有用户组织的机器主体
-    // 不能因计量兜底而获得根组织受限技能的可见性——可见性按真实调用者组织判定。
+    // #17 : l'organisation racine ne sert qu'au rattachement du metering (correctif de sécurité PR #18) ; un principal machine sans organisation utilisateur
+    // ne doit pas obtenir, par le repli de metering, la visibilité des skills restreints de l'organisation racine — la visibilité se juge sur l'organisation du vrai appelant.
     const { orgId } = this.resolveOrgId(options.userId)
     const viewerOrg = this.callerOrgId(options.userId)
     const invokeable = this.listInvokeableSkills(viewerOrg || undefined)
-    // 按名全名匹配优先，slug 兜底（技能名常含中文与空格，通用 regex 兜不了）
+    // Correspondance prioritaire par nom complet, slug en repli (le nom de skill contient souvent chinois et espaces, une regex générique ne suffit pas)
     const skill = invokeable.find((item) => item.name === name) ?? invokeable.find((item) => item.slug === name)
     if (!skill) {
       const hint = this.soft('skillHub')?.skills().all().find((item) => item.status === 'published' && (item.name === name || item.slug === name))
@@ -945,19 +945,19 @@ export class PanelService extends Service {
     const version = record?.versions.find((item) => item.version === skill.version && item.status === 'published')
     const content = version?.content?.trim() ?? ''
     if (!content) return { ok: false, reason: `技能「${skill.name}」当前版本（${skill.version}）无指令内容，无法直调` }
-    // D09/V16（additive）证据化加载：本次实际加载的技能 ID/版本/内容摘要随应答返回，
-    // 供「安装版本 ↔ 加载摘要 ↔ 实际使用」三方对账（摘要现场计算，不落库不改 skillhub schema）。
+    // Chargement probant D09/V16 (additive) : l'ID/la version/le résumé de contenu du skill réellement chargé accompagnent la réponse,
+    // pour la réconciliation en trois « version installée ↔ résumé de chargement ↔ usage réel » (résumé calculé à la volée, sans inscription ni modification du schéma skillhub).
     const skillLoad: PanelSkillLoad = {
       skillId: skill.id,
       version: skill.version,
       contentHash: createHash('sha256').update(content).digest('hex'),
     }
-    // 模型取向：显式指定优先；未指定时不跟随 Agent 资产（技能无资产），自动取目录首个在线模型
-    // （班组长没选过模型也要能一把直调——目录为空才诚实拒绝）
+    // Orientation du modèle : explicite prioritaire ; à défaut, ne suit pas l'actif Agent (un skill n'a pas d'actif), prend automatiquement le premier modèle en ligne du catalogue
+    // (un chef d'équipe qui n'a jamais choisi de modèle doit pouvoir appeler du premier coup — catalogue vide = seul cas de refus honnête)
     let model = options.modelOverride?.trim() ?? ''
     if (!model) {
-      // 只自动选「在线且已配 endpoint」的模型——无 endpoint 的模型调用必失败，不应被自动选中（J1 行为加固）
-      // （dsh 桥目录条目 endpoint 为「内置通道」占位非空 → 天然可被自动选中，正是 01门装态的期望行为）
+      // Ne choisir automatiquement qu'un modèle « en ligne et avec endpoint configuré » — un modèle sans endpoint échoue forcément à l'appel et ne doit pas être choisi (durcissement J1)
+      // (l'endpoint d'une entrée du catalogue du pont dsh est le placeholder non vide « canal intégré » → naturellement sélectionnable, exactement le comportement attendu en état installé porte 01)
       const online = resolvePanelModelGateway(this.ctx)?.gateway.models().all()
         .filter((item: { status: string; endpoint: string }) => item.status === 'online' && item.endpoint.trim() !== '') ?? []
       if (online.length === 0) return { ok: false, reason: '模型目录暂无在线模型——请管理员在「模型管理」中接入后再直调技能' }
@@ -987,7 +987,7 @@ export class PanelService extends Service {
       })
       return {
         ok: true, reply: stripThink(result.content), model: result.model, skill: { name: skill.name, version: skill.version },
-        // D09/V16 additive：证据化加载指纹（skillId/version/contentHash）
+        // D09/V16 additive : empreinte du chargement probant (skillId/version/contentHash)
         skillLoad,
       }
     } catch (error) {
@@ -1001,24 +1001,24 @@ export class PanelService extends Service {
       })
       return { ok: false, reason: `模型网关调用失败（${reason}）` }
     } finally {
-      // 与 askAgent 同风格的协作计量（org 主键缺省跳过；失败不阻塞回包）
+      // Metering de collaboration au même style qu'askAgent (clé primaire org absente = saut ; un échec ne bloque pas la réponse)
       if (orgId) {
         try {
           this.soft('usage')?.record({
             org: orgId,
             subject: options.userId ? `user:${options.userId}` : 'panel:tool',
             principal: `org:${orgId}`,
-            // J1 契约 v1 对表：计量资源键用 skill:<ID>（slug 可能含非 ASCII，过不了 usage resource 校验）
+            // Alignement sur le contrat J1 v1 : la clé de ressource du metering emploie skill:<ID> (le slug peut contenir du non-ASCII et ne passe pas la validation de ressource usage)
             resource: `skill:${skill.id}`,
             meters: [{ key: 'calls', value: 1, unit: 'call' }],
             idempotency_key: `panel:skill:${skill.id}:${newId('inv')}`,
           })
-        } catch { /* 计量失败不阻塞直调 */ }
+        } catch { /* échec de metering ne bloque pas l'appel direct */ }
       }
     }
   }
 
-  /** 部门挂载活动的场景图谱摘要（注入 Agent 系统提示；图谱未装载则空串）。 */
+  /** Résumé de cartographie de scénario de l'activité montée sur le département (injecté dans le prompt système de l'Agent ; chaîne vide si la cartographie n'est pas chargée). */
   sceneSummaryForDept(dept: DeptConfigRecord): string {
     try {
       const orgId = this.soft('iam')?.orgs().all()[0]?.id ?? ''
@@ -1033,7 +1033,7 @@ export class PanelService extends Service {
     }
   }
 
-  // -- 卡片动作（走纯平台链：任务落点 / 审批链 / 钉钉推送） -----------------------
+  // -- Actions de carte (chaîne plateforme pure : point d'atterrissage des tâches / chaîne d'approbation / poussé DingTalk) -----------------------
 
   async cardAction(input: { messageId: string; opId: string; actorId: string; actorName: string; reason?: string }): Promise<{ message: MessageRecord; result: string }> {
     const message = this.messages().get(input.messageId)
@@ -1064,12 +1064,12 @@ export class PanelService extends Service {
         title: `${message.card.title} · ${op.label}`,
         payload: { messageId: message.id, dept: message.dept, opId: op.id, opLabel: op.label, reason: input.reason ?? '' },
         requesterId: input.actorId, requesterName: input.actorName,
-        // QA A-06：卡片未声明风险级时缺省 high（fail-closed），不再「一次 approve 即执行」
+        // QA A-06 : une carte sans niveau de risque déclaré vaut high par défaut (fail-closed), fini le « un seul approve et ça exécute »
         riskLevel: op.risk ?? 'high',
       })
       result = `已提交审批（${approval.id}），在审批中心跟进`
     } else if (action === 'dd.push') {
-      // 桥接订阅 panel.card.action（action=dd.push）执行投递；此处仅置意图与留痕
+      // Le pont souscrit panel.card.action (action=dd.push) et exécute la livraison ; ici, simple pose d'intention et trace
       result = '已请求推送钉钉'
     }
     const done = [...message.card.done, input.opId]
@@ -1083,16 +1083,16 @@ export class PanelService extends Service {
     return { message: updated, result }
   }
 
-  // -- 任务 -------------------------------------------------------------------
+  // -- Tâches -------------------------------------------------------------------
 
-  /** 审计落痕（IAW 交接 5-2）：任务/Agent 直调带 sceneCode 维度落审计时间线；失败不阻塞面板主链。 */
+  /** Trace d'audit (livraison IAW 5-2) : tâches/appels directs d'Agent inscrits dans la ligne de temps d'audit avec la dimension sceneCode ; un échec ne bloque pas la chaîne principale du panneau. */
   private auditSafe(entry: Omit<AuditLogRecord, 'id' | 'createdAt' | 'updatedAt'>): void {
     try {
-      // soft 读（plan-gate01 瘦身口径）：01门 5 键装态无 audit 面——缺席时静默跳过（审计面独立降级）；
-      // 全量形态正常落审计。不可写 this.ctx.audit：cordis 未 inject 的键访问即抛错，全量形态也会被吞。
+      // Lecture soft (référentiel d'amincissement plan-gate01) : l'état installé 5 clés porte 01 n'a pas de face audit — absent = saut silencieux (dégradation indépendante de la face audit) ;
+      // la forme complète inscrit normalement dans l'audit. Interdit d'écrire this.ctx.audit : l'accès à une clé non injectée de cordis jette, et la forme complète serait aussi avalée.
       const audit = this.ctx.reflect.get('audit', false)
       audit?.record(entry)
-    } catch { /* 审计面独立降级 */ }
+    } catch { /* dégradation indépendante du plan d'audit */ }
   }
 
   createTask(input: {
@@ -1101,8 +1101,8 @@ export class PanelService extends Service {
     execIssueId?: string; goalId?: string; evidenceRefs?: string[]; reworkOf?: string
   }): TaskRecord {
     this.dept(input.dept)
-    // 执行中枢血缘（DSH issue#3 修订，2026-10-29）：面板=执行中枢投影——携带 execIssueId 时
-    // 必须能在 exec:issues 命中（唯一任务事实源红线），exec-hub 缺席（01门演示态）则诚实拒绝。
+    // Lignée du centre d'exécution (révision DSH issue#3, 2026-10-29) : panneau = projection du centre d'exécution — quand execIssueId est porté,
+    // il doit être atteint dans exec:issues (ligne rouge de la source de fait unique des tâches) ; exec-hub absent (état démo porte 01) = refus honnête.
     if (input.execIssueId) {
       const hub = this.execHub()
       if (!hub) throw new Error('执行中枢未接入（01门演示态）——携带 execIssueId 的任务需要宿主执行中枢')
@@ -1132,12 +1132,12 @@ export class PanelService extends Service {
     return record
   }
 
-  /** exec-hub 软读（执行中枢投影）：缺席（01门演示态）→ undefined，端点级诚实降级。 */
+  /** Lecture douce d'exec-hub (projection du centre d'exécution) : absent (état démo porte 01) → undefined, dégradation honnête au niveau endpoint. */
   private execHub(): any | undefined {
     return this.soft('execHub')
   }
 
-  /** 面板泳道 → exec-hub 任务状态镜像（todo/doing/review/done ↔ todo/in_progress/review/done）。 */
+  /** Miroir couloir du panneau → état de tâche exec-hub (todo/doing/review/done ↔ todo/in_progress/review/done). */
   private laneToIssueStatus(lane: TaskLane): 'todo' | 'in_progress' | 'review' | 'done' {
     return lane === 'doing' ? 'in_progress' : lane
   }
@@ -1147,7 +1147,7 @@ export class PanelService extends Service {
     if (!task) throw new Error(`任务不存在：${taskId}`)
     if (!TASK_LANES.includes(lane)) throw new Error(`非法泳道：${lane}`)
     const updated = this.tasks().update(taskId, { lane })
-    // 泳道迁移镜像回写 exec-hub（唯一任务事实源；best-effort + 审计如实留痕，不阻塞本地流转）
+    // La migration de couloir se ré-écrit en miroir vers exec-hub (source de fait unique ; best-effort + trace d'audit fidèle, ne bloque pas la transition locale)
     let mirror = ''
     if (task.execIssueId) {
       const hub = this.execHub()
@@ -1173,9 +1173,9 @@ export class PanelService extends Service {
   }
 
   /**
-   * 验收裁决（DSH issue#4 修订，2026-10-29）：签认关闭（accepted）/ 打回返工（rework）。
-   * 结论落面板任务 + 镜像回写 exec-hub（accepted→done；rework→in_progress 重开返工）；
-   * 同一任务不可重复裁决；镜像失败如实留痕不阻塞结论（对账靠 audit detail）。
+   * Verdict d'acceptance (révision DSH issue#4, 2026-10-29) : fermeture signée (accepted) / renvoi reprise (rework).
+   * La conclusion tombe dans la tâche du panneau + ré-écriture en miroir vers exec-hub (accepted→done ; rework→in_progress réouverture pour reprise) ;
+   * la même tâche ne peut être jugée deux fois ; un échec du miroir est tracé fidèlement sans bloquer la conclusion (la réconciliation s'appuie sur audit detail).
    */
   taskVerdict(taskId: string, verdict: 'accepted' | 'rework', input: { actorId: string; opinion?: string }): TaskRecord {
     const task = this.tasks().get(taskId)
@@ -1214,10 +1214,10 @@ export class PanelService extends Service {
   }
 
   /**
-   * 部门目标投影（DSH issue#4 修订，2026-10-29）：读透 exec-hub（不复制权威状态）——
-   * 目标（含 metric 基线/目标值）+ 任务（含血缘 goalAncestry/执行锁）+ 面板侧关联任务 ID。
-   * 范围：部门绑定组织 → 该组织子树；未绑定 → 全量（与部门范围权限同口径）。
-   * exec-hub 缺席 → null（调用方 503 DEGRADED 诚实降级）。
+   * Projection des objectifs du département (révision DSH issue#4, 2026-10-29) : lit au travers d'exec-hub (pas de copie de l'état d'autorité) —
+   * objectifs (base/valeur cible metric incluses) + tâches (lignée goalAncestry/verrou d'exécution incluses) + IDs des tâches liées côté panneau.
+   * Périmètre : département lié à une organisation → sous-arbre de celle-ci ; non lié → intégral (même référentiel que les permissions de périmètre départemental).
+   * exec-hub absent → null (l'appelant dégrade honnêtement en 503 DEGRADED).
    */
   deptGoalsProjection(dept: DeptConfigRecord): { goals: unknown[]; issues: unknown[] } | null {
     const hub = this.execHub()
@@ -1243,9 +1243,9 @@ export class PanelService extends Service {
     return { goals, issues }
   }
 
-  // -- 场景诊断（会话 × 图谱联动） -------------------------------------------------
+  // -- Diagnostic de scénario (interconnexion session × cartographie) -------------------------------------------------
 
-  /** 场景编号规范引用（如 QB01-A-2-5）——会话产出沉淀回转型路线图的联动点。 */
+  /** Référence canonique de code de scénario (ex. QB01-A-2-5) — point d'interconnexion où les productions de session se déposent dans la feuille de route de transformation. */
   sceneContext(code: string): { pack: ScenegraphPack; activityLabel: string; sceneLabel: string } {
     const hit = this.ctx.scenegraphs.findScene(code)
     if (!hit) throw new Error(`场景编号在已装载图谱中不存在：${code}`)
@@ -1272,7 +1272,7 @@ export class PanelService extends Service {
     return { message, task }
   }
 
-  // -- SSE 订阅注册表 -----------------------------------------------------------
+  // -- Registre d'abonnements SSE -----------------------------------------------------------
 
   subscribeStream(dept: string, listener: (event: { name: string; payload: unknown }) => void): () => void {
     const set = this.streamSubscribers.get(dept) ?? new Set()
@@ -1281,14 +1281,14 @@ export class PanelService extends Service {
     return () => set.delete(listener)
   }
 
-  /** 平台事件 → SSE 订阅者扇出（panel.* / flow.* / dingtalk-bridge.delivered）。 */
+  /** Événements de la plateforme → éventail vers les abonnés SSE (panel.* / flow.* / dingtalk-bridge.delivered). */
   wireEventBus(): void {
     const forward = (name: string) => (payload: unknown) => {
       const dept = (payload as { dept?: string } | undefined)?.dept
       const targets = dept ? [dept] : [...this.streamSubscribers.keys()]
       for (const target of targets) {
         for (const listener of this.streamSubscribers.get(target) ?? []) {
-          try { listener({ name, payload }) } catch { /* 单订阅者故障不断链 */ }
+          try { listener({ name, payload }) } catch { /* la défaillance d'un seul abonné n'interrompt pas la chaîne */ }
         }
       }
     }
@@ -1298,20 +1298,20 @@ export class PanelService extends Service {
     this.ctx.platformBus.on(PlatformEvents.PanelIndustryActivated, forward(PlatformEvents.PanelIndustryActivated))
     this.ctx.platformBus.on(PlatformEvents.DingtalkDelivered, forward(PlatformEvents.DingtalkDelivered))
     this.ctx.platformBus.on(PlatformEvents.ScenegraphUpdated, forward(PlatformEvents.ScenegraphUpdated))
-    // 事务流引擎（IAW 交接 3-1）：TF 步骤状态机事件随面板 SSE 扇出（无 dept 的 TF 广播全订阅者）
+    // Moteur de flux de dossiers (livraison IAW 3-1) : les événements de la machine à états des étapes TF suivent l'éventail SSE du panneau (un TF sans dept est diffusé à tous les abonnés)
     this.ctx.platformBus.on(PlatformEvents.FlowCreated, forward(PlatformEvents.FlowCreated))
     this.ctx.platformBus.on(PlatformEvents.FlowStepUpdated, forward(PlatformEvents.FlowStepUpdated))
     this.ctx.platformBus.on(PlatformEvents.FlowCompleted, forward(PlatformEvents.FlowCompleted))
-    // QA E-03：连接器镜像失败类事件此前只走总线半程——面板 SSE 一并扇出（无 dept 广播全订阅者），
-    // 值班面板可见 fail-closed 状态
+    // QA E-03 : les événements de type échec de miroir du connecteur ne faisaient auparavant que la moitié du bus — l'éventail SSE du panneau les diffuse aussi (sans dept, diffusion à tous),
+    // le panneau de permanence voit l'état fail-closed
     this.ctx.platformBus.on(PlatformEvents.ConnectorPolicyMirrorFailed, forward(PlatformEvents.ConnectorPolicyMirrorFailed))
     this.ctx.platformBus.on(PlatformEvents.ConnectorPolicySnapshotDrifted, forward(PlatformEvents.ConnectorPolicySnapshotDrifted))
   }
 }
 
 /**
- * @提及解析（展示用）：匹配中文/英文/数字昵称。Agent 名册的全名匹配（含空格）在
- * dispatchAgentMentions 里按名字面量做，这里只负责通用的高亮候选。
+ * Analyse des @mentions (pour affichage) : correspondance des pseudos chinois/anglais/chiffres. La correspondance par nom complet du registre d'Agents (espaces compris) se fait
+ * dans dispatchAgentMentions sur le littéral du nom ; ici seulement les candidats génériques de surlignage.
  */
 export function extractMentions(text: string): string[] {
   const mentions = new Set<string>()
@@ -1320,9 +1320,9 @@ export function extractMentions(text: string): string[] {
 }
 
 /**
- * 推理模型 <think> 块剥离（2026-09-11 E2E 实测）：MiniMax-M3 等推理模型把思考过程以
- * <think>…</think> 形式混在正文里输出——思考过程不是给频道读者看的内容，落库/展示只保留
- * 正文。只处理开头的思考块（模型惯例位置）；未闭合（思考未结束即截断）视为无正文。
+ * Retrait des blocs <think> des modèles de raisonnement (constat E2E 2026-09-11) : des modèles de raisonnement type MiniMax-M3 émettent le processus de réflexion
+ * mélangé au corps sous forme <think>…</think> — la réflexion n'est pas un contenu pour les lecteurs du canal ; l'inscription/l'affichage ne gardent
+ * que le corps. Ne traite que le bloc de réflexion en tête (position conventionnelle des modèles) ; non fermé (réflexion tronquée avant la fin) = considéré sans corps.
  */
 const THINK_BLOCK = /^\s*<think>[\s\S]*?<\/think>/
 const THINK_OPEN_UNTERMINATED = /^\s*<think>[\s\S]*$/
@@ -1333,7 +1333,7 @@ export function stripThink(text: string): string {
   return out.trimStart()
 }
 
-/** 流式增量的 think 屏蔽门：思考块闭合前按住不发，闭合后放行其后内容（单 delta 形态同样适用）。 */
+/** Porte de blocage think sur l'incrément de flux : avant la fermeture du bloc de réflexion, on retient ; après fermeture, on laisse passer ce qui suit (vaut aussi pour la forme delta unique). */
 export function createThinkGate(emit: (text: string) => void): (text: string) => void {
   let hold = ''
   let passed = false
@@ -1342,7 +1342,7 @@ export function createThinkGate(emit: (text: string) => void): (text: string) =>
     hold += text
     if (hold.trimStart().startsWith('<think>')) {
       const close = hold.indexOf('</think>')
-      if (close === -1) return // 思考未结束，继续按住
+      if (close === -1) return // réflexion non terminée, continuer à retenir
       passed = true
       const rest = hold.slice(close + '</think>'.length)
       hold = ''

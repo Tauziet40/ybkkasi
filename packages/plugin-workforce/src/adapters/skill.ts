@@ -1,11 +1,11 @@
 /**
- * Skill 资源适配器（§4.4 分型：指令/方法技能＝加载固定版本文本，绝不执行任意程序）。
+ * Adaptateur de ressources Skill (typage §4.4 : compétence instruction/méthode = charger un texte à version figée, jamais exécuter un programme arbitraire).
  *
- * probeGrant：skillPins 版本锁定证据（版本 + 内容摘要，capability-manifest 经
- * skillHub.resolveSkillPin 固定；此处核验 skillHub 探测能力在位）。
- * invoke：结构化探测 skillHub.download(skillId, version, user)（真实签名，返回已发布
- * 版本 { content }）→ 返回文本内容 + 版本/摘要证据；程序/脚本型技能一期不支持，
- * 缺失能力诚实报未支持，不以空实现冒充成功。
+ * probeGrant : preuve du verrouillage de version par skillPins (version + résumé de contenu, figé par capability-manifest via
+ * skillHub.resolveSkillPin ; on vérifie ici que la capacité de sondage de skillHub est en place).
+ * invoke : sondage structuré skillHub.download(skillId, version, user) (signature réelle, renvoie la version publiée
+ * { content }) → renvoie le contenu textuel + preuve version/résumé ; les compétences de type programme/script ne sont pas prises en charge en phase 1,
+ * une capacité manquante est honnêtement signalée non prise en charge, sans faire passer une implémentation vide pour un succès.
  */
 import { createHash } from 'node:crypto'
 import { t } from '../../../platform-i18n/src/index.ts'
@@ -17,7 +17,7 @@ import type {
 } from '../contract.ts'
 import type { IdentityResolution, ResourceGrantSpec } from '../contract.ts'
 
-/** skillHub 结构化探测面（真实签名见 plugin-skillhub/src/index.ts SkillHubService）。 */
+/** Face de sondage structurée de skillHub (signature réelle dans plugin-skillhub/src/index.ts SkillHubService). */
 interface SkillHubProbe {
   download?: (skillId: string, version: string, user: { id: string; name: string }) => { content: string }
   resolveSkillPin?: (skillId: string, version?: string) => { skillId: string; version: string; contentHash: string }
@@ -40,7 +40,7 @@ export function createSkillAdapter(ctx: {
         const version = typeof spec.constraints?.['version'] === 'string' ? spec.constraints['version'] as string : undefined
         const pin = probe.resolveSkillPin(spec.registryId, version)
         if (!pin || !pin.version) return { ok: false, message: t('技能 {skillId} 无法锁定发布版本', { skillId: spec.registryId }) }
-        // ref＝版本 + 摘要证据（D.3：固定版本与摘要、加载证明）
+        // ref = preuve version + résumé (D.3 : version et résumé figés, preuve de chargement)
         return { ok: true, ref: `skill:${spec.registryId}@${pin.version} sha256:${String(pin.contentHash).slice(0, 16)}` }
       } catch (error) {
         return { ok: false, message: t('技能版本锁定失败：{message}', { message: error instanceof Error ? error.message : String(error) }) }
@@ -63,7 +63,7 @@ export function createSkillAdapter(ctx: {
           name: t('数字员工:{id}', { id: input.work.employeeId }),
         })
         const contentHash = createHash('sha256').update(content).digest('hex')
-        // 摘要核验（§4.4：加载证据——实际加载内容必须与版本锁定一致）
+        // Vérification du résumé (§4.4 : preuve de chargement — le contenu réellement chargé doit correspondre au verrouillage de version)
         const pinnedHash = typeof constraints['contentHash'] === 'string' ? constraints['contentHash'] : ''
         if (pinnedHash && pinnedHash !== contentHash) {
           return {
@@ -72,7 +72,7 @@ export function createSkillAdapter(ctx: {
             gatewayRef: { outcome: 'denied', skillId: input.tool.registryId, version },
           }
         }
-        // 指令/工具组合型：只回传文本内容（作为指令素材），绝不执行任意程序
+        // Type instruction/combinaison d'outils : ne renvoie que le contenu textuel (comme matière première d'instruction), n'exécute jamais un programme arbitraire
         return {
           ok: true,
           content,

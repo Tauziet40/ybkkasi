@@ -1,13 +1,13 @@
 /**
- * 连接器风险目录覆盖常量（R6 声明式化——吸收 paperclip app-definitions 声明式目录模式）。
+ * Constantes de couverture du catalogue de risques des connecteurs (déclaratifisation R6 — absorbe le modèle de catalogue déclaratif de paperclip app-definitions).
  *
- * ⚠️ 本文件由 scripts/gen-connector-catalog.mjs 自动生成，勿手改——
- *    事实源：packages/plugin-connector/catalog/risk-overrides.json
- *    重新生成：node scripts/gen-connector-catalog.mjs
+ * ⚠️ Ce fichier est généré automatiquement par scripts/gen-connector-catalog.mjs, ne pas modifier à la main —
+ *    source de fait : packages/plugin-connector/catalog/risk-overrides.json
+ *    régénération : node scripts/gen-connector-catalog.mjs
  *
- * 优先级（resolveRiskLevel）：action 自带 riskLevel > 本目录 actions 声明 >
- * provider defaultRisk > heuristicRiskLevel 启发式兜底（fail-closed 默认 admin）。
- * riskTier（S1/S2）本迭代仅作声明与展示，审批联动后续迭代。
+ * Priorité (resolveRiskLevel) : riskLevel porté par l'action > déclaration actions du présent catalogue >
+ * defaultRisk du provider > heuristique heuristicRiskLevel en dernier recours (fail-closed, admin par défaut).
+ * riskTier (S1/S2) sert uniquement de déclaration et d'affichage dans cette itération, couplage approbation à venir.
  */
 import type { RiskOverrides } from './risk.ts'
 

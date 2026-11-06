@@ -1,6 +1,6 @@
 /**
- * iam 插件对模型暴露的工具（dsh-ops-iam Skill 的底座）。
- * 注册到 ctx.tools：在完整 dsh 中模型可直接调用；独立宿主中经 /api/tools/execute 触达。
+ * Outils exposés au modèle par l'extension iam (socle du Skill dsh-ops-iam).
+ * Enregistrés dans ctx.tools : dans le dsh complet, le modèle les appelle directement ; dans l'hôte autonome, on les atteint via /api/tools/execute.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ToolRunContext } from '../../platform-core/src/index.ts'
@@ -11,9 +11,9 @@ export const name = 'iam-tools'
 export const inject = ['tools', 'iam']
 
 /**
- * iam 管理类工具的保留身份键（N1 跨组契约）：独立宿主桥侧（plugin-console routes/bridge.ts
- * injectToolIdentity）以令牌解析的服务端身份注入 `args._actor`，客户端传入的同名键（含 actor）
- * 一律先剥离后重注入，身份不可由调用方自填。完整 dsh 宿主直调形态无桥注入，回落 exec.principal。
+ * Clé d'identité réservée des outils de gestion iam (contrat inter-groupes N1) : le côté pont de l'hôte autonome (plugin-console routes/bridge.ts
+ * injectToolIdentity) injecte `args._actor` avec l'identité serveur analysée du jeton ; la même clé passée côté client (actor compris)
+ * est toujours retirée puis réinjectée : l'identité ne peut pas être auto-remplie par l'appelant. La forme d'appel direct de l'hôte dsh complet, sans injection de pont, retombe sur exec.principal.
  */
 interface BridgeActor {
   id?: string
@@ -23,9 +23,9 @@ interface BridgeActor {
 }
 
 /**
- * 管理类工具操作者归一（N1）：`args._actor`（桥注入，优先）→ exec.principal（运行时直调）
- * → 匿名空权限 actor（iam 服务层 assertManageScope fail-closed 拒绝）。返回剥离 `_actor`
- * 后的业务参数，保留键不会泄入服务方法入参。
+ * Normalisation de l'opérateur des outils de gestion (N1) : `args._actor` (injection pont, prioritaire) → exec.principal (appel direct runtime)
+ * → actor anonyme sans permission (assertManageScope de la couche service iam refuse en fail-closed). Renvoie les paramètres métier
+ * après retirage de `_actor` ; la clé réservée ne fuit pas dans les paramètres des méthodes de service.
  */
 function manageActorOf(args: any, exec?: ToolRunContext): { actor: UserManageActor; rest: Record<string, any> } {
   const { _actor, ...rest } = args ?? {}
@@ -54,9 +54,9 @@ export function apply(ctx: Context) {
   const t = ctx.tools
 
   /**
-   * 调用者可见组织子树（安全审查 P1-02，2026-10-31）：与 REST 面 scopedOrgIdsOf 同口径——
-   * 平台管理员（'*'）返回 null（全量豁免）；其余按操作者组织子树收敛（无归属=fail-closed 空集）。
-   * 工具桥与 REST 共用边界，防止「列表页收窄、工具桥直读全量」的旁路。
+   * Sous-arbre organisationnel visible de l'appelant (revue de sécurité P1-02, 2026-10-31) : même référentiel que scopedOrgIdsOf de la face REST —
+   * l'admin plateforme ('*') reçoit null (exemption intégrale) ; les autres sont resserrés au sous-arbre de l'opérateur (sans rattachement = fail-closed, ensemble vide).
+   * Le pont d'outils et REST partagent la même frontière, contre le contournement « page liste resserrée, pont d'outils lisant tout ».
    */
   const scopedOrgIdsOf = (actor: UserManageActor): string[] | null => {
     if (actor.permissions.includes('*')) return null
@@ -136,8 +136,8 @@ export function apply(ctx: Context) {
     output: { type: 'object', additionalProperties: true },
     async execute(args, exec) {
       const { actor } = manageActorOf(args, exec)
-      // P1-02：非平台管理员按调用者组织子树收敛（与 REST /api/iam/users 同口径，
-      // 显式 orgId 落在子树外直接拒绝，不静默返回空集冒充「无此人」）
+      // P1-02 : un non-admin plateforme est resserré au sous-arbre organisationnel de l'appelant (même référentiel que REST /api/iam/users,
+      // un orgId explicite hors sous-arbre est refusé directement, sans retour silencieux d'un ensemble vide qui simulerait « personne de ce nom »)
       const scope = scopedOrgIdsOf(actor)
       const allow = scope === null ? null : new Set(scope)
       if (args.orgId && allow && !allow.has(String(args.orgId))) {

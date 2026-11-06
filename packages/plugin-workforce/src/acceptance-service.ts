@@ -1,10 +1,10 @@
 /**
- * 交付与验收服务（实施路径 §6.5：完成与验收分开）。
+ * Service de livraison et d'acceptation (chemin d'implémentation §6.5 : achèvement et acceptation séparés).
  *
- * 技术执行完成只形成「交付已提交」（deliverable submitted → exec-hub completeRun
- * 使任务转 review）；验收由具备 workforce.accept 的真人决定——通过→任务 done，
- * 退回→任务回 in_progress 并附原因。全部调用事实保留不删（V30：仅摘要无证据
- * 不能自动完成业务验收）。
+ * La fin de l'exécution technique ne forme qu'un « livrable soumis » (deliverable submitted → completeRun d'exec-hub
+ * passe la tâche en review) ; l'acceptation est décidée par un humain titulaire de workforce.accept — accord→tâche done,
+ * retour→tâche ramenée en in_progress avec motif. Tous les faits d'appel sont conservés sans suppression (V30 : un simple résumé sans preuve
+ * ne peut pas valoir acceptation métier automatique).
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -28,7 +28,7 @@ export class DeliveryService extends Service implements WorkforceDelivery {
     super(ctx, 'workforceDelivery')
   }
 
-  // -- 依赖 -------------------------------------------------------------
+  // -- Dépendances -------------------------------------------------------------
 
   private get store(): WorkforceStore {
     const store = (this.ctx as unknown as { workforceStore?: WorkforceStore }).workforceStore
@@ -61,7 +61,7 @@ export class DeliveryService extends Service implements WorkforceDelivery {
       ;(this.ctx as unknown as { platformBus?: { emit(name: string, payload: unknown): unknown } })
         .platformBus?.emit(event, payload)
     } catch {
-      // platformBus 未注入当前 fiber 时跳过
+      // platformBus non injecté dans la fiber courante : ignoré
     }
   }
 
@@ -70,20 +70,20 @@ export class DeliveryService extends Service implements WorkforceDelivery {
       ;(this.ctx as unknown as { logger?: (name: string) => { warn(message: string): unknown } })
         .logger?.('workforce').warn(message)
     } catch {
-      // logger 未注入时跳过
+      // logger non injecté : ignoré
     }
   }
 
-  // -- 提交 ---------------------------------------------------------------
+  // -- Soumission ---------------------------------------------------------------
 
   async submit(caller: WorkCallerRef, input: { permitId: string; summary: string; artifactIds: string[] }): Promise<DeliverableRecord> {
     const permit = await this.admission().verifyPermit(caller, input.permitId, { requireRun: true })
     if (!input.summary?.trim()) throw new WorkforceError('ARGUMENT_SCOPE_DENIED', t('交付摘要不能为空'))
     if (!Array.isArray(input.artifactIds) || input.artifactIds.length === 0) {
-      // V30：仅摘要没有交付证据，不能形成有效交付
+      // V30 : un simple résumé sans preuve de livraison ne forme pas une livraison valide
       throw new WorkforceError('ARTIFACT_SCOPE_DENIED', t('交付必须引用至少一个 artifact 证据'))
     }
-    // artifact 全部存在且属该员工/该 run
+    // Tous les artefacts existent et appartiennent à cet employé/ce run
     for (const artifactId of input.artifactIds) {
       const artifact = this.store.artifacts.get(artifactId)
       if (!artifact
@@ -92,8 +92,8 @@ export class DeliveryService extends Service implements WorkforceDelivery {
         throw new WorkforceError('ARTIFACT_SCOPE_DENIED', t('artifact {artifactId} 不存在或不属于该员工/该 run', { artifactId }))
       }
     }
-    // 版本＝该 run max+1（退回重交不覆盖历史交付）。TableStore.insert 为 void——记录以
-    // 本地变量返回，不得返回 insert() 结果（返回 void 会让提交链路拿到 undefined）
+    // Version = max du run + 1 (une nouvelle soumission après retour ne recouvre pas les livraisons historiques). TableStore.insert renvoie void — l'enregistrement est
+    // renvoyé via la variable locale, jamais le résultat d'insert() (renvoyer void donnerait undefined à la chaîne de soumission)
     const deliverable = this.store.txn(() => {
       const prior = this.store.deliverables.findWhere({ runId: permit.runId })
       const version = prior.reduce((max, item) => Math.max(max, item.version), 0) + 1
@@ -114,8 +114,8 @@ export class DeliveryService extends Service implements WorkforceDelivery {
       this.store.deliverables.insert(record)
       return record
     })
-    // 任务转 review 由 exec-hub 收口：结构化探测 completeRun（真实签名 (runId, {status, summary})）。
-    // 缺席/失败只告警不阻断——交付事实已落账，任务状态由运维对账收敛。
+    // Le passage de la tâche en review est verrouillé par exec-hub : sondage structuré completeRun (signature réelle (runId, {status, summary})).
+    // Absence/échec = simple avertissement sans blocage — le fait de livraison est déjà comptabilisé, l'état de la tâche converge par réconciliation d'exploitation.
     try {
       const hub = (this.ctx as unknown as {
         execHub?: { completeRun?: (runId: string, options?: { status?: string; summary?: string }) => unknown }
@@ -135,10 +135,10 @@ export class DeliveryService extends Service implements WorkforceDelivery {
     return deliverable
   }
 
-  // -- 验收 ---------------------------------------------------------------
+  // -- Acceptation ---------------------------------------------------------------
 
   async decide(caller: WorkCallerRef, input: { deliverableId: string; decision: 'accepted' | 'rejected'; reason: string }): Promise<DeliverableRecord> {
-    // 验收只能由真人作出（权限点 workforce.accept 由路由层把守，此处复核主体类型）
+    // L'acceptation ne peut émaner que d'un humain (le point de permission workforce.accept est gardé par la couche routes, ici on revérifie le type de sujet)
     if (caller.kind !== 'human') {
       throw new WorkforceError('PRINCIPAL_BINDING_MISMATCH', t('验收决定必须由真人作出（模型输出「成功」与 HTTP 200 都不能关闭业务任务）'))
     }
@@ -150,13 +150,13 @@ export class DeliveryService extends Service implements WorkforceDelivery {
     }
     const actor = caller.userId ?? caller.principalId
     if (input.decision === 'accepted') {
-      // 通过→关联任务 done（先流转后落账：回写失败则整体失败可重试，不留半决定）
+      // Accord→tâche liée done (transition avant écriture : si la réécriture échoue, l'ensemble échoue et est retentable, pas de décision à moitié faite)
       this.transitionIssue(deliverable, 'done', actor, true)
     } else {
-      // 退回→任务回 in_progress 并附原因（流转失败只告警，退回事实照常落账）
+      // Retour→tâche ramenée en in_progress avec motif (échec de transition = simple avertissement, le fait de retour est comptabilisé normalement)
       this.transitionIssue(deliverable, 'in_progress', actor, false)
     }
-    // TableStore.update 为 void（落库副作用）——回读作为决定后事实（不得接收 update() 结果）
+    // TableStore.update renvoie void (effet de bord d'écriture) — la relecture fait foi du fait décidé (ne pas consommer le résultat d'update())
     this.store.deliverables.update(deliverable.id, {
       status: input.decision,
       decidedAt: new Date().toISOString(),
@@ -172,8 +172,8 @@ export class DeliveryService extends Service implements WorkforceDelivery {
   }
 
   /**
-   * exec-hub 任务状态回写（结构化探测服务层 transitionIssue(id, to, actor)——真实签名）。
-   * 方法缺席：accepted 时阻断（任务不能无人收口）；rejected 时告警放行（退回事实已定）。
+   * Réécriture de l'état de la tâche exec-hub (sondage structuré de transitionIssue(id, to, actor) côté couche service — signature réelle).
+   * Méthode absente : blocage si accepted (une tâche ne peut rester sans clôture) ; avertissement et passage si rejected (le fait de retour est déjà acquis).
    */
   private transitionIssue(deliverable: DeliverableRecord, to: 'done' | 'in_progress', actor: string, blocking: boolean): void {
     if (!deliverable.issueId) {
@@ -205,7 +205,7 @@ export class DeliveryService extends Service implements WorkforceDelivery {
     }
   }
 
-  // -- 查询 ---------------------------------------------------------------
+  // -- Requêtes ---------------------------------------------------------------
 
   async get(caller: WorkCallerRef, deliverableId: string): Promise<DeliverableRecord> {
     const record = this.store.deliverables.get(deliverableId)
@@ -221,16 +221,16 @@ export class DeliveryService extends Service implements WorkforceDelivery {
     return records.sort((a, b) => a.version - b.version)
   }
 
-  /** 交付引用的 artifact 元信息（验收人核对证据用）。 */
+  /** Métadonnées des artefacts référencés par le livrable (pour que l'acceptant confronte les preuves). */
   artifactsOf(deliverable: DeliverableRecord): ArtifactRecord[] {
     const ids = this.parseIds(deliverable.artifactIdsJson)
     return ids.map((id) => this.store.artifacts.get(id)).filter((item): item is ArtifactRecord => Boolean(item))
   }
 
-  // -- 内部 ---------------------------------------------------------------
+  // -- Interne ---------------------------------------------------------------
 
   private workOrgOf(record: { issueId: string; employeeId: string }): string {
-    // 工作组织以员工主组织近似（交付记录未冗余 orgId；同组织判定满足「不跨组织外泄」）
+    // L'organisation de travail est approchée par l'organisation principale de l'employé (l'enregistrement de livraison ne redondance pas orgId ; le jugement même organisation satisfait « pas de fuite inter-organisations »)
     return this.store.employees.get(record.employeeId)?.orgId ?? ''
   }
 
@@ -243,7 +243,7 @@ export class DeliveryService extends Service implements WorkforceDelivery {
         const user = typeof iam?.users === 'function' ? iam.users().get(caller.userId) : undefined
         if (user?.orgId === orgId) return
       } catch {
-        // fail-closed：落入末尾拒绝
+        // fail-closed : retombe dans le refus final
       }
     }
     throw new WorkforceError('RUN_NOT_OWNED', t('无权查看该交付记录（仅本人或同组织主体）'))

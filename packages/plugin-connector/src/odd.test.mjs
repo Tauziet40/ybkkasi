@@ -1,6 +1,6 @@
 /**
- * ODD 域内判定纯函数自证（OPT-P2-01 配套测试，2026-09-12）。
- * 运行：node --test packages/plugin-connector/src/odd.test.mjs
+ * Auto-vérification des fonctions pures de jugement dans le domaine ODD (tests associés à OPT-P2-01, 2026-09-12).
+ * Exécution : node --test packages/plugin-connector/src/odd.test.mjs
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -86,7 +86,7 @@ test('⑬normalizeOdd：非法声明抛错（QA C-04 fail-closed，不再静默�
   assert.throws(() => normalizeOdd({ activeHours: { start: 25, end: 2 } }), /activeHours/)
   assert.throws(() => normalizeOdd({ dataFreshnessMinutes: -1 }), /dataFreshnessMinutes/)
   assert.throws(() => normalizeOdd({ allowedServices: 'hackernews' }), /allowedServices/)
-  // 空数组=未声明（非非法），仍折叠剔除
+  // Tableau vide = non déclaré (pas illégal), toujours replié puis retiré
   const normalized = normalizeOdd({ excludedActions: [], allowedServices: '*' })
   assert.deepEqual(normalized, { allowedServices: '*' })
 })

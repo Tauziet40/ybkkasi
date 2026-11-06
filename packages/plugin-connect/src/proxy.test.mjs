@@ -1,14 +1,14 @@
 /**
- * connect 工具远程代理契约化自证（OPT-P1-03 配套测试，2026-09-12）。
+ * Auto-vérification contractuelle du proxy distant d'outils de connect (tests associés à OPT-P1-03, 2026-09-12).
  *
- * 运行方式（真实 ToolRuntimeLite + 存根客户端，Node 直接加载）：
+ * Mode d'exécution (ToolRuntimeLite réel + client stub, chargement direct par Node) :
  *
  *     node --test packages/plugin-connect/src/proxy.test.mjs
  *
- * 覆盖面：
- *   - tools.intercept / decorate 正式扩展点（注册级拦截、存量包扎、还原、未知工具抛错）；
- *   - installToolProxy：未接入→本地执行；已接入→转发；转发失败→显式失败 + noteForwardFailure
- *     （绝不静默落本地）；运行时缺扩展点→安装失败 + noteDegraded（connect.degraded 语义）。
+ * Couverture :
+ *   - points d'extension officiels tools.intercept / decorate (interception à l'enregistrement, enveloppement des préexistants, restauration, erreur sur outil inconnu) ;
+ *   - installToolProxy : non connecté → exécution locale ; connecté → transfert ; échec de transfert → échec explicite + noteForwardFailure
+ *     (jamais de repli local silencieux) ; runtime sans points d'extension → échec d'installation + noteDegraded (sémantique connect.degraded).
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -24,7 +24,7 @@ function makeRuntime() {
   return new ToolRuntimeLite(new Context())
 }
 
-/** 夹具 ctx：effect 收集注销器（手动触发），logger 静音，platformBus 缺省（事件经 catch 静默）。 */
+/** ctx factice : effect collecte les destructeurs (déclenchés à la main), logger muet, platformBus absent (événements silencieux via catch). */
 function makeCtx(tools) {
   const effects = []
   return {

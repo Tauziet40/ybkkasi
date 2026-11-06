@@ -1,21 +1,21 @@
 /**
- * ODD（Operation Design Domain）运行时判定（OPT-P2-01，2026-09-12）。
+ * Jugement à l'exécution ODD (Operation Design Domain) (OPT-P2-01, 2026-09-12).
  *
- * 连接器权限组可声明 odd 块（运营设计域）：provider 白名单 / 显式排除 action /
- * 目录数据新鲜度阈值 / 许可时间窗。`inOdd` 为纯函数——授权链在 admin 审批门之前插入域内判定，
- * 离域即拒绝并发 `connector.odd_exit`（走 OPT-P1-04 总线落审计）。
- * 边界从此可计算：目录外 action、陈旧目录、时间窗外调用不再依赖"admin 兜底"被动防御。
+ * Un groupe de permissions connecteur peut déclarer un bloc odd (domaine de conception opérationnelle) : liste blanche provider / exclusion explicite d'actions /
+ * seuil de fraîcheur des données du catalogue / fenêtre temporelle autorisée. `inOdd` est une fonction pure — la chaîne d'autorisation insère le jugement de domaine avant la barrière d'approbation admin,
+ * hors domaine = refus et émission de `connector.odd_exit` (vers l'audit via le bus OPT-P1-04).
+ * La frontière devient calculable : action hors catalogue, catalogue périmé, appel hors fenêtre temporelle ne dépendent plus d'une défense passive « rattrapée par admin ».
  */
 import { t } from '../../platform-i18n/src/index.ts'
 
 export interface OddDeclaration {
-  /** provider（service）白名单：'*' 或显式列表；未声明=不限制。 */
+  /** Liste blanche provider (service) : '*' ou liste explicite ; non déclaré = sans limitation. */
   allowedServices?: string[] | '*'
-  /** 显式排除 action id（目录外/危险动作点名排除）。 */
+  /** Exclusion explicite d'ids d'action (exclusion nominative d'actions hors catalogue/dangereuses). */
   excludedActions?: string[]
-  /** 目录数据新鲜度阈值（分钟）：目录 syncedAt 距今超过阈值即离域（未声明=不限制）。 */
+  /** Seuil de fraîcheur des données du catalogue (minutes) : si le syncedAt du catalogue dépasse le seuil par rapport à maintenant → hors domaine (non déclaré = sans limitation). */
   dataFreshnessMinutes?: number
-  /** 许可时间窗（本地时，24h 制）：如 { start: 9, end: 18 }；跨零点支持 start > end；未声明=全天。 */
+  /** Fenêtre temporelle autorisée (heure locale, format 24 h) : ex. { start: 9, end: 18 } ; passage au-delà de minuit accepté avec start > end ; non déclaré = toute la journée. */
   activeHours?: { start: number; end: number }
 }
 
@@ -34,11 +34,11 @@ function inActiveHours(now: Date, window: { start: number; end: number }): boole
   const { start, end } = window
   if (start === end) return hour === start
   if (start < end) return hour >= start && hour < end
-  return hour >= start || hour < end // 跨零点：22→6
+  return hour >= start || hour < end // passage de minuit : 22→6
 }
 
 /**
- * 域内判定（纯函数）：全部约束命中即 in=true；任一离域给出 reasons（人可读，入审计）。
+ * Jugement de domaine (fonction pure) : toutes les contraintes satisfaites → in=true ; tout point hors domaine produit des reasons (lisibles, vers l'audit).
  */
 export function inOdd(
   odd: OddDeclaration,
@@ -80,10 +80,10 @@ export function inOdd(
 }
 
 /**
- * 规范化入参声明：剔除未声明字段，防止部分赋值把 undefined 语义写进台账。
- * QA C-04：**非法声明一律抛错（fail-closed）**——此前 start=25 / 负新鲜度 / 字符串形态白名单
- * 等坏声明被静默剔除，运营以为域已生效实际裸奔（fail-open）。未声明（absent）仍返回 undefined。
- * 抛错沿权限组 upsert 面板以 400 呈现，运营当场修正。
+ * Normalisation de la déclaration en entrée : retire les champs non déclarés, pour empêcher qu'une affectation partielle écrive une sémantique undefined dans le registre.
+ * QA C-04 : **toute déclaration illégale lève une erreur (fail-closed)** — auparavant start=25 / fraîcheur négative / liste blanche sous forme de chaîne
+ * et autres déclarations défectueuses étaient silencieusement retirées, l'exploitation croyait le domaine actif alors qu'il tournait à découvert (fail-open). Non déclaré (absent) renvoie toujours undefined.
+ * L'erreur remonte via le panneau upsert du groupe de permissions sous forme de 400, l'exploitation corrige sur place.
  */
 export function normalizeOdd(input: unknown): OddDeclaration | undefined {
   if (!input || typeof input !== 'object') return undefined

@@ -1,10 +1,10 @@
 /**
- * NasMcpClient —— MCP Streamable HTTP 客户端（NAS 文件网关专用轻量实现）。
+ * NasMcpClient — client MCP Streamable HTTP (implémentation légère dédiée à la passerelle de fichiers NAS).
  *
- * 与 plugin-mcp 的传输层同构（不跨插件引用私有方法，保持插件自包含）：
- * 单 POST JSON-RPC，兼容纯 JSON 与 SSE（text/event-stream 取首个 data 帧）两种响应；
- * initialize 握手缓存 mcp-session-id（TTL 5 分钟，无状态服务缓存空串避免重复握手）；
- * AbortController 超时控制。
+ * Structurellement identique à la couche de transport de plugin-mcp (sans référencer entre plugins des méthodes privées, l'extension reste autonome) :
+ * un POST JSON-RPC unique, compatible réponses JSON pur et SSE (text/event-stream, première trame data) ;
+ * la poignée de main initialize met en cache mcp-session-id (TTL 5 minutes ; un service sans état cache une chaîne vide pour éviter de refaire la poignée) ;
+ * contrôle de timeout par AbortController.
  */
 import { t } from '../../platform-i18n/src/index.ts'
 
@@ -29,7 +29,7 @@ export class NasMcpClient {
     this.headers = headers
   }
 
-  /** initialize 探活：返回服务端信息；不可达抛错。 */
+  /** Sondage initialize : renvoie les infos serveur ; injoignable = erreur levée. */
   async probe(): Promise<{ serverInfo?: { name?: string; version?: string } }> {
     const { payload } = await this.request({
       jsonrpc: '2.0',
@@ -53,8 +53,8 @@ export class NasMcpClient {
     return Array.isArray(payload?.result?.tools) ? payload.result.tools : []
   }
 
-  /** tools/call：返回 MCP content（文本块/数组或原样对象）；isError 时抛错。
-   *  options.headers 支持逐调用附加头（X-On-Behalf-User 透传真实用户身份，dev-plan-nas-authz §2.4）。 */
+  /** tools/call : renvoie le content MCP (bloc texte/tableau ou objet tel quel) ; isError = erreur levée.
+   *  options.headers permet des en-têtes additionnels par appel (X-On-Behalf-User transmet l'identité de l'utilisateur réel, dev-plan-nas-authz §2.4). */
   async call(tool: string, args: Record<string, unknown> = {}, options?: { timeoutMs?: number; headers?: Record<string, string> }): Promise<unknown> {
     const timeoutMs = options?.timeoutMs ?? CALL_TIMEOUT_MS
     const sessionId = await this.ensureSession().catch(() => undefined)
@@ -79,7 +79,7 @@ export class NasMcpClient {
       throw new Error(t('网关工具 {tool} 执行失败：{reason}', { tool, reason: text || 'isError=true' }))
     }
     if (Array.isArray(result?.content)) {
-      // 单一文本块直接返回文本，多块返回数组（调用方按需 JSON.parse）
+      // un bloc texte unique renvoie le texte, plusieurs blocs un tableau (l'appelant JSON.parse au besoin)
       const blocks = result.content as Array<Record<string, unknown>>
       return blocks.length === 1 && typeof blocks[0]?.text === 'string' ? blocks[0].text : blocks
     }
@@ -131,7 +131,7 @@ export class NasMcpClient {
           if (!line.startsWith('data:')) continue
           const frame = line.slice(5).trim()
           if (!frame || frame === '[DONE]') continue
-          try { return { payload: JSON.parse(frame), sessionId: sessionIdHeader } } catch { /* 跳过非 JSON 帧 */ }
+          try { return { payload: JSON.parse(frame), sessionId: sessionIdHeader } } catch { /* ignore les trames non JSON */ }
         }
         throw new Error(t('网关 SSE 响应中未找到 JSON-RPC 帧'))
       }

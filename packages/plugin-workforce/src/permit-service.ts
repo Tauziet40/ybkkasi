@@ -1,10 +1,10 @@
 /**
- * 工作授权（permit）服务（实施路径 §8.1/§13，附录 A 决策 4）。
+ * Service d'autorisation de travail (permit) (chemin d'implémentation §8.1/§13, annexe A décision 4).
  *
- * permit 是服务端签发的不透明随机 ID（generateSecret，非 JWT、非自解码结构），
- * 绑定主体/员工/任用版本/能力清单/run/租约，短期有效、可撤销；
- * 调用必须同时持真实机器令牌——permit 字符串本身不是凭证。
- * 权威存储：workforce_permits（SQLite，契约 WORKFORCE_TABLES）。
+ * Le permit est un identifiant aléatoire opaque émis côté serveur (generateSecret, ni JWT ni structure auto-décodables),
+ * lié au sujet/employé/version de nomination/inventaire de capacités/run/bail, à validité courte et révocable ;
+ * l'appel doit aussi présenter un vrai jeton machine — la chaîne permit n'est pas elle-même un justificatif.
+ * Stockage de référence : workforce_permits (SQLite, contrat WORKFORCE_TABLES).
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -20,7 +20,7 @@ import {
 } from './contract.ts'
 import { t } from '../../platform-i18n/src/index.ts'
 
-/** permit 默认有效期：30 分钟（§8.3 短期授权；租约默认 15 分钟由 exec-hub 侧持有）。 */
+/** Validité par défaut du permit : 30 minutes (§8.3 autorisation à court terme ; bail de 15 minutes par défaut détenu côté exec-hub). */
 const DEFAULT_PERMIT_TTL_MS = 30 * 60_000
 
 export class PermitService extends Service implements WorkforcePermits {
@@ -33,7 +33,7 @@ export class PermitService extends Service implements WorkforcePermits {
     this.ttlMs = config.permitTtlMs && config.permitTtlMs > 0 ? config.permitTtlMs : DEFAULT_PERMIT_TTL_MS
   }
 
-  // -- 依赖（结构化消费组1仓储实现，不反向依赖具体类） ---------------------------------
+  // -- Dépendances (consommation structurée de l'implémentation de dépôt du groupe 1, pas de dépendance inverse vers les classes concrètes) ---------------------------------
 
   private get store(): WorkforceStore {
     const store = (this.ctx as unknown as { workforceStore?: WorkforceStore }).workforceStore
@@ -48,11 +48,11 @@ export class PermitService extends Service implements WorkforcePermits {
       ;(this.ctx as unknown as { platformBus?: { emit(name: string, payload: unknown): unknown } })
         .platformBus?.emit(event, payload)
     } catch {
-      // platformBus 未注入当前 fiber 时跳过（cordis 严格服务访问）
+      // platformBus non injecté dans la fiber courante : ignoré (accès service strict de cordis)
     }
   }
 
-  // -- 签发 -------------------------------------------------------------
+  // -- Émission -------------------------------------------------------------
 
   issue(input: {
     resolution: IdentityResolution
@@ -64,7 +64,7 @@ export class PermitService extends Service implements WorkforcePermits {
   }): PermitRecord {
     const now = new Date().toISOString()
     const ttl = input.ttlMs > 0 ? input.ttlMs : this.ttlMs
-    // 不透明随机 ID：不可猜测、不可自解码（附录 A 决策 4）；主体取绑定 principalId（机器令牌反查事实）
+    // Identifiant aléatoire opaque : non devinable, non auto-décodable (annexe A décision 4) ; le sujet prend le principalId de la liaison (fait de la recherche inverse par jeton machine)
     const record: PermitRecord = {
       id: generateSecret('wfpermit'),
       employeeId: input.resolution.employee.id,
@@ -83,12 +83,12 @@ export class PermitService extends Service implements WorkforcePermits {
       revokedAt: '',
       revokedReason: '',
     }
-    // TableStore.insert 为 void（落库副作用）——记录以本地变量返回，不得返回 insert() 结果
+    // TableStore.insert renvoie void (effet de bord d'écriture) — l'enregistrement est renvoyé via la variable locale, jamais le résultat d'insert()
     this.store.permits.insert(record)
     return record
   }
 
-  // -- 校验 -------------------------------------------------------------
+  // -- Vérification -------------------------------------------------------------
 
   verify(permitId: string, caller: WorkCallerRef, opts?: { requireRun?: boolean }): PermitRecord {
     const permit = this.store.permits.get(permitId)
@@ -106,11 +106,11 @@ export class PermitService extends Service implements WorkforcePermits {
         throw new WorkforceError('RUN_NOT_OWNED', t('permit 未绑定执行 run/租约，不能用于资源调用'))
       }
     }
-    // 任用版本与 IdentityResolution 一致性由调用方组合校验（admission/port 持有解析结果）
+    // La cohérence version de nomination/IdentityResolution est vérifiée en combinaison par l'appelant (admission/port détiennent le résultat de résolution)
     return permit
   }
 
-  // -- 撤销 -------------------------------------------------------------
+  // -- Révocation -------------------------------------------------------------
 
   revoke(permitId: string, reason: string): void {
     const permit = this.store.permits.get(permitId)

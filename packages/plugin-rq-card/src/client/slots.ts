@@ -1,75 +1,75 @@
 /**
- * 注入面类型（InjectFace / PropsRuntime 组合，spike §4.1 文件清单的 slots.ts）。
+ * Types de la face d'injection (combinaison InjectFace / PropsRuntime, slots.ts de la liste de fichiers spike §4.1).
  *
- * 两个 slot 条目的 props 形状：
- *   - ExecutionCard ← `tool.call.toolview` 键位槽：owner（ui-tool 的 ToolCallTree）
- *     提供 callId/toolName/block/cwd/openFile/inspect；InjectFace 展开本插件
- *     inject 回调的产物；PropsLocale 绑定 `rq-card` 词典座位。
- *   - RqFeedback ← `conversation.chat.assistant-actions` list 槽：owner 提供
- *     messageId（spike §2.4 证据 D2）。
+ * Forme des props des deux entrées de slot :
+ *   - ExecutionCard ← slot clavier `tool.call.toolview` : l'owner (ToolCallTree d'ui-tool)
+ *     fournit callId/toolName/block/cwd/openFile/inspect ; InjectFace déploie le produit
+ *     de la callback inject de la présente extension ; PropsLocale lie la place du dictionnaire `rq-card`.
+ *   - RqFeedback ← slot list `conversation.chat.assistant-actions` : l'owner fournit
+ *     messageId (spike §2.4 preuve D2).
  *
- * 全部 dsh 包引用都是 type-only（编译期擦除，不进 bundle、不触构建纯度门禁）。
+ * Toutes les références de paquets dsh sont type-only (effacées à la compilation, hors bundle, sans toucher la barrière de pureté du build).
  * @module @dsh-ops/plugin-rq-card/client/slots
  */
 
 import type {
   HostObservable, InjectFace, PropsLocale, PropsRuntime,
 } from '@deepseek-ai/dsh-client-ui-slots'
-// Type-only：拉入 ui-conversation 的 SlotMap merge（assistant-actions 条目形态）。
+// Type-only : introduit la fusion SlotMap d'ui-conversation (forme d'entrée assistant-actions).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-// Type-only：拉入运行时快照的 ToolCallBlock 联合类型（spike §2.5 证据 E3）。
+// Type-only : introduit l'union de types ToolCallBlock de l'instantané runtime (spike §2.5 preuve E3).
 import type { ToolCallBlock } from '@deepseek-ai/dsh-client-runtime/client'
-// Type-only：拉入本包的 LocaleNamespaceMap merge（'rq-card' 座位）。
+// Type-only : introduit la fusion LocaleNamespaceMap du présent paquet (place 'rq-card').
 import type {} from './locales.ts'
 import type { ExecutionState, ExecutionStateInput } from './state.ts'
 
 /**
- * 执行卡的注入面。
+ * Face d'injection de la carte d'exécution.
  */
 export interface RqToolviewInjected {
   /**
-   * 四态映射入口（包一层 deriveExecutionState，保持卡片为纯渲染器、测试可替换）。
+   * Entrée de la mise en correspondance des quatre états (enveloppe deriveExecutionState, la carte reste un pur renderer, remplaçable en test).
    */
   deriveState: (input: ExecutionStateInput) => ExecutionState
   /**
-   * 资源健康面/阻断标志快照（30s 轮询与熔断/授权/绑定标志的接线点）。
-   * 宿主半接线前返回空对象（= health unknown），卡片按调用生命周期降级呈现；
-   * 接线后本函数的返回值展开进 deriveState 的输入，卡片自动升级为四态完整呈现。
+   * Instantané face santé de ressource/marqueurs de blocage (point de câblage du scrutin 30 s et des marqueurs disjoncteur/autorisation/liaison).
+   * Avant le câblage de la moitié hôte, renvoie un objet vide (= health unknown), la carte se dégrade sur la présentation du cycle de vie de l'appel ;
+   * après câblage, le retour de cette fonction se déploie dans l'entrée de deriveState, la carte monte automatiquement en présentation complète des quatre états.
    */
   healthSnapshot?: () => Partial<ExecutionStateInput>
 }
 
-/** 执行卡完整 props（键位条目标准组合，对齐 ui-tool 的 ToolCallViewProps 惯例）。 */
+/** Props complètes de la carte d'exécution (combinaison standard d'entrée clavier, alignée sur l'usage ToolCallViewProps d'ui-tool). */
 export type ExecutionCardProps = PropsRuntime<'tool.call.toolview'>
   & InjectFace<RqToolviewInjected>
   & PropsLocale<'rq-card'>
 
-/** 反馈条视图：每消息已提交评分的本地乐观态（服务端确认不回填——薄端点
- * 无读接口，失败静默保留本地标记，不打扰会话）。 */
+/** Vue de la barre de feedback : état optimiste local du score déjà soumis par message (la confirmation serveur n'est pas renvoyée — endpoint léger
+ * sans interface de lecture, l'échec silencieux conserve le marqueur local, sans déranger la session). */
 export interface RqFeedbackView {
-  /** 每消息一条：当前选中的评分。 */
+  /** Une par message : le score actuellement sélectionné. */
   items: ReadonlyMap<string, { score: 'up' | 'down' }>
 }
 
 /**
- * 反馈条的注入面。
+ * Face d'injection de la barre de feedback.
  */
 export interface RqFeedbackInjected {
-  /** 本会话共享的乐观态（每 Session 一个控制器）。 */
+  /** État optimiste partagé de la session (un contrôleur par Session). */
   hooks: { rqfb: HostObservable<RqFeedbackView> }
   /**
-   * 提交评分（fire-and-forget：网络失败静默降级，不向会话区报错）。
-   * @param messageId 定稿 assistant 消息 id。
+   * Soumet un score (fire-and-forget : échec réseau = dégradation silencieuse, pas d'erreur vers la zone de session).
+   * @param messageId id du message assistant définitif.
    * @param score 👍/👎。
-   * @param note 可选补充说明（当前 UI 不收集，契约预留）。
+   * @param note complément optionnel (l'UI actuelle ne le collecte pas, réserve de contrat).
    */
   rate: (messageId: string, score: 'up' | 'down', note?: string) => Promise<void>
 }
 
-/** 反馈条完整 props（list 条目标准组合，对齐 ui-message-feedback 的惯例）。 */
+/** Props complètes de la barre de feedback (combinaison standard d'une entrée list, alignée sur les usages d'ui-message-feedback). */
 export type RqFeedbackProps = PropsRuntime<'conversation.chat.assistant-actions'>
   & InjectFace<RqFeedbackInjected>
   & PropsLocale<'rq-card'>
 
-/** 组件实际消费的 ToolCallBlock 形态说明（运行时由框架传入 dsh 真实类型）。 */
+/** Description de la forme ToolCallBlock réellement consommée par le composant (le vrai type dsh est passé par le cadre à l'exécution). */
 export type ToolCallBlockView = ToolCallBlock

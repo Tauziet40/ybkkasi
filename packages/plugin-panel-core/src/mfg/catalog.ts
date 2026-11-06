@@ -1,8 +1,8 @@
 /**
- * 制造工具箱 —— 工具注册表（单一注册入口；自「制造业 AI 工具集」src/core/catalog.ts 并入）。
+ * Boîte à outils manufacture — registre d'outils (entrée d'enregistrement unique ; intégré depuis « jeu d'outils IA manufacture » src/core/catalog.ts).
  *
- * 新增已实现工具只改本文件 + engine.ts 的分支；网页表单、导入模板、MCP/工具面、
- * 执行期校验全部由本定义生成（源项目设计原则，并入后语义不变）。
+ * Ajouter un outil implémenté ne touche que ce fichier + la branche d'engine.ts ; formulaire web, gabarit d'import, face MCP/outils,
+ * validation à l'exécution sont tous générés par cette définition (principe de conception du projet source, sémantique inchangée après intégration).
  */
 import type { Field, ToolDefinition, Category } from './types.ts'
 
@@ -32,12 +32,12 @@ export const tools: ToolDefinition[] = [
 
 export const categories: readonly Category[] = ['生产运营', '质量工程', '研发设计', '供应链', '设备运维', '经营财务', '知识与文档'] as const
 
-/** 全部工具统一检索用文本（标题/副标题/标签/id）。 */
+/** Texte de recherche unifié pour tous les outils (titre/sous-titre/étiquettes/id). */
 export const toolSearchText = (tool: ToolDefinition): string =>
   `${tool.title} ${tool.subtitle} ${tool.tags.join(' ')} ${tool.id} ${tool.category}`.toLowerCase()
 
 export const findTool = (id: string): ToolDefinition | undefined => tools.find((tool) => tool.id === id)
 
-/** 按 Skill 标识反查工具（评估与放行面用：Skill 注册键 ≠ 工具 id）。 */
+/** Recherche inverse d'outil par identifiant Skill (pour l'évaluation et la libération : clé d'enregistrement Skill ≠ id d'outil). */
 export const findToolBySkill = (skill: string): ToolDefinition | undefined =>
   tools.find((tool) => tool.skill === skill)

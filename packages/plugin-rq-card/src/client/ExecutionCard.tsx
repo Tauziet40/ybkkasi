@@ -1,17 +1,17 @@
 /**
- * 四态执行卡：`tool.call.toolview` 键位槽条目（WP-06 泳道 C 的 C1/C2）。
+ * Carte d'exécution à quatre états : entrée du slot clavier `tool.call.toolview` (C1/C2 du couloir C, WP-06).
  *
- * 注册形态与 dsh ui-tool 的原子 toolview 同构（spike §2.3 证据 C3、§4.3 伪代码）：
- * 为元冰可工具名逐一注册 key，未列名的工具自动回落 GenericToolCard（加法式，
- * 不抢占任何已有键位）。四态判定全部经 deriveExecutionState 纯函数（C2 表），
- * 本组件只做纯渲染：
- *   调用中   → 骨架 + 可取消占位（取消通道待宿主半接线，占位钮禁用并说明）
- *   执行中   → 进度脉冲；degraded 附「有点慢，已转后台处理」
- *   已完成   → 结果摘要 + /rq 控制台对应资源页外链（同源带登录态）+ 👍/👎（反馈条另注册）
- *   异常阻断 → 红边条 + 业务文案（原因码 = C3 js/errors.js 的键）+ 行动按钮
+ * Forme d'enregistrement isomorphe au toolview atomique d'ui-tool de dsh (spike §2.3 preuve C3, §4.3 pseudo-code) :
+ * enregistre une clé pour chaque nom d'outil de method, les outils non listés retombant automatiquement sur GenericToolCard (additif,
+ * sans préemption d'aucune clé existante). Le jugement des quatre états passe entièrement par la fonction pure deriveExecutionState (table C2),
+ * ce composant ne fait que du rendu pur :
+ *   en appel       → squelette + placeholder annulable (le canal d'annulation attend le câblage de la moitié hôte, bouton désactivé avec explication)
+ *   en exécution   → pulsation de progression ; degraded ajoute « un peu lent, traité en arrière-plan »
+ *   terminé        → résumé du résultat + lien externe vers la page de ressource correspondante de la console /rq (same-origin avec état de connexion) + 👍/👎 (barre de feedback enregistrée séparément)
+ *   bloqué anomalie → bandeau rouge + libellé métier (code de motif = clé de C3 js/errors.js) + bouton d'action
  *
- * 【降级防御】对 block/content 的运行时访问全部带形状守卫：上游快照结构变化时
- * 卡片宁可少渲染，也不抛错——slot 边界（reportEntryError）之外再叠一层自律。
+ * [Défense par dégradation] tout accès à l'exécution à block/content est gardé de forme : si la structure d'instantané amont change,
+ * la carte préfère rendre moins plutôt que de jeter — au-delà de la frontière slot (reportEntryError), une couche d'auto-discipline.
  * @module @dsh-ops/plugin-rq-card/client/ExecutionCard
  */
 
@@ -19,7 +19,7 @@ import type { ExecutionState, ExecutionStateInput } from './state.ts'
 import type { ExecutionCardProps, ToolCallBlockView } from './slots.ts'
 import { CONSOLE_BASE } from '../wire.ts'
 
-/** 工具名前缀 → /rq 控制台资源页（hash 路由；未列名前缀回落工作台）。 */
+/** Préfixe de nom d'outil → page de ressource de la console /rq (route hash ; préfixe non listé = repli espace de travail). */
 const ROUTE_FOR_TOOL_PREFIX: Readonly<Record<string, string>> = Object.freeze({
   mcp: '#/mcp',
   nas: '#/nas',
@@ -36,7 +36,7 @@ const ROUTE_FOR_TOOL_PREFIX: Readonly<Record<string, string>> = Object.freeze({
   approval: '#/approvals',
 })
 
-/** 阻断原因码 → 行动按钮落地页（C3 文案模块的「行动按钮」列，同源带登录态）。 */
+/** Code de motif de blocage → page d'atterrissage du bouton d'action (colonne « bouton d'action » du module de libellés C3, same-origin avec état de connexion). */
 const ROUTE_FOR_REASON: Readonly<Record<string, string>> = Object.freeze({
   'nas-authz-deny': '#/nas-authz',
   'quota-exhausted': '#/approvals',
@@ -47,17 +47,17 @@ const ROUTE_FOR_REASON: Readonly<Record<string, string>> = Object.freeze({
   'invoke-error': '#/dashboard',
 })
 
-/** 按工具名取控制台资源页。 */
+/** Prend la page de ressource de la console selon le nom d'outil. */
 function routeForTool(toolName: string): string {
   const prefix = toolName.split('_', 1)[0] ?? ''
   return `${CONSOLE_BASE}${ROUTE_FOR_TOOL_PREFIX[prefix] ?? '#/dashboard'}`
 }
 
-/** 结果文本的截断上限（卡片是摘要，不是日志）。 */
+/** Plafond de troncature du texte de résultat (la carte est un résumé, pas un journal). */
 const RESULT_TEXT_LIMIT = 600
 
 /**
- * 从定稿结果块提取文本（形状守卫：content 块缺 text 字段时跳过）。
+ * Extrait le texte du bloc de résultat définitif (garde de forme : un bloc content sans champ text est sauté).
  */
 function resultText(block: { content?: unknown }): string {
   const content = block.content
@@ -75,14 +75,14 @@ function resultText(block: { content?: unknown }): string {
     : text
 }
 
-/** 卡片体（由状态派生部分 + t 词典渲染）。 */
+/** Corps de la carte (partie dérivée de l'état + rendu par dictionnaire t). */
 function CardBody({ state, block, toolName, t }: {
   state: ExecutionState
   block: ToolCallBlockView
   toolName: string
   t: (key: never) => string
 }) {
-  // t 的键来自 rq-card 词典（编译期联合类型）；运行时直接以字符串取词。
+  // Les clés de t viennent du dictionnaire rq-card (union de types à la compilation) ; à l'exécution, prise de mot par chaîne directe.
   const text = t as (key: string) => string
   switch (state.state) {
     case 'calling':
@@ -141,20 +141,20 @@ function CardBody({ state, block, toolName, t }: {
 }
 
 /**
- * 四态执行卡（键位条目组件）。
- * @param props - owner 共享（toolName/block）+ 注入面（deriveState/healthSnapshot）+ 词典。
+ * Carte d'exécution à quatre états (composant d'entrée clavier).
+ * @param props - partage owner (toolName/block) + face d'injection (deriveState/healthSnapshot) + dictionnaire.
  */
 export function ExecutionCard(props: ExecutionCardProps) {
   const { toolName, block, deriveState, healthSnapshot, t } = props
 
-  // ── 从调用块取生命周期素材（spike §2.5 证据 E3：运行中无 'kind'，定稿 kind:'tool-result'）──
+  // ── tirer la matière du cycle de vie du bloc d'appel (spike §2.5 preuve E3 : en cours d'exécution sans 'kind', définitif kind:'tool-result') ──
   const hasResult = typeof block === 'object' && block !== null && 'kind' in block
   const resultIsError = hasResult === true
     && typeof (block as { isError: unknown }).isError === 'boolean'
     && (block as { isError: boolean }).isError
   const invokePhase: ExecutionStateInput['invokePhase'] = hasResult ? 'idle' : 'calling'
 
-  // ── C2 表映射：调用生命周期素材 + 注入面健康快照（宿主半接线前为空）──
+  // ── mise en correspondance C2 : matière du cycle de vie d'appel + instantané santé de la face d'injection (vide avant câblage de la moitié hôte) ──
   const extra = healthSnapshot?.() ?? {}
   const state = deriveState({
     hasResult,

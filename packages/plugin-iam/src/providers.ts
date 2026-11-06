@@ -1,21 +1,21 @@
 /**
- * IdentityProviderAdapter —— 统一身份源适配层（融合自 OS-skill/auth-identity 模块设计）。
+ * IdentityProviderAdapter — couche d'adaptation unifiée des sources d'identité (fusion de la conception du module OS-skill/auth-identity).
  *
- * 登录主流程只面向本接口编程，不感知钉钉/飞书/企微差异；
- * 新增身份源 = 新增一个 Adapter 实现 + 连接器配置插一行。
+ * Le flux principal de connexion programme uniquement contre cette interface, insensible aux différences DingTalk/Feishu/WeCom ;
+ * ajouter une source d'identité = ajouter une implémentation d'Adapter + une ligne de configuration de connecteur.
  *
- * 双模式（生态设计 v1.2 第 0 步，M7 消解）：
- *   - real ：配置 appKey/appSecret 后走真实钉钉 OpenAPI（可指定 apiBase 指向代理/专有部署）。
- *   - mock ：未配置凭证时的显式降级——内置演示目录，healthCheck 标注 mock:true，禁止冒充真实。
+ * Double mode (conception écosystème v1.2 étape 0, résorption M7) :
+ *   - real : avec appKey/appSecret configurés, passe par la vraie OpenAPI DingTalk (apiBase peut pointer vers un proxy/déploiement dédié).
+ *   - mock : repli explicite sans identifiants configurés — annuaire de démonstration intégré, healthCheck marque mock:true, interdiction de se faire passer pour du réel.
  */
 import { t } from '../../platform-i18n/src/index.ts'
 
-/** 登录场景：四种形态归一为三类（auth-identity docs/04）。 */
+/** Scénario de connexion : quatre formes normalisées en trois classes (auth-identity docs/04). */
 export type LoginScene = 'web_qr' | 'h5' | 'in_app'
 
-/** 归一化后的自然人档案——登录主流程只认这个结构。 */
+/** Dossier de personne physique normalisé — le flux principal de connexion ne reconnaît que cette structure. */
 export interface NormalizedProfile {
-  /** 平台侧用户唯一键（优先 unionId：跨应用/跨企业同人标识）。 */
+  /** Clé unique côté plateforme utilisateur (unionId prioritaire : identifiant d'une même personne à travers applications/entreprises). */
   providerUserId: string
   corpId: string
   name: string
@@ -24,7 +24,7 @@ export interface NormalizedProfile {
   avatar?: string
 }
 
-/** code 换到的令牌包裹（各家结构差异封在这里）。 */
+/** Enveloppe du jeton obtenue contre le code (les différences de structure entre fournisseurs sont confinées ici). */
 export interface ProviderTokenSet {
   accessToken: string
   refreshToken?: string
@@ -43,38 +43,38 @@ export class ProviderAuthError extends Error {
 export interface IdentityProviderAdapter {
   readonly type: 'dingtalk' | 'feishu' | 'wecom'
   readonly label: string
-  /** 当前是否为降级 mock 模式（IdP 对外卖点禁止使用 mock 数据）。 */
+  /** Si le mode courant est le repli mock (l'endpoint IdP exposé interdit l'usage de données mock). */
   readonly mock: boolean
-  /** 构造授权跳转 URL 或二维码内容（in_app 场景可返回 null，由前端 SDK 取 code）。
-   *  options.promptConsent=true 时强制弹授权确认页：应用新增权限点后，
-   *  老用户的历史授权快照不含新 scope，需重新授权一次才能刷新。 */
+  /** Construit l'URL de redirection d'autorisation ou le contenu du QR (le scénario in_app peut renvoyer null, le SDK front prend le code).
+   *  Avec options.promptConsent=true, force la page de confirmation d'autorisation : après l'ajout de points de permission à l'application,
+   *  l'instantané d'autorisation historique des anciens utilisateurs ne contient pas le nouveau scope, une ré-autorisation est nécessaire pour le rafraîchir. */
   buildAuthorizeUrl(scene: LoginScene, state: string, redirectUri: string, options?: { promptConsent?: boolean }): Promise<string | null>
-  /** code → 平台令牌。code 单次消费，失败/过期抛 ProviderAuthError。 */
+  /** code → jeton de plateforme. Le code est à consommation unique ; échec/expiration lève ProviderAuthError. */
   exchangeCode(code: string): Promise<ProviderTokenSet>
-  /** 平台令牌 → 原始档案。 */
+  /** Jeton de plateforme → dossier brut. */
   getUserInfo(tokenSet: ProviderTokenSet): Promise<unknown>
-  /** 原始档案 → 归一化档案（三家差异的最终收敛点）。 */
+  /** Dossier brut → dossier normalisé (point de convergence final des différences entre les trois fournisseurs). */
   normalizeProfile(raw: unknown): NormalizedProfile
   /**
-   * 登录可用性预检（可选）：服务端拉取一次授权页，识别 IdP 侧的应用级拒绝
-   * （钉钉 900103「应用不存在」= 该 AppKey 未在登录应用/未开通扫码登录）。
-   * 返回 ok=false 时前端不整页跳转，直接展示可执行的修复指引。
+   * Pré-contrôle optionnel de disponibilité de connexion : le serveur tire une fois la page d'autorisation, identifie les refus
+   * au niveau application côté IdP (DingTalk 900103 « application inexistante » = ce AppKey n'est pas dans l'application de connexion/scan non activé).
+   * Si ok=false, le front ne redirige pas la page entière et affiche directement une consigne de réparation actionnable.
    */
   probeAuthorize?(redirectUri: string): Promise<{ ok: boolean; code?: string; message?: string }>
 }
 
-/** 钉钉连接器凭证（真实模式必需；缺省降级 mock）。 */
+/** Identifiants du connecteur DingTalk (requis en mode real ; sinon repli mock). */
 export interface DingTalkCredentials {
   corpId: string
   appKey: string
   appSecret: string
-  /** OpenAPI 基址（默认 https://api.dingtalk.com；测试/专有部署可指向本地 stub）。 */
+  /** URL de base OpenAPI (défaut https://api.dingtalk.com ; tests/déploiement dédié peuvent pointer vers un stub local). */
   apiBase?: string
-  /** 通讯录 topapi 基址（默认 https://oapi.dingtalk.com；测试/专有部署可指向本地 stub）。 */
+  /** URL de base topapi d'annuaire (défaut https://oapi.dingtalk.com ; tests/déploiement dédié peuvent pointer vers un stub local). */
   oapiBase?: string
 }
 
-/** 钉钉演示目录（mock 模式与 OrgConnector 共享同一份远端数据）。 */
+/** Annuaire de démonstration DingTalk (le mode mock partage la même donnée distante que l'OrgConnector). */
 export const DINGTALK_DIRECTORY = {
   corpId: 'ding-yuanbingke',
   users: [
@@ -88,10 +88,10 @@ export const DINGTALK_DIRECTORY = {
   ],
 } as const
 
-/** code 一次性消费窗口：窗口内重放拒绝，窗口外视为新授权码周期（演示友好且语义正确）。 */
+/** Fenêtre de consommation unique du code : rejet du rejeu dans la fenêtre, au-delà = nouveau cycle de code d'autorisation (amical pour la démo et sémantiquement correct). */
 const CODE_TTL_MS = 5 * 60_000
 
-/** 钉钉 Auth Adapter：mock 降级实现（演示）。 */
+/** Adapter d'authentification DingTalk : implémentation de repli mock (démonstration). */
 export class DingTalkAuthAdapter implements IdentityProviderAdapter {
   readonly type = 'dingtalk' as const
   readonly label = '钉钉'
@@ -100,8 +100,8 @@ export class DingTalkAuthAdapter implements IdentityProviderAdapter {
 
   async buildAuthorizeUrl(scene: LoginScene, state: string, redirectUri: string, _options?: { promptConsent?: boolean }): Promise<string | null> {
     if (scene === 'in_app') return null
-    // 不带 prompt=consent：已授权过的用户（浏览器持有钉钉会话）可静默通过，缩短回跳链路
-    // （mock 无真实授权页，promptConsent 仅作签名兼容，不产生行为差异）
+    // Sans prompt=consent : un utilisateur déjà autorisé (navigateur tenant une session DingTalk) passe silencieusement, chaîne de retour raccourcie
+    // (le mock n'a pas de vraie page d'autorisation, promptConsent n'est là que pour compatibilité de signature, sans différence de comportement)
     const params = new URLSearchParams({
       client_id: 'demo-app-key',
       redirect_uri: redirectUri,
@@ -147,9 +147,9 @@ export class DingTalkAuthAdapter implements IdentityProviderAdapter {
 }
 
 /**
- * 钉钉 Auth Adapter：真实 OpenAPI 实现。
- * 链路（与钉钉官方文档对齐）：
- *   扫码授权 → POST /v1.0/oauth2/userAccessToken（clientId/clientSecret/code → accessToken）
+ * Adapter d'authentification DingTalk : implémentation vraie OpenAPI.
+ * Chaîne (alignée sur la documentation officielle DingTalk) :
+ *   scan d'autorisation → POST /v1.0/oauth2/userAccessToken (clientId/clientSecret/code → accessToken)
  *   → GET /v1.0/contact/users/me（Bearer accessToken → unionId/name/email）
  */
 export class RealDingTalkAuthAdapter implements IdentityProviderAdapter {
@@ -169,10 +169,10 @@ export class RealDingTalkAuthAdapter implements IdentityProviderAdapter {
 
   async buildAuthorizeUrl(scene: LoginScene, state: string, redirectUri: string, options?: { promptConsent?: boolean }): Promise<string | null> {
     if (scene === 'in_app') return null
-    // 默认不带 prompt=consent：已授权过的用户（浏览器持有钉钉会话）可静默通过，缩短回跳链路；
-    // 组织归属由用户在钉钉「选择你加入的组织」页一次性选定，平台侧不再要求预选主体。
-    // promptConsent=true 时强制弹授权确认页：应用新增权限点后老用户的历史授权快照不含新 scope，
-    // 静默换到的 userAccessToken 调 users/me 会 403（AccessTokenPermissionDenied），需重授权一次刷新。
+    // Par défaut sans prompt=consent : un utilisateur déjà autorisé (navigateur tenant une session DingTalk) passe silencieusement, chaîne de retour raccourcie ;
+    // le rattachement d'organisation est choisi une bonne fois par l'utilisateur sur la page DingTalk « choisir votre organisation », la plateforme n'exige plus de présélection d'entité.
+    // Avec promptConsent=true, force la page de confirmation d'autorisation : après ajout de points de permission, l'instantané historique des anciens utilisateurs ne contient pas le nouveau scope,
+    // le userAccessToken obtenu silencieusement prendra un 403 sur users/me (AccessTokenPermissionDenied), une ré-autorisation est nécessaire pour rafraîchir.
     const params = new URLSearchParams({
       client_id: this.credentials.appKey,
       redirect_uri: redirectUri,
@@ -185,11 +185,11 @@ export class RealDingTalkAuthAdapter implements IdentityProviderAdapter {
   }
 
   /**
-   * 登录可用性预检：拉取一次授权页，识别 IdP 侧应用级拒绝。
-   * 钉钉把「AppKey 不属于该登录应用 / 未开通扫码登录」表现为 HTTP 200 的
-   * `__ERROR_PAGE_VARS`（errorCode 900103「应用不存在」），用户在浏览器里只看到一张
-   * 无法自救的错误页；服务端先探一次，就能在登录页给出「去开发者后台开哪一项」的指引。
-   * 网络失败/页面结构变化一律视为 ok（预检不作为登录门禁，只做增强）。
+   * Pré-contrôle de disponibilité de connexion : tire une fois la page d'autorisation, identifie un refus au niveau application côté IdP.
+   * DingTalk exprime « l'AppKey n'appartient pas à cette application de connexion / scan non activé » sous forme HTTP 200 avec
+   * `__ERROR_PAGE_VARS` (errorCode 900103 « application inexistante ») : l'utilisateur ne voit dans le navigateur qu'une
+   * page d'erreur sans recours ; une sonde serveur préalable permet d'afficher sur la page de connexion la consigne « quelle case activer dans la console développeur ».
+   * Échec réseau/changement de structure de page = toujours considéré ok (le pré-contrôle n'est pas une barrière de connexion, seulement un enrichissement).
    */
   async probeAuthorize(redirectUri: string): Promise<{ ok: boolean; code?: string; message?: string }> {
     const params = new URLSearchParams({
@@ -208,8 +208,8 @@ export class RealDingTalkAuthAdapter implements IdentityProviderAdapter {
       const match = /errorCode:\s*'([^']+)'[\s\S]*?errorMsg:\s*'((?:[^'\\]|\\.)*)'/.exec(html)
       if (!match) return { ok: true }
       const raw = match[2].replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-      // 钉钉错误页的 errorMsg 随界面语言变化（中文「应用不存在」/英文 Application does not exist），
-      // 统一按错误码给中文原因，避免把 IdP 原文直接抛给用户。
+      // L'errorMsg de la page d'erreur DingTalk varie avec la langue d'interface (« 应用不存在 » en chinois / Application does not exist en anglais),
+      // unification sur le code d'erreur avec un motif en chinois, pour éviter de relancer le brut de l'IdP à l'utilisateur.
       const known: Record<string, string> = {
         '900103': t('钉钉应用不存在：当前 AppKey 不是该企业已开通扫码登录的应用（或被删除/停用）'),
         '900108': t('钉钉应用未开通登录能力：需在开发者后台为企业内部应用开启「登录与分享」'),
@@ -266,18 +266,18 @@ export class RealDingTalkAuthAdapter implements IdentityProviderAdapter {
       payload = {}
     }
     if (!response.ok) {
-      // 诊断透出：钉钉返回体含 errcode/message/requiredScopes，token 企业用于识别「选错组织」场景
+      // Exposition du diagnostic : le corps de réponse DingTalk contient errcode/message/requiredScopes, le champ entreprise sert à identifier le scénario « mauvaise organisation choisie »
       const tokenCorpId = (tokenSet.raw as { corpId?: string }).corpId ?? t('未知')
-      // AccessTokenPermissionDenied（requiredScopes 未覆盖）：多为应用新增权限点后老用户授权快照未刷新，
-      // 单独错误码供回调层识别并自动发起一次 prompt=consent 重授权
+      // AccessTokenPermissionDenied (requiredScopes non couvert) : le plus souvent un instantané d'autorisation d'ancien utilisateur non rafraîchi après ajout de points de permission,
+      // code d'erreur dédié pour que la couche de rappel l'identifie et relance automatiquement une ré-autorisation prompt=consent
       const scopeDenied = bodyText.includes('AccessTokenPermissionDenied')
       throw new ProviderAuthError(
         t('钉钉用户档案获取失败（HTTP {status}，token企业={corpId}）：{body}', { status: response.status, corpId: tokenCorpId, body: bodyText.slice(0, 500) }),
         scopeDenied ? 'PROVIDER_SCOPE_DENIED' : 'PROFILE_NOT_FOUND',
       )
     }
-    // 优先采用用户在钉钉组织选择页实际选中的企业（userAccessToken 响应回传的 corpId），
-    // 使「选定哪个组织就以哪个组织的身份命中身份链接」；无回传时按连接器归属兜底
+    // Priorité à l'entreprise réellement choisie par l'utilisateur sur la page de sélection DingTalk (corpId renvoyé par la réponse userAccessToken),
+    // pour que « l'organisation choisie détermine l'entité sous laquelle le lien d'identité est atteint » ; sans renvoi, repli selon le rattachement du connecteur
     const rawCorpId = (tokenSet.raw as { corpId?: string }).corpId
     return { ...payload, corpId: rawCorpId || this.credentials.corpId }
   }

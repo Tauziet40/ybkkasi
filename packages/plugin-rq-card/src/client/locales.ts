@@ -1,28 +1,28 @@
-/** `rq-card` 命名空间词典（执行卡 + 反馈条 + 降级角标的全部文案）。 */
+/** Dictionnaire de l'espace de noms `rq-card` (tous les libellés de la carte d'exécution + barre de feedback + coin de repli). */
 
-/** 简体中文词典（键集的权威来源）。 */
+/** Dictionnaire chinois simplifié (source d'autorité du jeu de clés). */
 export const zh = {
-  // ── 执行卡：状态徽标 ──
+  // ── carte d'exécution : badges d'état ──
   'card.state.calling': '调用中',
   'card.state.executing': '执行中',
   'card.state.done': '已完成',
   'card.state.blocked': '已受阻',
   'card.state.idle': '等待中',
 
-  // ── 执行卡：通用 ──
+  // ── carte d'exécution : génériques ──
   'card.args.summary': '调用参数',
   'card.result.title': '执行结果',
   'card.result.truncated': '（内容过长，已截断）',
   'card.console.link': '到控制台查看',
 
-  // ── 执行卡：调用中（骨架 + 可取消占位）──
+  // ── carte d'exécution : en appel (squelette + placeholder annulable) ──
   'card.cancel.button': '取消',
   'card.cancel.hint': '取消通道待宿主半接线后启用',
 
-  // ── 执行卡：执行中（进度脉冲）──
+  // ── carte d'exécution : en exécution (pulsation de progression) ──
   'card.degraded.hint': '有点慢，已转后台处理',
 
-  // ── 执行卡：异常阻断（业务文案，原因码 = C3 js/errors.js 的键）──
+  // ── carte d'exécution : bloqué anomalie (libellé métier, code de motif = clé de C3 js/errors.js) ──
   'card.blocked.nas-authz-deny': '没有访问权限，请先申请授权',
   'card.blocked.quota-exhausted': '钱包额度已耗尽，请申请追加',
   'card.blocked.pdp-unreachable': '策略决策点暂不可达，已保护性暂停',
@@ -31,7 +31,7 @@ export const zh = {
   'card.blocked.binding-invalid': '身份绑定已失效，请重新绑定',
   'card.blocked.invoke-error': '执行出错，详见结果信息',
 
-  // ── 执行卡：阻断行动按钮（跳 /rq 控制台对应页，同源带登录态）──
+  // ── carte d'exécution : bouton d'action de blocage (saut vers la page correspondante de la console /rq, same-origin avec état de connexion) ──
   'card.action.nas-authz-deny': '申请访问',
   'card.action.quota-exhausted': '申请额度',
   'card.action.pdp-unreachable': '查看平台状态',
@@ -40,26 +40,26 @@ export const zh = {
   'card.action.binding-invalid': '重新绑定',
   'card.action.invoke-error': '查看平台状态',
 
-  // ── 反馈条 ──
+  // ── barre de feedback ──
   'fb.like': '有帮助',
   'fb.dislike': '没帮助',
   'fb.done': '已记录，感谢反馈',
 
-  // ── 降级角标（shell.overlay）──
+  // ── coin de repli (shell.overlay) ──
   'badge.degraded': '元冰可卡片未生效（纯文本模式）',
 } satisfies Record<string, string>
 
-/** `rq-card` 命名空间键联合。 */
+/** Union des clés de l'espace de noms `rq-card`. */
 export type RqCardKey = keyof typeof zh
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
-    /** 元冰可执行卡与反馈条的文案。 */
+    /** Libellés de la carte d'exécution et de la barre de feedback de method. */
     'rq-card': RqCardKey
   }
 }
 
-/** 英文词典，与 zh 键集逐键核对。 */
+/** Dictionnaire anglais, vérifié clé à clé avec le jeu zh. */
 export const en = {
   'card.state.calling': 'Calling',
   'card.state.executing': 'Running',
@@ -100,7 +100,7 @@ export const en = {
   'badge.degraded': 'RongQi cards inactive (plain-text mode)',
 } satisfies Record<RqCardKey, string>
 
-/** 日文词典，与 zh/en 键集逐键核对（です・ます調）。 */
+/** Dictionnaire japonais, vérifié clé à clé avec les jeux zh/en (style です・ます). */
 export const ja = {
   'card.state.calling': '呼び出し中',
   'card.state.executing': '実行中',

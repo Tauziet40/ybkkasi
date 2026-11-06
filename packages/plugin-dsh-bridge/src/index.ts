@@ -1,40 +1,40 @@
 /**
- * @dsh-ops/plugin-dsh-bridge —— dsh 宿主桥：数据面挂载（M1）+ 平台身份绑定（M4）。
+ * @dsh-ops/plugin-dsh-bridge — pont hôte dsh : montage du plan de données (M1) + liaison d'identité de la plateforme (M4).
  *
- * 【挂载半】把元冰可数据面（platform-core httpServer 的全部路由/中间件/静态资源）
- * 以 URL 前缀方式挂进 dsh webServer（ctx.webServer，dsh web 进程内唯一监听器）：
- *   http://<host>:<port>/rq/*   →  剥离 /rq 前缀后交给 httpServer.dispatch
- *   http://<host>:<port>/rq     →  302 /rq/（目录形态归一，保证 SPA 相对引用可解析）
+ * 【Moitié montage】 monte le plan de données method (ensemble des routes/middlewares/ressources statiques du httpServer de platform-core)
+ * sous forme de préfixe d'URL dans le webServer dsh (ctx.webServer, unique écouteur du processus web dsh) :
+ *   http://<host>:<port>/rq/*   →  le préfixe /rq retiré puis confié à httpServer.dispatch
+ *   http://<host>:<port>/rq     →  302 /rq/ (normalisation en forme répertoire, garantit la résolution des références relatives de la SPA)
  *
- * 【身份半】dsh web 自身无认证层（fence 非 auth，见 deepseek-harness connection/README），
- * 且 /api 的 RPC 信封不向 handler 暴露 Cookie——平台身份绑定只能在自有路由上完成
- * （webServer.register 的 handler 拥有原生 req/res，可读 Cookie、可 Set-Cookie）：
- *   GET  /auth/entry?ticket=…   一次性入场票据兑换 → Set-Cookie rq_sid → 302 /
- *                               （控制台/门户「打开交互界面」的自然免登通道）
- *   POST /dsh-bridge/redeem     {ticket} 兑换（tapIndex 引导脚本承接 #entry_ticket fragment 时调用）
- *   GET  /dsh-bridge/status     读 Cookie 返回绑定身份（浏览器半插件显示登录态）
- *   POST /dsh-bridge/logout     清除绑定与 Cookie
- *   POST /dsh-bridge/bind-session {sessionId} 把 dsh 会话与绑定身份关联
- *                               （工具出站归因：exec.agent.session.id → X-On-Behalf-User）
+ * 【Moitié identité】 le web dsh n'a pas de couche d'authentification propre (fence n'est pas auth, voir deepseek-harness connection/README),
+ * et l'enveloppe RPC de /api n'expose pas de Cookie aux handlers — la liaison d'identité de la plateforme ne peut se faire que sur des routes propres
+ * (les handlers de webServer.register disposent du req/res natif, peuvent lire les Cookie et poser des Set-Cookie) :
+ *   GET  /auth/entry?ticket=…   échange d'un billet d'entrée à usage unique → Set-Cookie rq_sid → 302 /
+ *                               (canal naturel de connexion sans ressaisie pour « ouvrir l'interface interactive » de la console/du portail)
+ *   POST /dsh-bridge/redeem     échange {ticket} (appelé par le script d'amorçage tapIndex recevant le fragment #entry_ticket)
+ *   GET  /dsh-bridge/status     lit le Cookie et renvoie l'identité liée (le plugin côté navigateur affiche l'état connecté)
+ *   POST /dsh-bridge/logout     efface la liaison et le Cookie
+ *   POST /dsh-bridge/bind-session {sessionId} associe la session dsh à l'identité liée
+ *                               (attribution sortante des outils : exec.agent.session.id → X-On-Behalf-User)
  *
- * 绑定存储 IdentityBindingService（provide 'identityBinding'）：
- *   - byToken（rq_sid → 身份，24h TTL）：兑换时经 EntryTicketService.redeem 一次性消费、
- *     实时校验账号状态；读取时再校验账号 active（冻结/离职即时失效）。
- *   - bySession（sessionId → 身份）：由浏览器引导脚本显式绑定；未绑定时回落 `current`
- *     （最近一次绑定身份，单操作者局域网姿态）——多用户并发归因是已知限制（dev-plan §七）。
- *   - plugin-nas 出站注入：ctx.identityBinding 存在时按会话/回落解析真实用户 →
- *     X-On-Behalf-User（P0-2 红线：身份只走请求头）；独立形态无此服务，行为不变。
+ * Stockage de liaison IdentityBindingService (provide 'identityBinding') :
+ *   - byToken (rq_sid → identité, TTL 24 h) : à l'échange, consommation unique via EntryTicketService.redeem et
+ *     validation en temps réel de l'état du compte ; à la lecture, nouvelle validation que le compte est active (gel/départ = invalidation immédiate).
+ *   - bySession (sessionId → identité) : lié explicitement par le script d'amorçage du navigateur ; sans liaison, repli sur `current`
+ *     (identité de la dernière liaison, posture LAN mono-opérateur) — l'attribution multi-utilisateurs concurrents est une limitation connue (dev-plan §7).
+ *   - injection sortante plugin-nas : quand ctx.identityBinding existe, résout l'utilisateur réel par session/repli →
+ *     X-On-Behalf-User (ligne rouge P0-2 : l'identité ne passe que par en-tête de requête) ; en forme autonome, ce service est absent, comportement inchangé.
  *
- * 设计依据：docs/internal/dev-plan-agent-host-unification.md §三/§五/§六。
- * dsh 侧挂载契约（deepseek-harness packages/host/webserver/src/index.ts:94-101）：
- *   WebRoute = { kind:'exact'|'prefix', path, handler(req,res) }，handler 拥有完整响应生命周期。
- * 硬约束：`/api` 前缀与全站 fallback 席位均已被 dsh 占用（重复注册 throw），
- * 元冰可数据面必须整体走独立前缀（/rq）。
+ * Fondements de conception : docs/internal/dev-plan-agent-host-unification.md §3/§5/§6.
+ * Contrat de montage côté dsh (deepseek-harness packages/host/webserver/src/index.ts:94-101) :
+ *   WebRoute = { kind:'exact'|'prefix', path, handler(req,res) }, le handler possède le cycle de réponse complet.
+ * Contrainte dure : le préfixe `/api` et le siège de fallback global sont déjà occupés par dsh (un double enregistrement throw),
+ * le plan de données method doit passer intégralement par un préfixe dédié (/rq).
  *
- * 【W5 耦合面收窄】对 webServer 的全部触点经 platform-core 宿主桥窄端口
- * （HostWebPort，adapter = createHostWebPort）完成；端口登记器 ctx.hostBridge
- * 探测或直挂（轻量 ctx 静默跳过）。inject 键与对外路由/端点行为不变——
- * dsh 升级 API 漂移时只改 adapter + 重跑契约测试（tests/host-bridge.contract.mjs）。
+ * 【Resserrement du couplage W5】 tous les points de contact avec webServer passent par le port étroit pont hôte de platform-core
+ * (HostWebPort, adapter = createHostWebPort) ; le registre de ports ctx.hostBridge
+ * sonde ou monte directement (ctx léger = saut silencieux). Les clés inject et le comportement des routes/endpoints exposés ne changent pas —
+ * en cas de dérive de l'API dsh à une montée de version, seul l'adapter change + relance des tests de contrat (tests/host-bridge.contract.mjs).
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
@@ -44,46 +44,46 @@ import { join } from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import { t } from '../../platform-i18n/src/index.ts'
 import type { HttpServerService } from '../../platform-core/src/index.ts'
-// W5 宿主桥窄端口：webServer 触点全部经端口类型 + adapter（createHostWebPort），
-// 本文件不再直接感知 dsh webServer 的具体形状；dsh 升级只需改 adapter + 重跑
-// 契约测试（packages/plugin-dsh-bridge/tests/host-bridge.contract.mjs）。
+// Port étroit du pont hôte W5 : les contacts webServer passent tous par le type de port + adapter (createHostWebPort),
+// ce fichier ne dépend plus directement de la forme concrète du webServer dsh ; une montée de version dsh ne demande que adapter + relance
+// des tests de contrat (packages/plugin-dsh-bridge/tests/host-bridge.contract.mjs).
 import {
   HostBridgeRegistry, createHostWebPort,
   type HostWebPort, type HostWebServerLike,
 } from '../../platform-core/src/host-bridge.ts'
 
 export interface DshBridgeConfig {
-  /** 元冰可数据面对外前缀（默认 /rq；须为以 / 开头的非根路径）。 */
+  /** Préfixe externe du plan de données method (par défaut /rq ; doit être un chemin non racine commençant par /). */
   mountPath?: string
-  /** 身份绑定 Cookie 名（默认 rq_sid）。 */
+  /** Nom du Cookie de liaison d'identité (par défaut rq_sid). */
   cookieName?: string
-  /** 绑定有效期（秒，默认 24h）。 */
+  /** Durée de validité de la liaison (secondes, 24 h par défaut). */
   bindTtlSeconds?: number
   /**
-   * Agent 关联 OIDC 客户端凭证文件（register-dsh-agent.mjs 产物，含 oidc.clientId/clientSecret）。
-   * 缺省 <dataDir>/dsh-agent-credential.json；配置后启用 /auth/oidc/start 授权码登录通道。
+   * Fichier d'identifiants du client OIDC associé à l'Agent (produit de register-dsh-agent.mjs, contient oidc.clientId/clientSecret).
+   * Par défaut <dataDir>/dsh-agent-credential.json ; une fois configuré, active le canal de connexion par code d'autorisation /auth/oidc/start.
    */
   oidcCredentialFile?: string
 }
 
 export const name = 'dsh-bridge'
 
-/** webServer/httpServer 由 dsh web profile 与 platform-core 提供；entryTickets/oidc/authn/audit/iam 由 plugin-authn/iam/audit 装配。 */
-// plan-gate01 Phase 3（2026-09-10）【受控漂移 · F 清单登记】：inject 收缩为 3 键硬依赖——
-// entryTickets/oidc 由 plugin-authn 装配，iam/authn/audit 是宿主面包，01门 4-entry 装配
-// （cordis.patch.yml）下均无提供者，声明即永久挂起（cordis 语义：声明+缺提供者=静默 INACTIVE，
-// spike 定稿）。运行期访问本来就是防御式可选语义（entryTickets/oidc/iam 均为「形状断言 + 可选
-// 读取」，缺席即诚实降级「仅挂载半生效」/ 503 AUTHN_UNAVAILABLE / audit?.record 可选调用），
-// 与收缩后的声明面正好对齐；全量形态（cordis.yml 22 entry）服务全在，行为不变。
+/** webServer/httpServer fournis par le profil web dsh et platform-core ; entryTickets/oidc/authn/audit/iam assemblés par plugin-authn/iam/audit. */
+// plan-gate01 Phase 3 (2026-09-10) [dérive contrôlée · inscrite au liste F] : inject réduit à 3 clés de dépendance dure —
+// entryTickets/oidc assemblés par plugin-authn, iam/authn/audit sont le pain de l'hôte ; sous l'assemblage 01-gate 4-entry
+// (cordis.patch.yml), aucun fournisseur n'existe, la déclaration resterait suspendue indéfiniment (sémantique cordis : déclarée + sans fournisseur = INACTIVE
+// silencieuse, entérinée par le spike). L'accès à l'exécution relevait déjà d'une sémantique défensive optionnelle (entryTickets/oidc/iam sont tous « assertion de forme + lecture
+// optionnelle », l'absence vaut dégradation honnête « seule la moitié montage est effective » / 503 AUTHN_UNAVAILABLE / audit?.record appel optionnel),
+// ce qui correspond exactement à la surface déclarée après réduction ; en forme complète (cordis.yml 22 entry), tous les services sont présents, comportement inchangé.
 export const inject = ['webServer', 'httpServer', 'opsStorage']
 
 /**
- * 可选服务软读（plan-gate01 Phase 3）：双形态兼容——
- *   - 真实 cordis ctx：ctx.reflect.get(key, false)（绕过 inject 检查；未声明键的属性
- *     访问会被 get trap 硬抛「without inject」，形状断言 `(ctx as {k?}).k` 防不了它）；
- *   - 服务视图对象（selftest 台架 / 轻量装配手工拼的 plain object）：无 reflect 面，
- *     直接属性读取（plain object 无 trap，缺席即 undefined）。
- * 两形态缺席一律 undefined = 桥接身份功能诚实降级。
+ * Lecture souple des services optionnels (plan-gate01 Phase 3) : compatibilité double forme —
+ *   - vrai ctx cordis : ctx.reflect.get(key, false) (contourne le contrôle inject ; l'accès à une propriété de clé non déclarée
+ *     est durement jeté par le get trap « without inject », l'assertion de forme `(ctx as {k?}).k` n'y peut rien) ;
+ *   - objet vue de services (baie selftest / objet simple monté à la main en assemblage léger) : sans façade reflect,
+ *     lecture directe de propriété (un objet simple n'a pas de trap, l'absence vaut undefined).
+ * Dans les deux formes, absence = undefined = dégradation honnête des fonctions d'identité du pont.
  */
 const softRead = (ctx: any, key: string): any => {
   try {
@@ -93,15 +93,15 @@ const softRead = (ctx: any, key: string): any => {
     return undefined
   }
 }
-// 注：identityBinding 由本插件内部的 IdentityBindingService 直挂提供（不经 inject 声明，
-// 避免「自提供自依赖」死锁）；iam/authn/audit 走防御式软访问（缺席 = 桥接身份功能诚实降级）。
+// Note : identityBinding est fourni par montage direct de l'IdentityBindingService interne à cette extension (sans déclaration inject,
+// pour éviter l'impasse « s'auto-fournit et s'auto-dépend ») ; iam/authn/audit passent par un accès défensif souple (absence = dégradation honnête des fonctions d'identité du pont).
 
 const BIND_TOKEN_PREFIX = 'rbs_'
 const DEFAULT_COOKIE = 'rq_sid'
 const DEFAULT_TTL_SECONDS = 24 * 3600
 const MAX_BINDINGS = 500
 
-/** 宿主会话直通端点所需的最小服务面（form B 轻量 ctx 防御式读取）。 */
+/** Surface de services minimale requise par les endpoints directs de session hôte (lecture défensive pour le ctx léger form B). */
 interface BridgeUserView {
   id: string
   username: string
@@ -142,7 +142,7 @@ interface BindingRecord {
   issuedAt: number
 }
 
-/** 平台身份绑定存储（Cookie ↔ 身份、dsh 会话 ↔ 身份）。详见模块头注释。 */
+/** Stockage de liaison d'identité de la plateforme (Cookie ↔ identité, session dsh ↔ identité). Voir l'en-tête de module. */
 export class IdentityBindingService extends Service {
   static readonly provide = 'identityBinding'
 
@@ -158,7 +158,7 @@ export class IdentityBindingService extends Service {
     this.ttlMs = (config.bindTtlSeconds ?? DEFAULT_TTL_SECONDS) * 1000
   }
 
-  /** 兑换票据并建立绑定：一次性消费 + 实时账号状态校验在 redeem 内完成。 */
+  /** Échange le billet et établit la liaison : consommation unique + validation en temps réel de l'état du compte faites dans redeem. */
   bindByTicket(redeem: (ticket: string) => { identity: { sub: string; name?: string; roles?: string[]; org?: { id?: string } } }, ticket: string): { token: string; identity: Record<string, unknown> } {
     const result = redeem(ticket)
     const token = BIND_TOKEN_PREFIX + randomBytes(24).toString('hex')
@@ -180,7 +180,7 @@ export class IdentityBindingService extends Service {
     return { token, identity: this.publicIdentity(record) }
   }
 
-  /** 读 Cookie 解析绑定身份：过期/未知/账号非 active 一律视为未绑定。 */
+  /** Lit le Cookie et résout l'identité liée : expirée/inconnue/compte non active = toujours considéré non lié. */
   identityForCookie(cookieHeader: string | undefined): Record<string, unknown> | undefined {
     const token = this.readCookieToken(cookieHeader)
     if (!token) return undefined
@@ -191,9 +191,9 @@ export class IdentityBindingService extends Service {
   }
 
   /**
-   * 绑定自检（WP-04/A2）：带可识别原因码的绑定态查询——
-   * no_cookie（从未绑定/已注销）/ expired（绑定过期）/ account_inactive（账号冻结离职联动失效）。
-   * 工作台横幅与重绑引导按 reason 出文案（errors.js「身份绑定已失效」族）。
+   * Auto-contrôle de liaison (WP-04/A2) : interrogation de l'état de liaison avec code de raison identifiable —
+   * no_cookie (jamais lié/déconnecté) / expired (liaison expirée) / account_inactive (invalidée par le gel/départ du compte).
+   * Le bandeau de l'espace de travail et le guidage de re-liaison affichent le libellé selon la reason (famille « liaison d'identité expirée » de errors.js).
    */
   bindingStatus(cookieHeader: string | undefined): { bound: boolean; reason?: 'no_cookie' | 'expired' | 'account_inactive'; identity?: Record<string, unknown> } {
     const token = this.readCookieToken(cookieHeader)
@@ -204,7 +204,7 @@ export class IdentityBindingService extends Service {
     return { bound: true, identity: this.publicIdentity(record) }
   }
 
-  /** 直接以平台身份建立绑定（OIDC 授权码通道：userinfo 换取后）。 */
+  /** Établit directement une liaison sous l'identité de la plateforme (canal code d'autorisation OIDC : après obtention du userinfo). */
   bindIdentity(identity: { sub: string; name?: string; roles?: string[]; org?: { id?: string } }): string {
     const token = BIND_TOKEN_PREFIX + randomBytes(24).toString('hex')
     const record: BindingRecord = {
@@ -221,7 +221,7 @@ export class IdentityBindingService extends Service {
     return token
   }
 
-  /** 绑定 dsh 会话（浏览器引导脚本调用；Cookie 定身份）。 */
+  /** Lie une session dsh (appelé par le script d'amorçage du navigateur ; le Cookie détermine l'identité). */
   bindSession(sessionId: string, cookieHeader: string | undefined): boolean {
     const identity = this.identityForCookie(cookieHeader)
     if (!identity) return false
@@ -234,7 +234,7 @@ export class IdentityBindingService extends Service {
     return true
   }
 
-  /** 工具出站归因解析：会话绑定优先，未绑定回落最近一次绑定（单操作者姿态）。 */
+  /** Résolution de l'attribution sortante des outils : la liaison de session prime, sans liaison repli sur la dernière liaison (posture mono-opérateur). */
   identityForSession(sessionId?: string): { userId: string; name: string } | undefined {
     this.evictExpired()
     const boundId = sessionId ? this.bySession.get(sessionId) : undefined
@@ -244,7 +244,7 @@ export class IdentityBindingService extends Service {
     return { userId: record.userId, name: record.name }
   }
 
-  /** 注销：移除该 Cookie 的绑定（会话绑定随 TTL 自然过期）。 */
+  /** Déconnexion : retire la liaison de ce Cookie (les liaisons de session expirent naturellement avec le TTL). */
   revoke(cookieHeader: string | undefined): void {
     const token = this.readCookieToken(cookieHeader)
     if (token) this.byToken.delete(token)
@@ -274,7 +274,7 @@ export class IdentityBindingService extends Service {
       if (!user) return false
       return user.status === undefined || user.status === 'active'
     } catch {
-      // IAM 不可用（不应发生：同进程插件树）——fail-closed 视为未绑定
+      // IAM indisponible (ne devrait pas arriver : arbre de plugins dans le même processus) — fail-closed, considéré non lié
       return false
     }
   }
@@ -290,9 +290,9 @@ export class IdentityBindingService extends Service {
 
 export function apply(ctx: Context, config: DshBridgeConfig = {}) {
   const mountPath = (config.mountPath ?? '/rq').replace(/\/+$/, '')
-  // 直挂（Service 基类注册 ctx.identityBinding）：复用已存在实例（自测视图注入），否则新建。
-  // dsh loader 的轻量 ctx 对「未在 inject 声明的服务」读取会抛错（form B 实测）：
-  // 先探测再构造，探测失败（未预注入/被裁剪）一律走本地构造。
+  // Montage direct (la classe de base Service enregistre ctx.identityBinding) : réutilise l'instance existante (injection de vue selftest), sinon en crée une.
+  // Le ctx léger du loader dsh jette sur la lecture d'un service « non déclaré dans inject » (constaté en form B) :
+  // on sonde d'abord puis on construit ; échec de sonde (non pré-injecté/élagué) = construction locale systématique.
   let prebound: IdentityBindingService | undefined
   try {
     prebound = (ctx as unknown as { identityBinding?: IdentityBindingService }).identityBinding
@@ -312,25 +312,25 @@ export function apply(ctx: Context, config: DshBridgeConfig = {}) {
     throw new Error(t('dsh-bridge 需要 ctx.httpServer（platform-core 必须先于本插件装配）'))
   }
 
-  // ---- W5 宿主桥窄端口：webServer → HostWebPort（adapter 收窄）----------------
-  // 业务代码（下方全部路由注册与 tapIndex）只依赖端口，不感知宿主实现。
-  // 能力面分级（见 platform-core/src/host-bridge.ts 头注）：
-  //   必须 register（上方已校验）；可选 tapIndex（缺席 = 免登脚本通道降级，
-  //   selftest 伪造 webServer 不带它也须照常工作——adapter 按存在性收窄）。
+  // ---- Port étroit du pont hôte W5 : webServer → HostWebPort (resserrement par adapter)----------------
+  // Le code métier (tous les enregistrements de routes ci-dessous et tapIndex) ne dépend que du port, pas de l'implémentation hôte.
+  // Gradation de la surface de capacités (voir l'en-tête de platform-core/src/host-bridge.ts) :
+  //   register obligatoire (vérifié ci-dessus) ; tapIndex optionnel (absence = dégradation du canal de script de connexion sans ressaisie,
+  //   un faux webServer selftest sans cette capacité doit continuer de fonctionner — l'adapter resserre selon l'existence).
   const hostWeb: HostWebPort = createHostWebPort(webServer)
-  // 端口登记（尽力而为）：真实 cordis 树上「探测或直挂」ctx.hostBridge（对齐
-  // 上方 IdentityBindingService 的自提供规避法；W5 边界内 platform-core apply
-  // 不装配登记器）。轻量 ctx（selftest 服务视图）无 cordis reflect 面，构造
-  // 会抛——登记跳过，端口本地直用，挂载半/身份半对外行为分毫不变。
+  // Enregistrement du port (au mieux) : sur le vrai arbre cordis, « sonder ou monter directement » ctx.hostBridge (aligné sur
+  // la méthode d'auto-fourniture d'IdentityBindingService ci-dessus ; dans le périmètre W5, le apply de platform-core
+  // n'assemble pas le registre). Le ctx léger (vue de services selftest) n'a pas de façade reflect cordis, la construction
+  // jetterait — l'enregistrement est sauté, le port sert localement en direct, le comportement externe moitié montage/moitié identité ne change d'un cheveu.
   try {
     const existing = softRead(ctx, 'hostBridge') as HostBridgeRegistry | undefined
     const registry = existing && typeof existing.registerWebPort === 'function' ? existing : new HostBridgeRegistry(ctx)
     registry.registerWebPort(hostWeb)
   } catch {
-    // 无 reflect 面（plain-object ctx）或登记失败：仅跨方取用缺席，不影响本插件
+    // Sans façade reflect (ctx plain-object) ou échec d'enregistrement : seule la prise inter-partie est absente, sans impact sur cette extension
   }
 
-  // ---- 挂载半：元冰可数据面 → /rq 前缀 ----------------------------------------
+  // ---- Moitié montage : plan de données method → préfixe /rq ----------------------------------------
   hostWeb.register({
     kind: 'prefix',
     path: mountPath,
@@ -347,13 +347,13 @@ export function apply(ctx: Context, config: DshBridgeConfig = {}) {
   })
   ctx.logger('dsh-bridge').info(`元冰可数据面已挂载至 dsh webServer：${mountPath}/*（单进程单入口）`)
 
-  // ---- 身份半：票据兑换 + 绑定 + 会话关联 ------------------------------------
+  // ---- Moitié identité : échange de billet + liaison + association de session ------------------------------------
   const binding = bindingService
-  // EntryTicketService（provide 'entryTickets'）与 authn 平级，由 plugin-authn 装配。
-  // N 节（交接 F 清单，2026-09-11）修复：请求期惰性解析——dsh Loader 并发装载 patch entry 时
-  // authn 可能晚于本插件发布 entryTickets，apply 期软读是竞态写法（软读到 undefined 即整段
-  // 早退，/dsh-bridge/* 身份面整体 404、宿主 Cookie 直通失效）。惰性解析后：注册面不再受
-  // 装配时序影响；服务就绪前的兑换请求得到明确错误，就绪即通。
+  // EntryTicketService (provide 'entryTickets') est au même rang que authn, assemblé par plugin-authn.
+  // Correctif du nœud N (liste de passation F, 2026-09-11) : résolution paresseuse à la requête — quand le loader dsh charge en concurrence les patch entry,
+  // authn peut publier entryTickets après cette extension ; une lecture souple au moment du apply est une écriture en course (lecture souple à undefined = départ
+  // précoce de tout le bloc, la face d'identité /dsh-bridge/* intégralement en 404, le passage direct du Cookie hôte cassé). Après résolution paresseuse : la face
+  // d'enregistrement ne dépend plus de l'ordre d'assemblage ; les demandes d'échange avant disponibilité du service reçoivent une erreur explicite, dès que prêt cela passe.
   const entryTicketsAt = () => (softRead(ctx, 'entryTickets') as unknown as {
     redeem(ticket: string, clientIp: string): { refType: string; refId: string; identity: { sub: string; name?: string; roles?: string[]; org?: { id?: string } } }
   } | undefined)
@@ -367,7 +367,7 @@ export function apply(ctx: Context, config: DshBridgeConfig = {}) {
     return entryTickets.redeem(ticket, 'dsh-bridge')
   }
 
-  /** 同源收紧：带 Origin 的请求必须与 Host 同 authority（dsh fence 同语义，防跨站驱动绑定面）。 */
+  /** Resserrement same-origin : toute requête portant un Origin doit avoir la même authority que le Host (même sémantique que fence dsh, contre la conduite inter-sites de la face de liaison). */
   const sameOrigin = (req: IncomingMessage): boolean => {
     const origin = req.headers.origin
     if (!origin) return true
@@ -390,7 +390,7 @@ export function apply(ctx: Context, config: DshBridgeConfig = {}) {
   const cookieAttrs = (token: string, maxAge: number): string =>
     `${config.cookieName ?? DEFAULT_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`
 
-  // 自然免登通道：控制台/门户「打开交互界面」以 ?entry_ticket= 跳转（query 版契约）
+  // Canal naturel de connexion sans ressaisie : la console/le portail « ouvrir l'interface interactive » redirige avec ?entry_ticket= (version query du contrat)
   hostWeb.register({
     kind: 'exact',
     path: '/auth/entry',
@@ -413,7 +413,7 @@ export function apply(ctx: Context, config: DshBridgeConfig = {}) {
     },
   })
 
-  // 浏览器半插件/引导脚本的同源绑定面（原生 req/res：可读 Cookie、可 Set-Cookie）
+  // Face de liaison same-origin du plugin/amorçage côté navigateur (req/res natifs : peut lire les Cookie, peut poser des Set-Cookie)
   hostWeb.register({
     kind: 'prefix',
     path: '/dsh-bridge',
@@ -443,7 +443,7 @@ export function apply(ctx: Context, config: DshBridgeConfig = {}) {
         return
       }
       if (req.method === 'GET' && endpoint === 'status') {
-        // WP-04/A2：带原因码的绑定自检（no_cookie/expired/account_inactive），供工作台横幅与重绑引导
+        // WP-04/A2 : auto-contrôle de liaison avec code de raison (no_cookie/expired/account_inactive), pour le bandeau de l'espace de travail et le guidage de re-liaison
         const status = binding.bindingStatus(req.headers.cookie)
         json(200, { ok: true, data: status })
         return
@@ -462,9 +462,9 @@ export function apply(ctx: Context, config: DshBridgeConfig = {}) {
         })
         return
       }
-      // 宿主 Cookie → 平台会话直通（部门面板/控制台 SPA 零二次登录，review-dsh-agent-panel-v2 宿主打通）：
-      // rq_sid 绑定身份 → ensureHumanPrincipal + issueSessionPair——与票据免登端点同安全语义
-      // （账号状态实时校验在 bindingStatus 内完成；同源收紧已在上方统一执行）
+      // Passerelle directe Cookie hôte → session de la plateforme (panneau départemental/console SPA sans seconde connexion, interconnexion hôte review-dsh-agent-panel-v2) :
+      // identité liée rq_sid → ensureHumanPrincipal + issueSessionPair — même sémantique de sécurité que l'endpoint de connexion sans ressaisie par billet
+      // (validation en temps réel de l'état du compte faite dans bindingStatus ; le resserrement same-origin déjà appliqué uniformément ci-dessus)
       if (req.method === 'POST' && endpoint === 'session') {
         void (async () => {
           const status = binding.bindingStatus(req.headers.cookie)
@@ -488,7 +488,7 @@ export function apply(ctx: Context, config: DshBridgeConfig = {}) {
           }
           const principal = deps.authn.ensureHumanPrincipal(user.id, user.displayName)
           const session = deps.authn.issueSessionPair(principal.id, { issuedBy: 'dsh-bridge:cookie' })
-          try { deps.iam.markLogin(user.id) } catch { /* 登录标记非关键路径 */ }
+          try { deps.iam.markLogin(user.id) } catch { /* marquage de connexion hors chemin critique */ }
           deps.audit?.record({
             type: 'auth', actorType: 'human', actorId: user.id, actorName: user.displayName,
             action: 'dsh_bridge.cookie.session', resourceType: 'dsh_bridge', resourceId: 'rq_sid',
@@ -514,9 +514,9 @@ export function apply(ctx: Context, config: DshBridgeConfig = {}) {
       json(404, { ok: false, error: { code: 'NOT_FOUND', message: t('未知端点：{method} /dsh-bridge/{endpoint}', { method: req.method ?? '', endpoint }) } })
     },
   })
-  // ---- OIDC 授权码通道（/auth/oidc/start → 平台授权页 → /auth/oidc/callback） --------
-  // 未带票据直开 dsh web 的用户：浏览器半插件（或手工）指向 /auth/oidc/start →
-  // 服务端生成 PKCE 并 302 平台授权页（本地口令/钉钉扫码）→ 回跳换码 → userinfo → 绑定 Cookie。
+  // ---- Canal de code d'autorisation OIDC (/auth/oidc/start → page d'autorisation de la plateforme → /auth/oidc/callback) --------
+  // Utilisateur ouvrant dsh web directement sans billet : le plugin navigateur (ou à la main) pointe vers /auth/oidc/start →
+  // le serveur génère un PKCE et 302 vers la page d'autorisation de la plateforme (mot de passe local/QR DingTalk) → retour avec code → userinfo → liaison Cookie.
   const oidc = softRead(ctx, 'oidc') as { issuer(): string } | undefined
   const dataDirPath = (ctx as unknown as { opsStorage?: { dataDirPath?: string } }).opsStorage?.dataDirPath
   const credFile = config.oidcCredentialFile ?? (dataDirPath ? join(dataDirPath, 'dsh-agent-credential.json') : undefined)
@@ -528,7 +528,7 @@ export function apply(ctx: Context, config: DshBridgeConfig = {}) {
     try {
       const parsed = JSON.parse(readFileSync(credFile, 'utf8'))
       if (parsed?.oidc?.clientId) oidcClient = { clientId: parsed.oidc.clientId, clientSecret: parsed.oidc.clientSecret }
-    } catch { /* 凭证文件缺失/损坏：OIDC 通道降级为不可用，entry-ticket 通道不受影响 */ }
+    } catch { /* fichier d'identifiants absent/corrompu : canal OIDC dégradé en indisponible, le canal entry-ticket n'est pas affecté */ }
     if (oidcClient) {
       hostWeb.register({
         kind: 'exact',
@@ -613,10 +613,10 @@ export function apply(ctx: Context, config: DshBridgeConfig = {}) {
     ctx.logger('dsh-bridge').info(`OIDC 凭证文件不存在（${credFile ?? '未配置'}），授权码通道未启用——可先运行 register-dsh-agent.mjs`)
   }
 
-  // ---- 免登引导脚本（tapIndex）：承接 #entry_ticket= fragment 既有契约 ----------------
-  // fragment 不进服务端日志（优于 query）；同源 POST 天然通过 dsh 信任围栏。
-  // 控制台 openAgentEntry 跳转 <entryUrl>#entry_ticket=<ticket> → 本脚本兑换 → 清 hash → 刷新。
-  // 可选能力 tapIndex：端口上缺席（宿主未提供）= 降级 warn，通道收敛到 /auth/entry query 版
+  // ---- Script d'amorçage de connexion sans ressaisie (tapIndex) : reprend le contrat existant du fragment #entry_ticket= ----------------
+  // Le fragment n'entre pas dans les logs serveur (mieux que query) ; le POST same-origin passe naturelment la barrière de confiance dsh.
+  // La console openAgentEntry redirige <entryUrl>#entry_ticket=<ticket> → ce script échange → efface le hash → rafraîchit.
+  // Capacité optionnelle tapIndex : absente du port (non fournie par l'hôte) = dégradation warn, le canal converge vers la version query de /auth/entry
   const tapIndex = hostWeb.tapIndex
   if (typeof tapIndex === 'function') {
     tapIndex((html: string) => {

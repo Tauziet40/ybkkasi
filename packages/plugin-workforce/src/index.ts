@@ -1,14 +1,14 @@
 /**
- * plugin-workforce —— 数字员工域装配入口。
+ * plugin-workforce — entrée d'assemblage du domaine de l'employé numérique.
  *
- * 职责三分（实施路径 §3.1，不复制三套身份系统）：
- *   - 本插件：员工档案、任用版本、运行绑定、能力清单、permit、受控调用账本、交付验收；
- *   - exec-hub：目标/项目/任务/run 与执行租约（经 ExecHubWorkIntegration 集成端口消费）；
- *   - 各资源网关：实际资源调用与原有授权链（经 adapters 复用，不重写）。
+ * Triple répartition des responsabilités (chemin d'implémentation §3.1, pas de triplication de trois systèmes d'identité) :
+ *   - cette extension : dossier de l'employé, version de nomination, liaison d'exécution, inventaire de capacités, permit, registre des appels contrôlés, acceptation de la livraison ;
+ *   - exec-hub : objectifs/projets/tâches/run et bail d'exécution (consommés via le port d'intégration ExecHubWorkIntegration) ;
+ *   - les passerelles de ressources : appels de ressources réels et chaîne d'autorisation d'origine (réutilisées via les adapters, pas réécrites).
  *
- * 防循环装配（§10.2）：本插件在既有基础服务之后装配；对外的唯一横切面是
- * platform-core 的窄端口（ctx.workforcePolicy，apply 即存在）——本插件 ready 后
- * register() 登记实现；exec-hub 与资源网关仅依赖端口类型，不反向依赖本插件。
+ * Anti-assemblage circulaire (§10.2) : cette extension est assemblée après les services de base existants ; sa seule face transversale externe est
+ * le port étroit de platform-core (ctx.workforcePolicy, présent dès apply) — une fois cette extension ready,
+ * register() enregistre l'implémentation ; exec-hub et les passerelles de ressources ne dépendent que du type du port, sans dépendance inverse vers cette extension.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { WorkforceStoreService } from './repositories.ts'
@@ -31,17 +31,17 @@ import type { WorkforceGrayConfig } from './contract.ts'
 export * from './contract.ts'
 
 export interface WorkforceConfig extends WorkforceGrayConfig {
-  /** 数据目录（artifact staging 与 SQLite 同底座）；默认 <cwd>/data。 */
+  /** Répertoire de données (staging des artefacts et SQLite sur la même base) ; défaut <cwd>/data. */
   dataDir?: string
-  /** permit 默认有效期（毫秒），默认 30 分钟。 */
+  /** Validité par défaut du permit (millisecondes), 30 minutes par défaut. */
   permitTtlMs?: number
-  /** 租约默认有效期（毫秒），默认 15 分钟。 */
+  /** Validité par défaut du bail (millisecondes), 15 minutes par défaut. */
   leaseTtlMs?: number
 }
 
 export const name = 'workforce'
 
-// 提供者均在本插件之前装配（boot-all.ts / cordis.yml 同序）：基础层→网关→agent→exec-hub→workforce
+// Les fournisseurs sont tous assemblés avant cette extension (même ordre dans boot-all.ts / cordis.yml) : couche de base→passerelles→agent→exec-hub→workforce
 export const inject = [
   'httpServer', 'opsStorage', 'platformBus', 'iam', 'authn', 'audit', 'txnStore', 'usage',
   'resourceCore', 'agentRegistry', 'mcpRegistry', 'connectorHub', 'modelGateway', 'skillHub', 'nasRegistry',
@@ -49,13 +49,13 @@ export const inject = [
 ]
 
 export async function apply(ctx: Context, config: WorkforceConfig = {}) {
-  // 服务直构（与 plugin-mcp/plugin-connector 同形态）：new Service(ctx) 把 provide 登记进
-  // 本插件自身 fiber——apply 内的端口/工具/路由得以同步读取同插件服务键（ctx.plugin(类) 会
-  // 产生独立子 fiber，同插件键未经 inject 声明不可见，且 await 挂载不保证子 apply 时序）。
-  // 构造序即依赖序：adapters 构造期即读 workforceArtifacts 探测面，故 artifacts 先于 adapters。
-  // 1. 权威存储迁移（幂等建表：WORKFORCE_TABLES）
+  // Construction directe des services (même forme que plugin-mcp/plugin-connector) : new Service(ctx) enregistre le provide dans
+  // la fiber de cette extension — les ports/outils/routes dans apply peuvent ainsi lire synchrone­ment les clés de services de la même extension (ctx.plugin(Classe) crée
+  // une sous-fiber indépendante, les clés de la même extension sont invisibles sans déclaration inject, et le montage await ne garantit pas l'ordre des sous-apply).
+  // L'ordre de construction est l'ordre des dépendances : les adapters lisent la face de sondage workforceArtifacts dès leur construction, donc artifacts avant adapters.
+  // 1. Migration du stockage de référence (création de tables idempotente : WORKFORCE_TABLES)
   new WorkforceStoreService(ctx, config)
-  // 2. 员工域服务（服务间依赖经 ctx 惰性解析——各服务 getter 在请求期读取，无构造顺序耦合）
+  // 2. Services du domaine employé (dépendances entre services résolues paresseusement via ctx — les getters de chaque service lisent à la requête, aucun couplage d'ordre de construction)
   new EmployeeService(ctx)
   new AppointmentService(ctx)
   new IdentityResolverService(ctx)
@@ -65,17 +65,17 @@ export async function apply(ctx: Context, config: WorkforceConfig = {}) {
   new AdapterRegistryService(ctx)
   new InvocationService(ctx)
   new DeliveryService(ctx)
-  // 灰度开关（W7 契约 D-②）：admission 构造接收灰度配置，认领/续租入口按组织拒绝
+  // Commutateur de déploiement progressif (contrat W7 D-②) : la construction de l'admission reçoit la configuration de progressivité, les entrées de réclamation/prolongation refusent par organisation
   new AdmissionService(ctx, config)
-  // 台账维护（W5 运维面 D-③）：过期 permit 落账 + 终态 run 盘点（封存不删行）；
-  // 构造期起定时巡检（env 可停用），REST /api/workforce/admin/maintenance/run 手动触发
+  // Maintenance du registre (face opérationnelle W5 D-③) : comptabilisation des permits expirés + inventaire des runs à état terminal (archivage sans suppression de ligne) ;
+  // inspection périodique dès la construction (désactivable par env), déclenchement manuel via REST /api/workforce/admin/maintenance/run
   new MaintenanceService(ctx)
-  // 3. 登记窄端口实现（platform-core 登记器）：本插件 fiber 已持有全部同插件服务，同步登记
-  //    （灰度配置随端口进入 authorizeWorkAction：关闭组织在工作级授权入口显式拒绝）
+  // 3. Enregistrement de l'implémentation du port étroit (registre de platform-core) : la fiber de cette extension détient déjà tous ses services, enregistrement synchrone
+  //    (la configuration de progressivité entre dans authorizeWorkAction via le port : organisation désactivée = refus explicite à l'entrée d'autorisation au niveau travail)
   ctx.workforcePolicy.register(createWorkforcePolicyPort(ctx, config))
-  // 4. 运行时薄工具（workforce_claim/invoke/renew/submit；身份取 exec.principal，禁止 args 传入）
+  // 4. Outils fins d'exécution (workforce_claim/invoke/renew/submit ; identité tirée d'exec.principal, transmission par args interdite)
   registerWorkforceTools(ctx)
-  // 5. REST 工作面（/api/workforce/*，guarded 路由依赖 console 中间件先行）
+  // 5. Face de travail REST (/api/workforce/*, les routes guarded dépendent de la priorité du middleware console)
   registerWorkforceRoutes(ctx)
 }
 

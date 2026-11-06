@@ -1,38 +1,38 @@
 /**
- * @dsh-ops/plugin-usage —— usage 计量管道（生态设计 v1.2 第 2 步）。
+ * @dsh-ops/plugin-usage — pipeline de metering usage (conception écosystème v1.2 étape 2).
  *
- * 全平台唯一的资源消耗计量入口：
- *   资源消耗方（MCP 网关 / 模型网关 / 插件运行时）
- *     → usage.record()（schema v1 校验 → SQLite 先写后发 → platformBus 广播）
- *     → 订阅方（audit 成本归集 / billing 扣费 / market 分成 / 对账引擎）
+ * Unique entrée de metering de la consommation de ressources de toute la plateforme :
+ *   consommateur de ressources (passerelle MCP / passerelle de modèles / runtime d'extension)
+ *     → usage.record() (validation schéma v1 → SQLite écrire d'abord puis envoyer → diffusion platformBus)
+ *     → souscripteurs (collecte de coûts audit / débit billing / partage market / moteur de réconciliation)
  *
- * schema 语义（定版 additive-only）：
- *   - usage.recorded schema_version=1：字段只增不改不删；新字段只能以可选形式随 minor 版本加入；
- *   - 消费端必须容忍未知新字段（前向兼容义务）；
- *   - 弃用字段走 platform.schema.deprecated 事件，历史数据不迁移不重算。
- * 投递语义（M8）：at-least-once + 消费端按 idempotency_key 幂等；先落库后分发（宕机不丢）；
- *   消费异常重试 3 次入死信集合并告警；支持按时间窗重放。
+ * Sémantique du schéma (figée, additive-only) :
+ *   - usage.recorded schema_version=1 : champs seulement ajoutés, jamais modifiés ni supprimés ; les nouveaux champs n'entrent qu'en optionnel avec une version mineure ;
+ *   - les consommateurs doivent tolérer les nouveaux champs inconnus (obligation de compatibilité ascendante) ;
+ *   - les champs dépréciés passent par l'événement platform.schema.deprecated, les données historiques ne sont ni migrées ni recalculées.
+ * Sémantique de livraison (M8) : at-least-once + idempotence du consommateur par idempotency_key ; inscription avant distribution (aucune perte sur crash) ;
+ *   3 retries d'anomalie de consommation puis lettre morte avec alerte ; rejeu par fenêtre temporelle pris en charge.
  *
- * schema 变更记录（action-plan-dsh-frontend WP-03 / 默认决议 D1、D2，2026-09-02）：
- *   - D1 resource 值域增补 `app:<id>`、`kb:<orgId>`（additive）：价格簿播种零费率 `app:*`/`kb:*`
- *     （meter_key=calls），是否计费由运营调价决定；
- *   - D2 非计费事件统一零价快照：零费率规则产出 charge_cents=0 且 rate.nonbillable=true；
- *     UsageRecordInput.nonbillable=true 为便捷构造入口（非计费反馈/知识事件），仅允许配零费率规则，
- *     防止「标了非计费却按计费规则入账」的口径漂移；
- *   - D3（数字员工整改组7，2026-10-15）工作调用关联（§11.3 additive-only）：UsageRecordInput /
- *     UsageEvent 增可选 invocationId，落库列 invocation_id TEXT NOT NULL DEFAULT ''（存量库启动时
- *     pragma 探测 + ALTER TABLE 幂等迁移）。语义：把本次消费事实关联到 workforce_invocations 的一条
- *     工作调用账（workforce_usage_links 的伴随索引），聚合/对账口径不变、不双计；幂等键机制与历史
- *     resource 键一字不动。
- *   - C4（企业数字员工内网协作 A2A/UHP，2026-10-20）协作链归集（additive-only，同 D3 口径）：
- *     UsageRecordInput / UsageEvent 增可选 contextId，落库列 context_id TEXT NOT NULL DEFAULT ''。
- *     语义：同一 A2A contextId（跨员工协作链）下多 Task 的全部计量按链归集——
- *     collaborationEvents() / collaborationSummary() 提供「一次协作总成本」聚合，幂等键机制不变。
+ * Journal des changements de schéma (action-plan-dsh-frontend WP-03 / résolutions par défaut D1, D2, 2026-09-02) :
+ *   - D1 le domaine de valeurs de resource s'enrichit de `app:<id>`, `kb:<orgId>` (additive) : le tarif sème à taux nul `app:*`/`kb:*`
+ *     (meter_key=calls), la facturation éventuelle relève du retarification opérationnel ;
+ *   - D2 les événements non facturables adoptent l'instantané à prix zéro : une règle à taux nul produit charge_cents=0 et rate.nonbillable=true ;
+ *     UsageRecordInput.nonbillable=true est une entrée de construction commode (événements non facturables de feedback/savoir), admise seulement avec une règle à taux nul,
+ *     contre la dérive de référentiel « marqué non facturable mais comptabilisé selon une règle facturable » ;
+ *   - D3 (groupe 7 de la mise en conformité de l'employé numérique, 2026-10-15) association d'appel de travail (§11.3 additive-only) : UsageRecordInput /
+ *     UsageEvent reçoivent l'optionnel invocationId, colonne invocation_id TEXT NOT NULL DEFAULT '' (les bases existantes reçoivent à l'amorçage
+ *     la sonde pragma + migration idempotente ALTER TABLE). Sémantique : associe le présent fait de consommation à un registre
+ *     d'appel de travail de workforce_invocations (index accompagnant de workforce_usage_links), référentiels d'agrégation/réconciliation inchangés, pas de double comptage ;
+ *     le mécanisme de clé idempotente et la clé resource historique sans changer un mot.
+ *   - C4 (collaboration intranet A2A/UHP de l'employé numérique d'entreprise, 2026-10-20) agrégation de chaîne de collaboration (additive-only, même référentiel que D3) :
+ *     UsageRecordInput / UsageEvent reçoivent l'optionnel contextId, colonne context_id TEXT NOT NULL DEFAULT ''.
+ *     Sémantique : tout le metering des Tasks sous un même contextId A2A (chaîne de collaboration inter-employés) s'agrège par chaîne —
+ *     collaborationEvents() / collaborationSummary() fournissent l'agrégat « coût total d'une collaboration », mécanisme de clé idempotente inchangé.
  *
- * 商业模式收敛（元冰可开发计划 M0，2026-09-09）：平台商业口径为「私有化年费 + 治理包」，
- * usage 管道定位为**用量透明计量与内部成本参考**——价格簿 list 侧统一零价快照（charge_cents=0，
- * 不对外呈现任何金额结算语义），cost 侧保留内部采购成本参考（成本穿透报表口径，见 docs/contract-j4-usage-report.md）。
- * monthlyReport() 提供 J4 契约的 tokens 三维聚合（部门 org / Agent / Skill）。
+ * Convergence du modèle économique (plan de développement method M0, 2026-09-09) : le référentiel commercial de la plateforme est « licence annuelle privatif + pack de gouvernance »,
+ * le pipeline usage se positionne comme **metering transparent de l'usage et référence de coût interne** — la face list du tarif est un instantané à prix zéro uniforme (charge_cents=0,
+ * sans aucune sémantique de règlement en montant présentée à l'extérieur), la face cost conserve la référence de coût d'achat interne (référentiel du rapport de perçage des coûts, voir docs/contract-j4-usage-report.md).
+ * monthlyReport() fournit l'agrégat tridimensionnel de tokens du contrat J4 (département org / Agent / Skill).
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -42,13 +42,13 @@ import { AssetUsageError, reportFingerprint, type AssetUsageReportRecord } from 
 import * as usageTools from './tools.ts'
 
 // ---------------------------------------------------------------------------
-// schema v1（定版）
+// schéma v1 (figé)
 // ---------------------------------------------------------------------------
 
 export const USAGE_SCHEMA = 'usage.recorded'
 export const USAGE_SCHEMA_VERSION = 1
 
-/** 可扩展计量字典条目：替代固定 token 三件套，L3 自定义计量同结构接入。 */
+/** Entrée de dictionnaire de metering extensible : remplace le trio fixe de tokens, le metering personnalisé L3 entre avec la même structure. */
 export interface UsageMeter {
   key: string
   value: number
@@ -56,10 +56,10 @@ export interface UsageMeter {
 }
 
 /**
- * 组合计价行（#14，2026-10-29，additive-only）：一次事件按多个计量键分别计价再求和
- * （模型 token 双米计价：input_tokens × 输入费率 + output_tokens × 输出费率）。
- * 仅平台内部可信生产方（modelgw）使用；费率仍取自价格簿（modelgw 在调用时点读取），
- * 快照 rate.line_items 原样留痕，对账/审计可复算。
+ * Ligne de prix combiné (#14, 2026-10-29, additive-only) : un événement est tarifé séparément selon plusieurs clés de metering puis sommé
+ * (tarification double mètre des tokens de modèle : input_tokens × taux d'entrée + output_tokens × taux de sortie).
+ * Réservé aux producteurs internes de confiance de la plateforme (modelgw) ; les taux viennent toujours du tarif (modelgw lit à l'instant de l'appel),
+ * l'instantané rate.line_items laisse une trace intégrale, récalculable en réconciliation/audit.
  */
 export interface UsageCostLineItem {
   meter_key: string
@@ -68,47 +68,47 @@ export interface UsageCostLineItem {
   units_per_step: number
 }
 
-/** 价格快照（计费时点冻结，历史可复算）。 */
+/** Instantané de tarif (figé à l'instant de la facturation, recalculable historiquement). */
 export interface UsagePricingSnapshot {
   currency: string
-  /** 本事件应收（列表价口径，含税）。 */
+  /** Recevable de cet événement (référentiel prix catalogue, TTC). */
   charge_cents: number
-  /** 本事件平台成本（口径：L1 采购成本）。 */
+  /** Coût plateforme de cet événement (référentiel : coût d'achat L1). */
   cost_cents: number
   /**
-   * 成本语义标注（#14 additive）：'not_priced' = 费率未配置/全零费率导致的 0——
-   * 「未知」不与「真零成本」混读；缺省 = priced（含费率非零但量小取整为 0 的诚实零）。
+   * Annotation sémantique de coût (#14 additive) : 'not_priced' = 0 dû à un taux non configuré/taux nul —
+    * « inconnu » ne se lit pas comme « vrai coût nul » ; défaut = priced (y compris le zéro honnête d'un taux non nul mais d'un montant arrondi à 0).
    */
   cost_status?: 'priced' | 'not_priced'
-  /** 计价明细快照（费率 + 计量键），分账/审计复算依据；组合计价行 additive（#14）。 */
+  /** Instantané du détail de tarification (taux + clé de metering), base de récalcul pour partage/audit ; lignes de prix combiné additive (#14). */
   rate: { pattern: string; meter_key: string; list_cents_per_unit: number; cost_cents_per_unit: number; units_per_step: number; tax_rate: number; nonbillable?: boolean; line_items?: UsageCostLineItem[] }
 }
 
-/** usage.recorded v1 事件（只追加，禁改版；扩展仅允许新增可选字段）。 */
+/** Événement usage.recorded v1 (append-only, interdiction de changer de version ; l'extension n'admet que de nouveaux champs optionnels). */
 export interface UsageEvent {
   schema: typeof USAGE_SCHEMA
   schema_version: number
   event_id: string
   idempotency_key: string
   trace_id?: string
-  /** D3（additive）：关联的数字员工工作调用账 ID（workforce_invocations.id）；非工作调用事件不下发该键。 */
+  /** D3 (additive) : id du registre d'appel de travail de l'employé numérique associé (workforce_invocations.id) ; absent des événements hors appel de travail. */
   invocationId?: string
-  /** C4（additive，A2A/UHP 协作面）：跨员工协作链 ID（A2A contextId）——同链多 Task 的全部计量按此归集；非协作事件不下发该键。 */
+  /** C4 (additive, face collaboration A2A/UHP) : id de chaîne de collaboration inter-employés (contextId A2A) — tout le metering des Tasks d'une même chaîne s'agrège dessous ; absent des événements hors collaboration. */
   contextId?: string
   occurred_at: string
   tenant_id: string
   org: string
-  /** 最终用户/Agent（on-behalf-of 终点）：user:<id> | agent:<id> */
+  /** Utilisateur final/Agent (point d'arrivée du on-behalf-of) : user:<id> | agent:<id> */
   subject: string
-  /** 计费责任主体：org:<id> | plugin:<id> | app:<id> | platform */
+  /** Sujet responsable de la facturation : org:<id> | plugin:<id> | app:<id> | platform */
   principal: string
-  /** 资源：model:<slug> | plugin:<id> | mcp:<slug> | skill:<id> | nas:<id> | app:<id> | kb:<orgId>（D1 additive） */
+  /** Ressource : model:<slug> | plugin:<id> | mcp:<slug> | skill:<id> | nas:<id> | app:<id> | kb:<orgId> (D1 additive) */
   resource: string
   meters: UsageMeter[]
   pricing: UsagePricingSnapshot
 }
 
-/** 计量事件登记入参（schema 校验后由 record() 补全派生字段）。 */
+/** Entrée d'inscription d'événement de metering (les champs dérivés sont complétés par record() après validation du schéma). */
 export interface UsageRecordInput {
   org: string
   subject: string
@@ -117,36 +117,36 @@ export interface UsageRecordInput {
   meters: UsageMeter[]
   tenant_id?: string
   trace_id?: string
-  /** D3（additive，可选）：数字员工工作调用账 ID（invocation_id 列）；缺省空串，聚合口径不变。 */
+  /** D3 (additive, optionnel) : id du registre d'appel de travail de l'employé numérique (colonne invocation_id) ; défaut chaîne vide, référentiel d'agrégation inchangé. */
   invocationId?: string
-  /** C4（additive，可选）：A2A 协作链 ID（context_id 列）；缺省空串，聚合口径不变。 */
+  /** C4 (additive, optionnel) : id de chaîne de collaboration A2A (colonne context_id) ; défaut chaîne vide, référentiel d'agrégation inchangé. */
   contextId?: string
-  /** 幂等键：调用方自带（推荐，如 <producer>:<业务单号>）；缺省按主体+资源+窗口+序号生成。 */
+  /** Clé idempotente : apportée par l'appelant (recommandé, ex. <producteur>:<numéro de dossier métier>) ; à défaut générée par sujet+ressource+fenêtre+numéro. */
   idempotency_key?: string
   occurred_at?: string
   /**
-   * 非计费便捷构造（D2 零价快照）：true 时要求该资源命中零费率价格簿规则，
-   * 事件按 charge_cents=0 + rate.nonbillable=true 入账（反馈/知识等观测事件不污染计费口径）。
+   * Construction commode non facturable (D2 instantané à prix zéro) : true exige que la ressource atteigne une règle du tarif à taux nul,
+   * l'événement est inscrit charge_cents=0 + rate.nonbillable=true (les événements d'observation feedback/savoir ne polluent pas le référentiel de facturation).
    */
   nonbillable?: boolean
   /**
-   * 组合计价行（#14 additive，可选）：提供时事件成本 = 各行 (value/step)×rate 之和——
-   * 模型 token 双米计价（input/output 分别计价）的唯一入口；费率由生产方从价格簿读取后传入，
-   * 快照 rate.line_items 原样留痕。缺省走价格簿单米计价（历史行为不变）。
+   * Lignes de prix combiné (#14 additive, optionnel) : fournies, le coût de l'événement = somme des (value/step)×rate —
+   * unique entrée de la tarification double mètre des tokens de modèle (input/output tarifés séparément) ; les taux sont lus dans le tarif par le producteur puis passés,
+   * l'instantané rate.line_items laisse une trace intégrale. À défaut, tarification mono-mètre du tarif (comportement historique inchangé).
    */
   costLineItems?: UsageCostLineItem[]
 }
 
 /**
- * D2 零价快照便捷构造：非计费观测事件（反馈/知识包使用等）统一按零费率 calls 计量登记。
- * 返回值可直接交给 usage.record()；资源必须命中零费率价格簿规则（app: 与 kb: 前缀已默认播种），
- * 否则 record() 拒绝（nonbillable 标记防口径漂移）。
+ * Construction commode d'instantané à prix zéro D2 : les événements d'observation non facturables (feedback/usage de paquets de savoir, etc.) sont inscrits uniformément en metering calls à taux nul.
+ * La valeur de retour se donne directement à usage.record() ; la ressource doit atteindre une règle du tarif à taux nul (les préfixes app: et kb: sont semés par défaut),
+ * sinon record() refuse (la marque nonbillable prévient la dérive de référentiel).
  */
 export function nonbillableUsage(base: Omit<UsageRecordInput, 'meters' | 'nonbillable'> & { calls?: number }): UsageRecordInput {
   return { ...base, meters: [{ key: 'calls', value: base.calls ?? 1, unit: 'call' }], nonbillable: true }
 }
 
-/** 价格簿条目：resource 模式（精确 → 前缀匹配）→ 计量键与费率。 */
+/** Entrée du tarif : motif resource (exact → correspondance de préfixe) → clé de metering et taux. */
 export interface PriceBookEntry extends RecordBase {
   pattern: string
   meter_key: string
@@ -155,18 +155,18 @@ export interface PriceBookEntry extends RecordBase {
   units_per_step: number
   tax_rate: number
   currency: string
-  /** 费率版本（分录快照引用，历史可复算）。 */
+  /** Version du taux (référence d'instantané d'écriture, recalculable historiquement). */
   rate_version: string
 }
 
-/** 能力授权登记（M5 运行时对账基线）：market 安装插件时写入。 */
+/** Enregistrement d'autorisation de capacité (base de la réconciliation à l'exécution M5) : écrit par market à l'installation d'une extension. */
 export interface CapabilityGrantRecord extends RecordBase {
   principal: string
   capabilities: string[]
   source: string
 }
 
-/** 死信（消费 3 次失败的事件）。 */
+/** Lettres mortes (événements en échec de consommation 3 fois). */
 export interface DeadLetterRecord extends RecordBase {
   event_id: string
   consumer: string
@@ -177,7 +177,7 @@ export interface DeadLetterRecord extends RecordBase {
 export type UsageConsumer = (event: UsageEvent) => void
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TENANT = 't_default'
@@ -188,9 +188,9 @@ export class UsageService extends Service {
 
   private consumers = new Map<string, { handler: UsageConsumer; attempts: Map<string, number> }>()
   private seq = 0
-  /** REL-11 读侧加固：已发过 warning 的脏数据键（进程内去重，防告警风暴）。 */
+  /** Durcissement lecture REL-11 : clés de données sales ayant déjà émis warning (déduplication en processus, contre la tempête d'alertes). */
   private warnedDirtyKeys = new Set<string>()
-  /** 事件保留天数（USAGE_RETENTION_DAYS，默认 730=2 年；0=永久保留不清理）。 */
+  /** Jours de rétention des événements (USAGE_RETENTION_DAYS, défaut 730 = 2 ans ; 0 = rétention permanente sans nettoyage). */
   readonly retentionDays: number
   private retentionTimer: ReturnType<typeof setInterval> | undefined
 
@@ -209,25 +209,25 @@ export class UsageService extends Service {
       meters_json: 'TEXT NOT NULL',
       pricing_json: 'TEXT NOT NULL',
       trace_id: "TEXT NOT NULL DEFAULT ''",
-      // D3（组7 additive）：数字员工工作调用关联列——新库直接建齐；存量库由下方 pragma 探测迁移
+      // D3 (groupe 7 additive) : colonne d'association d'appel de travail de l'employé numérique — créée d'emblée en base neuve ; en base existante, migration par la sonde pragma ci-dessous
       invocation_id: "TEXT NOT NULL DEFAULT ''",
-      // C4（A2A/UHP 协作面 additive）：跨员工协作链关联列——同上 additive-only 口径
+      // C4 (face collaboration A2A/UHP additive) : colonne d'association de chaîne de collaboration inter-employés — même référentiel additive-only
       context_id: "TEXT NOT NULL DEFAULT ''",
     }, { uniques: [['idempotency_key']], indexes: [['occurred_at'], ['principal'], ['tenant_id']] })
-    // 存量库增量迁移（D3，幂等守护）：pragma table_info 探测无列才 ALTER——
-    // 只 additive（NOT NULL 带默认值），不改既有列、不动索引与幂等键
+    // Migration incrémentale des bases existantes (D3, garde idempotente) : sonde pragma table_info, ALTER seulement si colonne absente —
+    // additive seulement (NOT NULL avec défaut), sans toucher aux colonnes existantes, ni aux index ni à la clé idempotente
     const usageColumns = this.ctx.txnStore.sql<{ name: string }>('pragma table_info(usage_events)')
     if (!usageColumns.some((column) => column.name === 'invocation_id')) {
       this.ctx.txnStore.run("ALTER TABLE usage_events ADD COLUMN invocation_id TEXT NOT NULL DEFAULT ''")
       this.ctx.logger('usage').info('usage_events 增量迁移：已补 invocation_id 列（数字员工工作调用关联，D3 additive）')
     }
-    // C4 存量库增量迁移（与 D3 同款幂等守护）：A2A 协作链关联列
+    // Migration incrémentale C4 des bases existantes (même garde idempotente que D3) : colonne d'association de chaîne de collaboration A2A
     if (!usageColumns.some((column) => column.name === 'context_id')) {
       this.ctx.txnStore.run("ALTER TABLE usage_events ADD COLUMN context_id TEXT NOT NULL DEFAULT ''")
       this.ctx.logger('usage').info('usage_events 增量迁移：已补 context_id 列（A2A 跨员工协作链关联，C4 additive）')
     }
-    // 消费水位（引擎级幂等）：同一消费方对同一事件只产生一次副作用——
-    // replay()/死信重投不会造成 billing/audit 投影双计（评审实证缺陷的修复点）。
+    // Niveau de consommation (idempotence au niveau moteur) : un même consommateur ne produit qu'un seul effet de bord par événement —
+    // replay()/ré-injection de lettres mortes ne provoque pas de double comptage des projections billing/audit (point de correctif d'un défaut avéré en revue).
     ctx.txnStore.ensureTable('usage_consumptions', {
       consumer: 'TEXT NOT NULL',
       event_id: 'TEXT NOT NULL',
@@ -237,7 +237,7 @@ export class UsageService extends Service {
     this.retentionDays = Number.isFinite(retention) && retention > 0 ? Math.floor(retention) : 0
     if (this.retentionDays > 0) {
       ctx.logger('usage').info(`usage 事件保留策略：${this.retentionDays} 天（USAGE_RETENTION_DAYS，0=永久）`)
-      // 启动 20s 后首跑 + 每 6h 巡检（对齐 iam 连接器自动同步的构造期定时器惯例）
+      // premier tour 20 s après le démarrage + inspection toutes les 6 h (aligné sur l'usage des minuteurs de construction de la synchronisation automatique des connecteurs iam)
       const first = setTimeout(() => void this.sweepRetention(), 20_000)
       ctx.effect(() => () => clearTimeout(first))
       this.retentionTimer = setInterval(() => void this.sweepRetention(), 6 * 3_600_000)
@@ -250,15 +250,15 @@ export class UsageService extends Service {
   }
 
   /**
-   * 保留策略巡检：清理超出保留窗口的 usage_events，连带消费水位与对应死信。
-   * 语义（发布说明 2026-09-11 登记）：事件被清理后，同幂等键重报将按新事件重新入账——
-   * 保留窗口即删除契约；J4 月度报表窗口（近 13 个月）在默认 730 天窗口内不受影响。
+   * Inspection de politique de rétention : nettoie les usage_events hors fenêtre de rétention, avec niveaux de consommation et lettres mortes correspondantes.
+   * Sémantique (enregistrée dans les notes de version 2026-09-11) : un événement nettoyé, un nouveau rapport de même clé idempotente sera comptabilisé comme nouvel événement —
+   * la fenêtre de rétention vaut contrat de suppression ; la fenêtre du rapport mensuel J4 (13 derniers mois) est dans la fenêtre par défaut de 730 jours, non affectée.
    */
   purgeExpired(daysOverride?: number): { cutoff: string; purgedEvents: number; purgedWatermarks: number; purgedDeadLetters: number } {
     const days = daysOverride ?? this.retentionDays
     if (!(days > 0)) return { cutoff: '', purgedEvents: 0, purgedWatermarks: 0, purgedDeadLetters: 0 }
     const cutoff = new Date(Date.now() - days * 86_400_000).toISOString()
-    // 死信先对表：事件已出窗的死信一并移除（保留它们只会让重投在事件缺失时才被动清理）
+    // Les lettres mortes d'abord rapprochées : une lettre morte dont l'événement est sorti de fenêtre est retirée aussi (les garder ne ferait qu'un nettoyage passif à la ré-injection sur événement manquant)
     let purgedDeadLetters = 0
     for (const letter of this.deadLetters().all()) {
       const row = this.ctx.txnStore.one<UsageRow>('usage_events', { id: letter.event_id })
@@ -286,19 +286,19 @@ export class UsageService extends Service {
     }
   }
 
-  // -- 登记与分发 -----------------------------------------------------------
+  // -- Enregistrement et distribution -----------------------------------------------------------
 
-  /** 全平台唯一计量入口：校验 → 计价 → 落库（幂等）→ 总线分发。 */
+  /** Unique point d'entrée du metering sur toute la plateforme : validation → tarification → écriture en base (idempotent) → distribution sur le bus. */
   record(input: UsageRecordInput): UsageEvent {
     this.validate(input)
     const tenant = input.tenant_id ?? this.resolveTenant(input.org)
     const price = this.priceOf(input.resource)
-    // D2 非计费便捷构造：nonbillable 标记只允许配零费率规则（防「标了非计费却按计费规则入账」）
+    // D2 construction pratique non facturable : le marqueur nonbillable n'est autorisé qu'avec une règle à taux nul (évite « marqué non facturable mais comptabilisé selon une règle facturable »)
     if (input.nonbillable === true && !(price.list_cents_per_unit === 0 && price.cost_cents_per_unit === 0)) {
       throw new Error(t('非计费事件只允许命中零费率价格簿规则：资源 {resource} 命中 {pattern}（非零费率），请去掉 nonbillable 或先调零费率', { resource: input.resource, pattern: price.pattern }))
     }
-    // 零费率规则产出的即非计费事件（统一零价快照口径）：charge_cents=0 + rate.nonbillable=true
-    // #14：组合计价行在场时，非计费判定看各行费率（价格簿单米口径只是主键示意，不再独裁）
+    // Ce qu'une règle à taux nul produit est précisément un événement non facturable (référentiel uniforme d'instantané à prix zéro) : charge_cents=0 + rate.nonbillable=true
+    // #14 : en présence de lignes de tarification combinées, le caractère non facturable se juge sur le taux de chaque ligne (le référentiel mono-mètre du tarif n'est qu'une indication de clé primaire, n'est plus décisionnaire)
     const lineItems = (input.costLineItems ?? []).map((item) => {
       for (const [field, value, min] of [
         ['value', item.value, 0], ['cost_cents_per_unit', item.cost_cents_per_unit, 0], ['units_per_step', item.units_per_step, 1],
@@ -316,8 +316,8 @@ export class UsageService extends Service {
       || (lineItems.length > 0
         ? price.list_cents_per_unit === 0 && lineItems.every((item) => item.cost_cents_per_unit === 0)
         : price.list_cents_per_unit === 0 && price.cost_cents_per_unit === 0)
-    // 硬校验：事件必须携带价格簿计价键（宁可拒绝不可静默 0 计费——
-    // 价格簿对调用方不可见（usage.admin），错误信息直接携带期望键供自纠）
+    // Validation dure : l'événement doit porter la clé de tarification du tarif (mieux vaut refuser qu'une facturation silencieuse à 0 —
+    // le tarif est invisible pour l'appelant (usage.admin), le message d'erreur porte directement la clé attendue pour auto-correction)
     if (!input.meters.some((item) => item.key === price.meter_key)) {
       throw new Error(
         t('计量键不匹配：资源 {resource} 按价格簿 {pattern} 以「{key}」计价，收到 [{received}]。请按 {key} 重报，不要编造计量键',
@@ -325,8 +325,8 @@ export class UsageService extends Service {
       )
     }
     const meter = input.meters.find((item) => item.key === price.meter_key)!
-    // REL-11 读侧加固：存量脏费率（非有限/负值/零步长）按 0 计价并发 warning（防永久投毒）；
-    // 合法数值走原值，计价结果不变。快照记录实际采用的修正值（非有限值 JSON 序列化为 null 会继续污染对账）
+    // REL-11 durcissement côté lecture : un taux historique sale (non fini/négatif/pas nul) est tarifié à 0 avec un warning (évite un empoisonnement permanent) ;
+    // Une valeur légale passe telle quelle, le résultat de tarification inchangé. L'instantané enregistre la valeur corrigée réellement employée (un non-fini sérialisé en null en JSON continuerait de polluer la réconciliation)
     const listRate = Number.isFinite(price.list_cents_per_unit) && price.list_cents_per_unit >= 0
       ? price.list_cents_per_unit
       : this.warnDirtyData(`pricebook:${price.pattern}:list`, t('价格簿 {pattern} 的 list_cents_per_unit={value} 为非法数值，本次计价按 0 处理；请尽快修正价格簿（REL-11）', { pattern: price.pattern, value: String(price.list_cents_per_unit) }))
@@ -337,7 +337,7 @@ export class UsageService extends Service {
       ? price.units_per_step
       : this.warnDirtyData(`pricebook:${price.pattern}:step`, t('价格簿 {pattern} 的 units_per_step={value} 为非法数值（须为正数），本次计价按 0 处理；请尽快修正价格簿（REL-11）', { pattern: price.pattern, value: String(price.units_per_step) }))
     const charge = step > 0 ? Math.round((meter.value / step) * listRate) : 0
-    // #14：组合计价行在场 → 成本 = Σ 行计价（input/output 双米）；否则走价格簿单米（历史口径不变）
+    // #14 : lignes de tarification combinées présentes → coût = Σ tarification des lignes (double mètre input/output) ; sinon tarif mono-mètre du livre de prix (référentiel historique inchangé)
     const cost = lineItems.length > 0
       ? lineItems.reduce((sum, item) => sum + Math.round((item.value / item.units_per_step) * item.cost_cents_per_unit), 0)
       : (step > 0 ? Math.round((meter.value / step) * costRate) : 0)
@@ -347,9 +347,9 @@ export class UsageService extends Service {
       event_id: newId('uevt'),
       idempotency_key: input.idempotency_key ?? this.autoIdempotencyKey(input),
       ...(input.trace_id !== undefined ? { trace_id: input.trace_id } : {}),
-      // D3（additive）：仅调用方显式携带时下发该键（schema 前向兼容：消费端容忍缺省）
+      // D3 (additive) : la clé n'est émise que si l'appelant la porte explicitement (compatibilité avant du schéma : les consommateurs tolèrent l'absence)
       ...(input.invocationId !== undefined ? { invocationId: input.invocationId } : {}),
-      // C4（additive）：A2A 协作链 ID，仅显式携带时下发
+      // C4 (additive) : identifiant de chaîne de collaboration A2A, émis uniquement s'il est porté explicitement
       ...(input.contextId !== undefined ? { contextId: input.contextId } : {}),
       occurred_at: input.occurred_at ?? new Date().toISOString(),
       tenant_id: tenant,
@@ -362,12 +362,12 @@ export class UsageService extends Service {
         currency: price.currency,
         charge_cents: charge,
         cost_cents: cost,
-        // #14：not_priced 标注「费率未配置/全零导致的 0」——下游不得把未知读成零成本
+        // #14 : not_priced marque un « 0 dû à un taux non configuré/nul » — l'aval ne doit pas lire l'inconnu comme un coût nul
         ...(cost === 0 && nonbillable ? { cost_status: 'not_priced' as const } : {}),
         rate: {
           pattern: price.pattern,
           meter_key: price.meter_key,
-          // REL-11：记录实际采用的修正后费率（合法数值时与原值恒等）
+          // REL-11 : enregistre le taux corrigé réellement employé (identique à l'original pour une valeur légale)
           list_cents_per_unit: listRate,
           cost_cents_per_unit: costRate,
           units_per_step: step,
@@ -381,8 +381,8 @@ export class UsageService extends Service {
     if (!inserted) {
       const existing = this.ctx.txnStore.one<UsageRow>('usage_events', { idempotency_key: event.idempotency_key })
       if (!existing) throw new Error(t('幂等键异常：{key} 已占用但记录缺失', { key: event.idempotency_key }))
-      // feedback 幂等口径（组4：同 messageId 改评分不双计）：键不含 score 段，score 随 meter unit
-      // 落在内容里——同键改评属预期重放（first-write-wins，保留首次评分），不按内容冲突拒绝
+      // Référentiel idempotent feedback (groupe 4 : re-noter le même messageId ne double pas le comptage) : la clé ne contient pas de segment score, le score suit l'unité du mètre
+      // tombe dans le contenu — re-noter avec la même clé est un rejeu attendu (first-write-wins, le premier score est conservé), pas de refus pour conflit de contenu
       const sameContent = existing.org === event.org
         && existing.subject === event.subject
         && existing.principal === event.principal
@@ -391,24 +391,24 @@ export class UsageService extends Service {
       if (!sameContent) {
         throw new Error(t('幂等键冲突：{key} 已绑定事件 {id}，同键不同内容被拒绝', { key: event.idempotency_key, id: existing.id }))
       }
-      // 幂等重放：返回既有事件（计价快照以首次登记为准，不随费率变动重算）
+      // Rejeu idempotent : renvoie l'événement existant (l'instantané de tarification fait foi du premier enregistrement, pas de recalcul selon la variation des taux)
       return rowToEvent(existing)
     }
     this.dispatch(event)
     return event
   }
 
-  /** 注册消费方（at-least-once；3 次失败入死信）。 */
+  /** Enregistre un consommateur (at-least-once ; 3 échecs = lettre morte). */
   consume(consumerId: string, handler: UsageConsumer): () => void {
     this.consumers.set(consumerId, { handler, attempts: new Map() })
     return () => this.consumers.delete(consumerId)
   }
 
   /**
-   * 分发：at-least-once 语义下的「效果恰好一次」——
-   *   1. 先占消费水位（INSERT OR IGNORE）：已消费过的事件直接跳过（replay 幂等）；
-   *   2. 处理器失败即释放水位，立即退避重试（真实执行，共 3 次）；
-   *   3. 3 次均失败入死信（持久化）并告警，可经 retryDeadLetters() 人工重投。
+   * Distribution : « effet exactement une fois » sous sémantique at-least-once —
+   *   1. occupation préalable du niveau de consommation (INSERT OR IGNORE) : événement déjà consommé = saut direct (rejeu idempotent) ;
+   *   2. échec du gestionnaire = libération du niveau, retry immédiate avec repli (exécution réelle, 3 fois au total) ;
+   *   3. 3 échecs = lettre morte (persistée) avec alerte, ré-injectable manuellement via retryDeadLetters().
    */
   private dispatch(event: UsageEvent): void {
     this.ctx.platformBus.emit(USAGE_SCHEMA, event)
@@ -416,7 +416,7 @@ export class UsageService extends Service {
       const claimed = this.ctx.txnStore.insertOrIgnore('usage_consumptions', {
         consumer: consumerId, event_id: event.event_id, at: new Date().toISOString(),
       })
-      if (!claimed) continue // 已消费（replay/重投）：幂等跳过
+      if (!claimed) continue // déjà consommé (rejeu/ré-injection) : saut idempotent
       let delivered = false
       for (let attempt = 1; attempt <= 3 && !delivered; attempt++) {
         try {
@@ -424,9 +424,9 @@ export class UsageService extends Service {
           entry.attempts.delete(`${consumerId}:${event.event_id}`)
           delivered = true
         } catch (error) {
-          // 立即重试（同步管道不阻塞事件循环）：瞬时失败最多 3 次真实执行
+          // retry immédiate (le pipeline synchrone ne bloque pas la boucle d'événements) : au plus 3 exécutions réelles sur échec transitoire
           if (attempt < 3) continue
-          // 释放消费水位，允许人工重投时重新消费
+          // libère le niveau de consommation pour permettre une nouvelle consommation à la ré-injection manuelle
           this.ctx.txnStore.run('DELETE FROM usage_consumptions WHERE consumer = ? AND event_id = ?', [consumerId, event.event_id])
           this.deadLetters().insert({
             id: newId('dlq'), event_id: event.event_id, consumer: consumerId,
@@ -441,7 +441,7 @@ export class UsageService extends Service {
     }
   }
 
-  /** 重放窗口内事件（消费水位保证幂等：重复重放不产生重复副作用）。 */
+  /** Rejoue les événements de la fenêtre (le niveau de consommation garantit l'idempotence : rejeus répétés sans effets de bord dupliqués). */
   replay(sinceIso: string): { replayed: number } {
     const rows = this.ctx.txnStore.sql<UsageRow>(
       'SELECT * FROM usage_events WHERE occurred_at >= ? ORDER BY occurred_at',
@@ -451,18 +451,18 @@ export class UsageService extends Service {
     return { replayed: rows.length }
   }
 
-  /** 死信重投：逐条重新分发，成功即移出死信队列。返回 {retried, remaining}。 */
+  /** Ré-injection des lettres mortes : redistribution une à une, succès = sortie de la file. Renvoie {retried, remaining}. */
   retryDeadLetters(): { retried: number; remaining: number } {
     const letters = this.deadLetters().all()
     let retried = 0
     for (const letter of letters) {
       const row = this.ctx.txnStore.one<UsageRow>('usage_events', { id: letter.event_id })
       if (!row) {
-        this.deadLetters().remove(letter.id) // 事件已不存在（清理/过期）：死信一并移除
+        this.deadLetters().remove(letter.id) // événement déjà inexistant (nettoyage/expiration) : la lettre morte est retirée aussi
         continue
       }
       const consumer = this.consumers.get(letter.consumer)
-      if (!consumer) continue // 消费方未注册（插件未加载）：保留死信
+      if (!consumer) continue // consommateur non enregistré (extension non chargée) : lettre morte conservée
       this.deadLetters().remove(letter.id)
       try {
         const claimed = this.ctx.txnStore.insertOrIgnore('usage_consumptions', {
@@ -484,7 +484,7 @@ export class UsageService extends Service {
     return { retried, remaining: this.deadLetters().count() }
   }
 
-  // -- 查询 -----------------------------------------------------------------
+  // -- Requêtes -----------------------------------------------------------------
 
   query(filter: { tenant_id?: string; principal?: string; resource?: string; from?: string; to?: string; limit?: number } = {}): { total: number; items: UsageEvent[] } {
     const conditions: string[] = []
@@ -505,7 +505,7 @@ export class UsageService extends Service {
     const params: Array<string | number> = []
     if (filter.tenant_id) { conditions.push('tenant_id = ?'); params.push(filter.tenant_id) }
     if (filter.principal) { conditions.push('principal = ?'); params.push(filter.principal) }
-    // QA B-03：resource 过滤此前在 SQL 缺列被静默忽略（usage_query 工具返回全库数字）——补齐
+    // QA B-03 : le filtre resource était auparavant silencieusement ignoré quand la colonne manquait en SQL (l'outil usage_query renvoyait les chiffres de toute la base) — corrigé
     if (filter.resource) { conditions.push('resource = ?'); params.push(filter.resource) }
     if (filter.from) { conditions.push('occurred_at >= ?'); params.push(filter.from) }
     if (filter.to) { conditions.push('occurred_at <= ?'); params.push(filter.to) }
@@ -518,9 +518,9 @@ export class UsageService extends Service {
   }
 
   /**
-   * 运营分析聚合（资产运营页/成本穿透报表）：窗口内按资源 / 归口主体（组织）/ 日趋势分组。
-   * 一次 SQL 各取一份聚合，供「谁在用什么资产、内部成本多少」的运营口径。
-   * M0-3：金额口径为内部成本参考（cost_cents）；charge_cents 零价快照恒 0，仅为事件快照兼容字段。
+   * Agrégats d'analyse opérationnelle (page d'exploitation des actifs/rapport de perçage des coûts) : fenêtre groupée par ressource / sujet d'imputation (organisation) / tendance journalière.
+   * Un SQL prend un agrégat de chaque, pour le référentiel opérationnel « qui utilise quel actif, à quel coût interne ».
+   * M0-3 : le référentiel des montants est la référence de coût interne (cost_cents) ; charge_cents instantané à prix zéro constant 0, simple champ de compatibilité de l'instantané d'événement.
    */
   breakdown(fromIso: string): {
     byResource: Array<{ resource: string; count: number; charge_cents: number; cost_cents: number }>
@@ -543,8 +543,8 @@ export class UsageService extends Service {
   }
 
   /**
-   * 观测矩阵：窗口内指定前缀资源的 资源×日 使用次数（技能热力图等观测视图数据源）。
-   * prefix 由调用方以代码字面量传入（如 'skill:'），不进 LIKE 通配符。
+   * Matrice d'observation : nombre d'utilisations ressource×jour des ressources du préfixe dans la fenêtre (source de données de vues d'observation type carte de chaleur des skills).
+   * Le préfixe est passé par l'appelant en littéral de code (ex. 'skill:'), sans joker LIKE.
    */
   matrix(fromIso: string, prefix: string): Array<{ resource: string; day: string; count: number }> {
     return this.ctx.txnStore.sql<{ resource: string; day: string; count: number }>(
@@ -554,9 +554,9 @@ export class UsageService extends Service {
   }
 
   /**
-   * 协作链聚合（C4 A2A/UHP 协作面 additive）：按 context_id（A2A contextId）归集「一次跨员工
-   * 协作的总成本」。单链查询返回链上全部事件（时间正序）；窗口汇总返回 Top 协作链。
-   * 金额口径与 usageReport 相同：tokens=键名含 tokens 的米值和，cost=内部成本参考。
+   * Agrégat de chaîne de collaboration (additive face collaboration A2A/UHP C4) : agrège « le coût total
+    * d'une collaboration inter-employés » par context_id (contextId A2A). Requête mono-chaîne = tous les événements de la chaîne (ordre chronologique) ; résumé de fenêtre = Top chaînes.
+   * Référentiel des montants identique à usageReport : tokens = somme des mètres dont le nom de clé contient tokens, cost = référence de coût interne.
    */
   collaborationEvents(contextId: string): UsageEvent[] {
     if (!contextId) return []
@@ -591,12 +591,12 @@ export class UsageService extends Service {
   }
 
   /**
-   * 资产台账/用量报表聚合（设计适配 2026-10-14，只读 additive）：
-   * 窗口 [from, to) 内按 资源/部门/日 三维分组的 调用数+tokens+内部成本 聚合。
+   * Agrégat registre d'actifs/rapport d'usage (adaptation de conception 2026-10-14, lecture seule additive) :
+   * fenêtre [from, to) groupée en trois dimensions ressource/département/jour : agrégat appels+tokens+coût interne.
    *
-   * calls 口径：事件 meters 中键为 calls 的米值求和（批量计量一事件可代表多次调用），
-   * 无 calls 米的事件（如 mcp:/model: 按 tokens 计价的历史事件）按 1 次计——
-   * 「一次登记 = 一次调用批次」。tokens 口径与 summary/monthlyReport 一致（键名含 tokens 全累加）。
+   * Référentiel calls : somme des valeurs des mètres de clé calls des événements (un metering en lot peut représenter plusieurs appels),
+   * un événement sans mètre calls (ex. événements historiques mcp:/model: tarifés aux tokens) compte pour 1 —
+   * « un enregistrement = un lot d'appels ». Référentiel tokens identique à summary/monthlyReport (tous les noms de clé contenant tokens cumulés).
    */
   usageReport(fromIso: string, toIso?: string): {
     byResource: Array<{ resource: string; events: number; calls: number; tokens: number; cost_cents: number }>
@@ -625,10 +625,10 @@ export class UsageService extends Service {
   }
 
   /**
-   * 资源×日 调用数趋势（设计适配 2026-10-14，只读 additive）：
-   * 台账 trend[14] / 市场热力 heat[30] 的数据源；calls 口径与 usageReport 一致
-   * （calls 米求和，无该米的事件按 1 计）。prefix 由调用方以代码字面量传入（同 matrix），
-   * 缺省全资源。
+   * Tendance ressource×jour du nombre d'appels (adaptation de conception 2026-10-14, lecture seule additive) :
+   * source de données du trend[14] du registre et du heat[30] du marché ; référentiel calls identique à usageReport
+   * (somme des mètres calls, événement sans ce mètre compté 1). Le préfixe est passé par l'appelant en littéral de code (comme matrix),
+   * défaut toutes ressources.
    */
   callsTrend(fromIso: string, prefix?: string): Array<{ resource: string; day: string; calls: number }> {
     const conditions = ['e.occurred_at >= ?']
@@ -643,10 +643,10 @@ export class UsageService extends Service {
   }
 
   /**
-   * 成本/用量摘要（IAW 交接 4-1：面板侧成本查询的最小接口）。
-   * 窗口 [from, to) 内按 org / subject 过滤的聚合：事件数、内部成本（cost_cents 口径，
-   * charge_cents 零价快照恒 0）、tokens 三分（input/output/其他）与按资源分项。
-   * 权限分层由 HTTP 层负责：usage.read 可查任意主体，panel.read 只读自身组织（scope 收敛在端点做）。
+   * Résumé coût/usage (livraison IAW 4-1 : interface minimale de requête de coût côté panneau).
+   * Fenêtre [from, to) filtrée par org / sujet : nombre d'événements, coût interne (référentiel cost_cents,
+   * charge_cents instantané à prix zéro constant 0), tokens en trois parts (input/output/autres) et ventilation par ressource.
+   * La stratification de permissions relève de la couche HTTP : usage.read interroge tout sujet, panel.read ne lit que sa propre organisation (le resserrement de périmètre est fait à l'endpoint).
    */
   summary(filter: { from: string; to: string; org?: string; subject?: string }): UsageSummary {
     if (!filter.from || !filter.to) throw new Error(t('summary 需要 from/to 窗口'))
@@ -656,15 +656,15 @@ export class UsageService extends Service {
     if (filter.subject) { conditions.push('e.subject = ?'); params.push(filter.subject) }
     const where = ` WHERE ${conditions.join(' AND ')}`
     const whereAnd = ` AND ${conditions.join(' AND ')}`
-    // QA B-01：关联子查询必须包在聚合函数内——SQLite 对 GROUP BY 查询 SELECT 列表中的
-    // 裸关联子查询只对组内某一行求值，tokens 因此只统计到每组任意一条事件（J4 报表小 176 倍）。
-    // SUM((SELECT …)) 语义 = 逐行求子查询值再求和，与 json_each JOIN 口径一致且三维自洽。
+    // QA B-01 : la sous-requête corrélée doit être enveloppée dans une fonction d'agrégation — SQLite, dans la liste SELECT d'une requête GROUP BY, n'évalue
+    // la sous-requête corrélée nue que sur une ligne quelconque du groupe, les tokens ne comptaient donc qu'un événement arbitraire par groupe (rapport J4 176 fois trop petit).
+    // SUM((SELECT …)) évalue la sous-requête ligne par ligne puis somme, référentiel cohérent avec le JOIN json_each et auto-cohérent en trois dimensions.
     const tokensExpr = "COALESCE(SUM((SELECT SUM(CAST(json_extract(m.value, '$.value') AS INTEGER)) FROM json_each(e.meters_json) m WHERE json_extract(m.value, '$.key') LIKE '%tokens%')), 0)"
-    // #14：not_priced = cost 为 0 且（显式标注 或 零费率快照）——「未知」与「真零成本」读侧分开。
-    // 零费率快照判定同时覆盖两类事件：修复后事件带 nonbillable/cost_status 标注；存量事件
-    //（标注字段引入前入账）无标注，但 rate 快照恒记录实际采用的费率——list=0 且 cost=0 即
-    // 全零费率，语义与标注等价，读侧直接识别免一次性迁移。费率在配但量小取整为 0
-    //（rate.cost>0）不匹配，仍算 priced；rate 缺失（极端老数据）无法判定，保守计 priced。
+    // #14 : not_priced = coût 0 et (annotation explicite ou instantané à taux nul) — « inconnu » et « vrai coût nul » séparés à la lecture.
+    // Le jugement d'instantané à taux nul couvre deux classes : après correctif, l'événement porte l'annotation nonbillable/cost_status ; un événement existant
+    // (inscrit avant l'introduction des champs d'annotation) est sans annotation, mais l'instantané rate enregistre toujours le taux réellement employé — list=0 et cost=0 =
+    // taux entièrement nul, sémantiquement équivalent à l'annotation, reconnu directement à la lecture sans migration ponctuelle. Un taux configuré mais un montant arrondi à 0
+    //(rate.cost>0) ne correspond pas, reste priced ; rate absent (données très anciennes) indécidable, prudent : compté priced.
     const notPricedExpr = "COALESCE(SUM(CASE WHEN CAST(json_extract(e.pricing_json, '$.cost_cents') AS INTEGER) = 0 AND (json_extract(e.pricing_json, '$.rate.nonbillable') = 1 OR json_extract(e.pricing_json, '$.cost_status') = 'not_priced' OR (json_extract(e.pricing_json, '$.rate.list_cents_per_unit') = 0 AND json_extract(e.pricing_json, '$.rate.cost_cents_per_unit') = 0)) THEN 1 ELSE 0 END), 0)"
     const byResource = this.ctx.txnStore.sql<{ resource: string; events: number; tokens: number; cost_cents: number; charge_cents: number; not_priced_events: number }>(
       `SELECT e.resource AS resource, COUNT(*) AS events, ${tokensExpr} AS tokens,` +
@@ -687,16 +687,16 @@ export class UsageService extends Service {
       charge_cents: byResource.reduce((sum, row) => sum + row.charge_cents, 0),
       input_tokens: tokenSplit('input_tokens'),
       output_tokens: tokenSplit('output_tokens'),
-      // #14：成本覆盖率（priced = events − not_priced），门禁据此判断「成本是否可归集」
+      // #14 : couverture de coût (priced = events − not_priced), la barrière en juge si « le coût est imputable »
       not_priced_events: byResource.reduce((sum, row) => sum + row.not_priced_events, 0),
       byResource,
     }
   }
 
   /**
-   * 产出反馈聚合（IAW 交接 4-2：Agent 产出采纳率）。
-   * 数据源：👍/👎 反馈落账的零价快照 usage 事件（幂等键前缀 feedback:，D2 口径）；
-   * score 取幂等键末段（:up/:down），资源/主体取事件字段。adoptionRate = up/(up+down)，无反馈时为 null。
+   * Agrégat des retours de production (livraison IAW 4-2 : taux d'adoption des productions d'Agent).
+   * Source : événements usage en instantané à prix zéro des retours 👍/👎 inscrits (préfixe de clé idempotente feedback:, référentiel D2) ;
+   * score pris dans le dernier segment de la clé idempotente (:up/:down), ressource/sujet dans les champs d'événement. adoptionRate = up/(up+down), null sans retour.
    */
   feedbackStats(filter: { from?: string; to?: string; org?: string } = {}): {
     from?: string; to?: string
@@ -709,8 +709,8 @@ export class UsageService extends Service {
     if (filter.from) { conditions.push('occurred_at >= ?'); params.push(filter.from) }
     if (filter.to) { conditions.push('occurred_at < ?'); params.push(filter.to) }
     if (filter.org) { conditions.push('org = ?'); params.push(filter.org) }
-    // 评分来源（组4：幂等键去 score 段后）——新格式评分随事件内容（meter unit=up/down）；
-    // 存量行键尾仍带 score 段，按键尾回退解析（两代格式并存期间聚合口径不变）
+    // Source du score (groupe 4 : clé idempotente sans segment score) — nouveau format : score avec le contenu d'événement (meter unit=up/down) ;
+    // les lignes existantes gardent le segment score en queue de clé, analyse de repli sur la queue (référentiel d'agrégation inchangé pendant la coexistence des deux générations)
     const rows = this.ctx.txnStore.sql<{ resource: string; subject: string; org: string; day: string; idempotency_key: string; meters_json: string }>(
       `SELECT resource, subject, org, substr(occurred_at, 1, 10) AS day, idempotency_key, meters_json FROM usage_events WHERE ${conditions.join(' AND ')}`,
       params,
@@ -719,7 +719,7 @@ export class UsageService extends Service {
       try {
         const unit = JSON.parse(row.meters_json)?.[0]?.unit
         if (unit === 'up' || unit === 'down') score = unit
-      } catch { /* 内容损坏回落键尾解析 */ }
+      } catch { /* contenu corrompu : repli sur l'analyse de la fin de clé */ }
       if (score !== 'up' && score !== 'down') score = row.idempotency_key.slice(row.idempotency_key.lastIndexOf(':') + 1)
       return { ...row, score }
     })
@@ -754,16 +754,16 @@ export class UsageService extends Service {
   }
 
   /**
-   * J4 月度用量报表聚合（M0-3：用量透明计量报表；契约口径见 docs/contract-j4-usage-report.md）。
-   * tokens 三维聚合：部门（org 归口字段）/ Agent（subject=agent:*）/ Skill（resource=skill:*），
-   * 附模型维度（byModel，additive）与全口径 totals；tokens 取计量键名含 "tokens" 的米值求和
-   * （input_tokens/output_tokens/tokens 同口径累加）。nonbillable_events 为零价快照事件数（D2）。
+   * Agrégat du rapport mensuel d'usage J4 (M0-3 : rapport de metering transparent de l'usage ; référentiel du contrat voir docs/contract-j4-usage-report.md).
+   * Agrégat tridimensionnel de tokens : département (champ d'imputation org) / Agent (subject=agent:*) / Skill (resource=skill:*),
+   * avec dimension modèle (byModel, additive) et totaux toutes dimensions ; tokens = somme des mètres dont le nom de clé contient "tokens"
+   * (input_tokens/output_tokens/tokens cumulés au même référentiel). nonbillable_events = nombre d'événements en instantané à prix zéro (D2).
    */
   monthlyReport(month?: string): MonthlyUsageReport {
     const period = month ?? new Date().toISOString().slice(0, 7)
     if (!/^\d{4}-\d{2}$/.test(period)) throw new Error(t('报表月份格式应为 YYYY-MM'))
     const [from, to] = periodBoundsIso(period)
-    // QA B-01：同 summary——子查询必须包进 SUM()，否则 GROUP BY 下每组只统计任意一行
+    // QA B-01 : comme summary — la sous-requête doit être enveloppée dans SUM(), sinon sous GROUP BY chaque groupe ne compte qu'une ligne arbitraire
     const tokensExpr = "COALESCE(SUM((SELECT SUM(CAST(json_extract(m.value, '$.value') AS INTEGER)) FROM json_each(e.meters_json) m WHERE json_extract(m.value, '$.key') LIKE '%tokens%')), 0)"
     const select = (dimension: string, extraWhere: string) =>
       this.ctx.txnStore.sql<ReportRow>(
@@ -795,12 +795,12 @@ export class UsageService extends Service {
     }
   }
 
-  // -- FinOps 成本穿透与空转检测（M2） ---------------------------------------
+  // -- Perçage des coûts FinOps et détection de marche au vide (M2) ---------------------------------------
 
   /**
-   * FinOps 成本穿透（CFO 视图 v1）：月度窗口内 org×model 交叉透视 + 上月环比 + Top 消耗主体。
-   * 金额口径与 J4 一致：cost_cents 内部采购成本参考（charge_cents 零价快照恒 0，不参与穿透）。
-   * matrix 取 Top 8 部门 × Top 8 模型（按成本降序），其余并入「其他」，防小样本淹没主结论。
+   * Perçage des coûts FinOps (vue CFO v1) : tableau croisé org×model sur fenêtre mensuelle + variation par rapport au mois précédent + Top sujets consommateurs.
+   * Référentiel des montants identique à J4 : cost_cents référence de coût d'achat interne (charge_cents instantané à prix zéro constant 0, hors perçage).
+   * matrix prend les Top 8 départements × Top 8 modèles (par coût décroissant), le reste fondu dans « autres », contre la noyade de la conclusion principale par les petits échantillons.
    */
   costPenetration(month?: string): FinOpsCostPenetration {
     const period = month ?? new Date().toISOString().slice(0, 7)
@@ -828,7 +828,7 @@ export class UsageService extends Service {
       `SELECT e.org AS org, ${costExpr} AS cost_cents FROM usage_events e WHERE e.occurred_at >= ? AND e.occurred_at < ? GROUP BY e.org`,
       [prevFrom, prevTo],
     ).map((row) => [row.org, Number(row.cost_cents)]))
-    // 每部门的 Top 模型（成本占比）——一次 SQL 按 org×model 聚合后内存取 Top3
+    // Top modèles par département (part de coût) — un SQL agrège org×model puis prend le Top3 en mémoire
     const orgModelRows = this.ctx.txnStore.sql<{ org: string; resource: string; cost_cents: number }>(
       `SELECT e.org AS org, e.resource AS resource, ${costExpr} AS cost_cents FROM usage_events e WHERE e.occurred_at >= ? AND e.occurred_at < ? AND e.resource LIKE 'model:%' GROUP BY e.org, e.resource`,
       [from, to],
@@ -875,7 +875,7 @@ export class UsageService extends Service {
       }
     })
 
-    // org×model 交叉矩阵（Top8×Top8，行列各带「其他」兜底项；总计恒 = 全口径成本）
+    // Matrice croisée org×model (Top8×Top8, lignes et colonnes avec chacune un repli « autres » ; le total vaut toujours le coût toutes dimensions)
     const topOrgs = byOrg.slice(0, 8).map((row) => row.dimension)
     const topModels = byModel.slice(0, 8).map((row) => row.dimension)
     const orgIndex = new Map(topOrgs.map((org, i) => [org, i]))
@@ -892,9 +892,9 @@ export class UsageService extends Service {
     }
     const totals = windowTotals(from, to)
     const prevTotals = windowTotals(prevFrom, prevTo)
-    // 「其他」行/列 = 该部门/模型在 model 域的全量 − Top8 直角和（注意行口径必须同为 model 域，
-    // 不能用 byOrg 全资源成本，否则矩阵混入非模型成本、总计失守）；角格保持第一步循环的原始累加
-    // （org 与 model 双双超出 Top8 的成本天然落在 cells[R][C]），矩阵总计恒等于全口径 model 成本
+    // Ligne/colonne « autres » = le plein du département/modèle dans le domaine model − la somme en angle droit du Top8 (attention : le référentiel de ligne doit aussi être le domaine model,
+    // pas le coût toutes ressources de byOrg, sinon la matrice mélange des coûts non-modèle et le total fausse) ; la cellule d'angle garde l'accumulation brute de la boucle de la première étape
+    // (le coût où org et model dépassent tous deux le Top8 tombe naturellement dans cells[R][C]), le total matrice vaut toujours le coût modèle toutes dimensions
     const orgModelTotal = new Map<string, number>()
     for (const row of orgModelRows) orgModelTotal.set(row.org, (orgModelTotal.get(row.org) ?? 0) + Number(row.cost_cents))
     for (let i = 0; i < R; i++) {
@@ -925,12 +925,12 @@ export class UsageService extends Service {
   }
 
   /**
-   * FinOps 空转检测 v1（近似口径）：「窗口内无后续动作调用的模型调用」。
-   * 规划口径（M2）：空转 = 无业务结果回传的调用，先以「无后续动作」近似——
-   *   模型调用发生后的 idleWindowMinutes 内，同一主体（subject）没有任何非模型资源动作
-   *  （skill:/mcp:/nas:/app:/connector:/kb: 等），且其 trace_id 未关联任何动作事件 → 计为疑似空转。
-   * 已知误报：纯对话（模型调用后直接答复用户、无工具调用）会计入——页面须标注「近似口径、需人工复核」，
-   * 精确口径等 M4 证据引擎的 task_success/task_fail 结果回传（零费率计量键）落地后替换。
+   * Détection FinOps de marche au vide v1 (référentiel approximatif) : « appel de modèle sans appel d'action ultérieur dans la fenêtre ».
+   * Référentiel planifié (M2) : marche au vide = appel sans retour de résultat métier, d'abord approximé par « sans action ultérieure » —
+   *   dans les idleWindowMinutes suivant l'appel de modèle, le même sujet (subject) n'a aucune action sur ressource non-modèle
+    * (skill:/mcp:/nas:/app:/connector:/kb:, etc.) et son trace_id n'est associé à aucun événement d'action → suspect de marche au vide.
+   * Faux positifs connus : la pure conversation (appel de modèle directement suivi d'une réponse à l'utilisateur, sans appel d'outil) compte — la page doit porter la mention « référentiel approximatif, revue humaine requise »,
+   * le référentiel exact attend l'atterrissage des retours de résultats task_success/task_fail du moteur de preuves M4 (clé de metering à taux nul) pour être remplacé.
    */
   idleAnalysis(filter: { from?: string; to?: string; month?: string; idleWindowMinutes?: number } = {}): FinOpsIdleAnalysis {
     let from = filter.from ?? ''
@@ -949,7 +949,7 @@ export class UsageService extends Service {
       `SELECT e.occurred_at, e.subject, e.org, e.resource, e.trace_id, e.meters_json, ${costExpr} AS cost_cents FROM usage_events e WHERE e.occurred_at >= ? AND e.occurred_at < ? AND e.resource LIKE 'model:%' ORDER BY e.subject, e.occurred_at`,
       [from, to],
     ).map((row) => ({ ...row, cost_cents: Number(row.cost_cents) }))
-    // 动作时间线（非模型事件）：按主体分组的升序时间戳 + trace 索引（trace 内有动作即视为有业务结果）
+    // Chronologie des actions (événements non-modèle) : horodatages croissants groupés par sujet + index de trace (une action dans la trace = réputé avoir un résultat métier)
     const actionRows = this.ctx.txnStore.sql<{ subject: string; occurred_at: string; trace_id: string }>(
       "SELECT e.subject, e.occurred_at, e.trace_id FROM usage_events e WHERE e.occurred_at >= ? AND e.occurred_at < ? AND e.resource NOT LIKE 'model:%' ORDER BY e.subject, e.occurred_at",
       [from, to],
@@ -989,7 +989,7 @@ export class UsageService extends Service {
 
       const at = new Date(row.occurred_at).getTime()
       const timeline = actionsBySubject.get(row.subject) ?? []
-      // 二分：主体在 [at, at+window] 内是否还有非模型动作（含边界：动作与调用同一时刻也算有后续）
+      // dichotomie : le sujet a-t-il encore une action non-modèle dans [at, at+window] (bordures comprises : une action au même instant que l'appel compte comme suite)
       let followUp = false
       let lo = 0
       let hi = timeline.length
@@ -1033,19 +1033,19 @@ export class UsageService extends Service {
     }
   }
 
-  // -- 价格簿 ---------------------------------------------------------------
+  // -- Tarif ---------------------------------------------------------------
   priceBook(): Collection<PriceBookEntry> {
     return this.ctx.opsStorage.collection<PriceBookEntry>('usage:priceBook')
   }
 
   upsertPrice(entry: Omit<PriceBookEntry, 'id' | 'createdAt' | 'updatedAt'>): PriceBookEntry {
-    // REL-11：写入口数值校验——此前 {"list_cents_per_unit":"abc"} 也能 200 入簿，计价产出 NaN 快照、
-    // 对账恒 mismatch 且每次发 critical 告警（存量脏数据永久投毒）。非法即抛错（guarded 统一映射 400）
+    // REL-11 : validation numérique de l'entrée d'écriture — auparavant {"list_cents_per_unit":"abc"} entrait au tarif en 200, la tarification produisait un instantané NaN,
+    // la réconciliation était constamment en mismatch avec une alerte critical à chaque fois (empoisonnement permanent par données sales existantes). Illégal = erreur levée (guarded mappe uniformément en 400)
     for (const [field, value, min] of [
       ['list_cents_per_unit', entry.list_cents_per_unit, 0],
       ['cost_cents_per_unit', entry.cost_cents_per_unit, 0],
       ['tax_rate', entry.tax_rate, 0],
-      ['units_per_step', entry.units_per_step, 1], // 计价除数：0 会产出 Infinity，负数会产出负金额
+      ['units_per_step', entry.units_per_step, 1], // diviseur de tarification : 0 produirait Infinity, un négatif un montant négatif
     ] as Array<[string, number, number]>) {
       if (!Number.isFinite(value) || value < min) {
         throw new Error(t('价格簿字段 {field} 必须为有限数值且 ≥{min}，收到：{value}', { field, min, value: String(value) }))
@@ -1057,8 +1057,8 @@ export class UsageService extends Service {
   }
 
   /**
-   * 价格簿只读查询（#14，供可信生产方在调用时点取费率组装组合计价行；未登记返回 undefined 不抛）。
-   * 匹配口径与 record() 内部 priceOf 一致：精确 → 前缀通配。
+   * Requête en lecture du tarif (#14, pour qu'un producteur de confiance prenne les taux à l'instant de l'appel et assemble des lignes de prix combiné ; non enregistré = undefined sans lever).
+   * Référentiel d'appariement identique au priceOf interne de record() : exact → joker de préfixe.
    */
   priceOfResource(resource: string): PriceBookEntry | undefined {
     try {
@@ -1079,42 +1079,42 @@ export class UsageService extends Service {
   }
 
   private ensureDefaultPriceBook(): void {
-    // 逐条幂等播种：存量部署升级时只补缺失的默认规则，不覆盖运营已改过的费率
+    // Semis idempotent entrée par entrée : à la montée de version d'un déploiement existant, ne comble que les règles par défaut manquantes, sans écraser les taux modifiés par l'exploitation
     const defaults: Array<Omit<PriceBookEntry, 'id' | 'createdAt' | 'updatedAt'>> = [
-      // M0-3（2026-09-09）：mcp:* 转为「零价快照 + 内部成本参考」——charge 恒 0（不对外结算），cost 保留采购成本口径
+      // M0-3 (2026-09-09) : mcp:* devient « instantané à prix zéro + référence de coût interne » — charge toujours 0 (pas de règlement externe), cost garde le référentiel du coût d'achat
       { pattern: 'mcp:*', meter_key: 'tokens', list_cents_per_unit: 0, cost_cents_per_unit: 15, units_per_step: 1000, tax_rate: 0.06, currency: 'CNY', rate_version: 'v2026.09-cost' },
       { pattern: 'platform:*', meter_key: 'calls', list_cents_per_unit: 0, cost_cents_per_unit: 0, units_per_step: 1, tax_rate: 0.06, currency: 'CNY', rate_version: 'v2026.08' },
-      // 观测补齐：skill/nas 先零费率采集（价格簿有规则即可入管道），是否计费由运营调价决定
+      // Complément d'observation : skill/nas d'abord à taux nul (une règle au tarif suffit pour entrer dans le pipeline), facturation éventuelle par retarification opérationnelle
       { pattern: 'skill:*', meter_key: 'calls', list_cents_per_unit: 0, cost_cents_per_unit: 0, units_per_step: 1, tax_rate: 0.06, currency: 'CNY', rate_version: 'v2026.08' },
       { pattern: 'nas:*', meter_key: 'calls', list_cents_per_unit: 0, cost_cents_per_unit: 0, units_per_step: 1, tax_rate: 0.06, currency: 'CNY', rate_version: 'v2026.08' },
-      // 连接器纳管（open-connector 融合）：同上零费率起步；record() 硬校验要求有规则方可入管道，
-      // 运营按需把特定 connector:<provider> 调整为非零费率（dev-plan-connector §2.6）
+      // Gestion des connecteurs (fusion open-connector) : même départ à taux nul ; la validation dure de record() exige une règle pour entrer dans le pipeline,
+      // l'exploitation ajuste au besoin un connector:<provider> particulier en taux non nul (dev-plan-connector §2.6)
       { pattern: 'connector:*', meter_key: 'calls', list_cents_per_unit: 0, cost_cents_per_unit: 0, units_per_step: 1, tax_rate: 0.06, currency: 'CNY', rate_version: 'v2026.08' },
-      // D1（WP-03）：应用与知识包观测入管道——零费率起步，事件自动按非计费零价快照入账（D2）
+      // D1 (WP-03) : applications et paquets de savoir entrent au pipeline en observation — départ à taux nul, l'événement automatiquement en instantané non facturable à prix zéro (D2)
       { pattern: 'app:*', meter_key: 'calls', list_cents_per_unit: 0, cost_cents_per_unit: 0, units_per_step: 1, tax_rate: 0.06, currency: 'CNY', rate_version: 'v2026.09' },
       { pattern: 'kb:*', meter_key: 'calls', list_cents_per_unit: 0, cost_cents_per_unit: 0, units_per_step: 1, tax_rate: 0.06, currency: 'CNY', rate_version: 'v2026.09' },
-      // WP-07（feedback 回传）：宿主数字员工作为可观测资源——零费率起步，运营可调价
+      // WP-07 (retour feedback) : l'employé numérique hôte comme ressource observable — départ à taux nul, ajustable par l'exploitation
       { pattern: 'agent:*', meter_key: 'calls', list_cents_per_unit: 0, cost_cents_per_unit: 0, units_per_step: 1, tax_rate: 0.06, currency: 'CNY', rate_version: 'v2026.09' },
-      // 部门面板（review-dsh-agent-panel-v2 D1 裁决）：计量键格式 panel:<dept>.<行业code>（如 panel:mfg.qb01），
-      // 双冒号/@ 形态过不了 record() 的 resource 硬校验；零费率起步，运营按行业包调价
+      // Panneau départemental (arbitrage D1 de review-dsh-agent-panel-v2) : format de clé de metering panel:<dept>.<code secteur> (ex. panel:mfg.qb01),
+      // les formes double deux-points/@ ne passent pas la validation dure resource de record() ; départ à taux nul, ajustable par l'exploitation par paquet de secteur
       { pattern: 'panel:*', meter_key: 'calls', list_cents_per_unit: 0, cost_cents_per_unit: 0, units_per_step: 1, tax_rate: 0.06, currency: 'CNY', rate_version: 'v2026.09' },
     ]
     for (const entry of defaults) {
       if (!this.priceBook().findOne((item) => item.pattern === entry.pattern)) this.upsertPrice(entry)
     }
-    // 存量迁移（M0-3）：mcp:* 若仍是旧的转售默认价（list 30 分/千 tokens，未被运营改过），
-    // 归零为「零价快照 + 成本参考」口径；运营已主动调价的条目不动。
+    // Migration des préexistants (M0-3) : si mcp:* porte encore l'ancien prix de revente par défaut (list 30 centimes/1k tokens, non modifié par l'exploitation),
+    // remis à zéro vers le référentiel « instantané à prix zéro + référence de coût » ; les entrées activement retarifiées par l'exploitation restent intactes.
     const legacyMcp = this.priceBook().findOne((item) => item.pattern === 'mcp:*')
     if (legacyMcp && legacyMcp.list_cents_per_unit === 30 && legacyMcp.cost_cents_per_unit === 15 && legacyMcp.rate_version === 'v2026.08') {
       this.priceBook().update(legacyMcp.id, { list_cents_per_unit: 0, rate_version: 'v2026.09-cost' })
     }
   }
 
-  // -- 对账（三方口径比对） -----------------------------------------------
+  // -- Réconciliation (comparaison des référentiels des trois parties) -----------------------------------------------
 
   /**
-   * 对账：usage 口径（事件流水）vs 已登记消费方投影口径，全量比对。
-   * 消费方通过 consume() 挂载时同步登记投影集合 usage:projection:<consumerId>。
+   * Réconciliation : référentiel usage (flux d'événements) vs référentiel projeté des consommateurs enregistrés, comparaison intégrale.
+   * Le consommateur enregistre à l'accrochage via consume() sa collection projetée usage:projection:<consumerId>.
    */
   reconcile(windowFromIso?: string): {
     usage: { count: number; charge_cents: number }
@@ -1127,7 +1127,7 @@ export class UsageService extends Service {
       const rows = this.ctx.opsStorage.collection<ProjectionRow>(`usage:projection:${consumerId}`).all()
         .filter((row) => (windowFromIso ? row.window >= windowFromIso.slice(0, 10) : true))
       const count = rows.reduce((sum, row) => sum + row.count, 0)
-      // REL-11 读侧加固：投影集合中的存量脏行（非有限 charge_cents）按 0 计入对账，不再恒 mismatch 反复告警
+      // Durcissement lecture REL-11 : les lignes sales préexistantes de la collection projetée (charge_cents non fini) comptées à 0 dans la réconciliation, fini le mismatch permanent et l'alerte en boucle
       const charge = rows.reduce((sum, row) => sum + (Number.isFinite(row.charge_cents) ? row.charge_cents
         : this.warnDirtyData(`projection-row:${consumerId}:${row.id}`, t('usage 投影 {consumer} 窗口 {window} 的 charge_cents 非有限（存量脏数据），对账按 0 计入（REL-11）', { consumer: consumerId, window: row.window }))), 0)
       projections.push({
@@ -1147,11 +1147,11 @@ export class UsageService extends Service {
     return { usage: { count: usageTotals.count, charge_cents: usageTotals.charge_cents }, projections, mismatch }
   }
 
-  /** 消费方投影累加（供 consume() 回调内部调用）。 */
+  /** Accumulation de la projection consommateur (appelé à l'intérieur du rappel consume()). */
   project(consumerId: string, event: UsageEvent): void {
     const collection = this.ctx.opsStorage.collection<ProjectionRow>(`usage:projection:${consumerId}`)
     const day = event.occurred_at.slice(0, 10)
-    // REL-11 读侧加固：存量脏事件的 charge_cents 非有限时按 0 投影（防对账口径持续失真），按事件去重告警
+    // Durcissement lecture REL-11 : un événement sale préexistant avec charge_cents non fini est projeté à 0 (contre la distorsion continue du référentiel de réconciliation), alerte dédupliquée par événement
     const rawCharge = event.pricing.charge_cents
     const charge = Number.isFinite(rawCharge) ? rawCharge
       : this.warnDirtyData(`projection:${event.event_id}`, t('usage 事件 {id} 的 pricing.charge_cents={value} 非有限（存量脏数据），本次投影按 0 计入（REL-11）', { id: event.event_id, value: String(rawCharge) }))
@@ -1163,7 +1163,7 @@ export class UsageService extends Service {
     }
   }
 
-  // -- 运行时对账（M5：声明 vs 行为） --------------------------------------
+  // -- Réconciliation à l'exécution (M5 : déclaration vs comportement) --------------------------------------
 
   capabilityGrants(): Collection<CapabilityGrantRecord> {
     return this.ctx.opsStorage.collection<CapabilityGrantRecord>('usage:capabilityGrants')
@@ -1175,7 +1175,7 @@ export class UsageService extends Service {
     return this.capabilityGrants().insert({ id: newId('cap'), principal, capabilities, source })
   }
 
-  /** 能力漂移检测：窗口内实际消耗的资源 vs 声明授权；未声明的实际消耗即告警。 */
+  /** Détection de dérive de capacités : ressources réellement consommées dans la fenêtre vs autorisations déclarées ; toute consommation réelle non déclarée déclenche l'alerte. */
   capabilityDrift(sinceIso?: string): { drift: Array<{ principal: string; consumed: string[]; granted: string[]; ungranted: string[] }> } {
     const { items } = this.query({ from: sinceIso, limit: 1000 })
     const consumedByPrincipal = new Map<string, Set<string>>()
@@ -1207,19 +1207,19 @@ export class UsageService extends Service {
     return this.ctx.opsStorage.collection<DeadLetterRecord>('usage:deadLetters')
   }
 
-  // -- 资产使用凭证（2026-10-31）---------------------------------------------
-  // 与 usage_events 计费管道的关系见 asset-reports.ts 头注：凭证是使用事实（skill 本地执行等
-  // 平台无感知的使用由 Agent 主动提报），不进价格簿/成本口径；授权闭环校验在 prepareAssetUsageReport
-  // （REST 路由与 MCP 工具共用编排，本服务只管存储/幂等/查询/聚合）。
+  // -- Justificatifs d'utilisation d'actifs (2026-10-31) ---------------------------------------------
+  // Le rapport avec le pipeline de facturation usage_events est en tête d'asset-reports.ts : le justificatif est un fait d'utilisation (les usages
+  // invisibles de la plateforme comme l'exécution locale d'un skill sont rapportés activement par l'Agent), hors tarif/référentiel de coût ; la validation de la boucle d'autorisation est dans prepareAssetUsageReport
+  // (orchestration partagée entre routes REST et outils MCP, ce service ne gère que stockage/idempotence/requête/agrégation).
 
-  /** 凭证流水集合（幂等键引擎级唯一，防并发重复入账）。 */
+  /** Collection des justificatifs (clé idempotente unique au niveau moteur, empêche la comptabilisation dupliquée en concurrence). */
   assetReports(): Collection<AssetUsageReportRecord> {
     const collection = this.ctx.opsStorage.collection<AssetUsageReportRecord>('usage:assetReports')
     collection.uniqueOn('idempotencyKey', (record) => record.idempotencyKey)
     return collection
   }
 
-  /** 落库（幂等）：同键同内容返回原凭证 deduped=true；同键异容 409；仅首次落库发总线事件（审计逐次留痕不因重放膨胀）。 */
+  /** Écriture en base (idempotente) : même clé et même contenu → renvoie le justificatif d'origine deduped=true ; même clé et contenu différent → 409 ; l'événement de bus n'est émis qu'à la première écriture (la trace d'audit, elle, est consignée à chaque fois sans gonfler au rejeu). */
   submitAssetUsageReport(prepared: Omit<AssetUsageReportRecord, 'id' | 'createdAt' | 'updatedAt'>): { report: AssetUsageReportRecord; deduped: boolean } {
     const existing = this.assetReports().findOne((item) => item.idempotencyKey === prepared.idempotencyKey)
     if (existing) {
@@ -1241,7 +1241,7 @@ export class UsageService extends Service {
     return { report, deduped: false }
   }
 
-  /** 凭证查询（经营对账/审计出口）：assetType/assetKey/agentId/from/to 过滤，occurredAt 倒序。 */
+  /** Requête de justificatifs (sortie de réconciliation d'exploitation/audit) : filtres assetType/assetKey/agentId/from/to, tri inverse sur occurredAt. */
   assetUsageReports(filters: { assetType?: string; assetKey?: string; agentId?: string; from?: string; to?: string; limit?: number } = {}): AssetUsageReportRecord[] {
     let rows = this.assetReports().all()
     if (filters.assetType) rows = rows.filter((row) => row.assetType === filters.assetType)
@@ -1254,7 +1254,7 @@ export class UsageService extends Service {
     return rows.slice(0, limit)
   }
 
-  /** 按 assetKey 聚合凭证数（台账 usageReports30d 口径：occurredAt ≥ fromISO）。 */
+  /** Agrégation du nombre de justificatifs par assetKey (référentiel usageReports30d du registre : occurredAt ≥ fromISO). */
   assetUsageReportCounts(fromISO: string): Map<string, number> {
     const counts = new Map<string, number>()
     for (const row of this.assetReports().all()) {
@@ -1264,11 +1264,11 @@ export class UsageService extends Service {
     return counts
   }
 
-  // -- 内部 -----------------------------------------------------------------
+  // -- Interne -----------------------------------------------------------------
 
   /**
-   * REL-11 读侧加固：脏数据（存量非有限费率/金额）warning 告警，恒返回 0 供计价/投影回落。
-   * 同一 key（进程生命周期内）只告一次，防止每个事件重复触发告警风暴。
+   * REL-11 durcissement côté lecture : alerte warning sur données sales (taux/montants historiques non finis), renvoie toujours 0 en repli de tarification/projection.
+   * Une même clé (durée de vie du processus) n'alerte qu'une fois, contre la tempête d'alertes déclenchée par chaque événement.
    */
   private warnDirtyData(key: string, message: string): 0 {
     if (!this.warnedDirtyKeys.has(key)) {
@@ -1295,7 +1295,7 @@ export class UsageService extends Service {
     }
   }
 
-  /** 租户解析：org → tenant（多租户最小集，v1.2 第 2 步）。 */
+  /** Résolution du tenant : org → tenant (jeu minimal multi-tenant, étape 2 de la v1.2). */
   private resolveTenant(orgId: string): string {
     if (!orgId || orgId === '') return DEFAULT_TENANT
     return this.ctx.iam.orgs().get(orgId)?.tenantId ?? DEFAULT_TENANT
@@ -1313,7 +1313,7 @@ interface ProjectionRow extends RecordBase {
   charge_cents: number
 }
 
-/** J4 月度报表行（维度值 + 事件数 + tokens 聚合 + 金额口径 + 零价快照事件数）。 */
+/** Ligne du rapport mensuel J4 (valeur de dimension + nombre d'événements + agrégation tokens + référentiel monétaire + nombre d'événements à instantané à prix zéro). */
 export interface MonthlyUsageReportRow {
   dimension: string
   events: number
@@ -1328,29 +1328,29 @@ export interface MonthlyUsageReport {
   from: string
   to: string
   totals: MonthlyUsageReportRow
-  /** 部门维度（org 归口字段）。 */
+  /** Dimension département (champ de rattachement org). */
   byOrg: MonthlyUsageReportRow[]
-  /** Agent 维度（subject=agent:*）。 */
+  /** Dimension Agent (subject=agent:*). */
   byAgent: MonthlyUsageReportRow[]
-  /** Skill 维度（resource=skill:*）。 */
+  /** Dimension Skill (resource=skill:*). */
   bySkill: MonthlyUsageReportRow[]
-  /** 模型维度（resource=model:*，additive 便于成本穿透）。 */
+  /** Dimension modèle (resource=model:*, additive pour faciliter la pénétration des coûts). */
   byModel: MonthlyUsageReportRow[]
 }
 
-/** 成本/用量摘要（IAW 交接 4-1）：窗口聚合 + tokens 三分 + 按资源分项。 */
+/** Résumé coûts/consommation (passage de relais IAW 4-1) : agrégation fenêtrée + tripartition des tokens + ventilation par ressource. */
 export interface UsageSummary {
   from: string
   to: string
   events: number
-  /** 内部成本参考（分）；charge_cents 为零价快照兼容字段（恒 0）。 */
+  /** Référence de coût interne (cents) ; charge_cents est un champ de compatibilité d'instantané à prix zéro (toujours 0). */
   cost_cents: number
   charge_cents: number
   input_tokens: number
   output_tokens: number
   /**
-   * 未定价事件数（#14 additive）：cost_cents=0 且由「费率未配置/全零费率」导致——
-   * 覆盖率口径：priced_events = events − not_priced_events；0 成本 ≠ 无消耗。
+   * Nombre d'événements non tarifés (#14 additive) : cost_cents=0 et dû à « taux non configuré/taux entièrement nul » —
+   * référentiel de couverture : priced_events = events − not_priced_events ; coût 0 ≠ sans consommation.
    */
   not_priced_events: number
   byResource: Array<{ resource: string; events: number; tokens: number; cost_cents: number; charge_cents: number; not_priced_events: number }>
@@ -1365,20 +1365,20 @@ interface ReportRow {
   nonbillable_events: number
 }
 
-/** FinOps 成本穿透行（部门/模型维度 + 上月环比 + 部门行的 Top 模型拆分）。 */
+/** Ligne de pénétration des coûts FinOps (dimensions département/modèle + évolution vs mois précédent + éclaté Top modèles des lignes département). */
 export interface FinOpsDimRow {
   dimension: string
   events: number
   tokens: number
   cost_cents: number
   prev_cost_cents: number
-  /** 环比百分比：(本期−上期)/上期×100，保留 1 位小数；上期为 0 且本期非 0 时为 null（无可比基数）。 */
+  /** Pourcentage d'évolution : (période−précédente)/précédente×100, 1 décimale ; null si la période précédente vaut 0 et l'actuelle non (pas de base comparable). */
   delta_pct: number | null
-  /** 部门行的 Top3 模型拆分（模型行无此字段）。 */
+  /** Éclaté Top3 modèles des lignes département (absent des lignes modèle). */
   topModels?: Array<{ model: string; cost_cents: number; share: number }>
 }
 
-/** FinOps 成本穿透（CFO 视图 v1）聚合结果。 */
+/** Résultat agrégé de la pénétration des coûts FinOps (vue CFO v1). */
 export interface FinOpsCostPenetration {
   month: string
   from: string
@@ -1388,42 +1388,42 @@ export interface FinOpsCostPenetration {
   totals: { events: number; cost_cents: number; tokens: number; prev_cost_cents: number; delta_pct: number | null }
   byOrg: FinOpsDimRow[]
   byModel: FinOpsDimRow[]
-  /** org×model 成本交叉矩阵（Top8×Top8 + 「其他」行列；cells[org][model]，单位分）。 */
+  /** Matrice croisée des coûts org×modèle (Top8×Top8 + ligne/colonne « autres » ; cells[org][model], en cents). */
   matrix: { orgs: string[]; models: string[]; cells: number[][] }
   topSubjects: Array<{ subject: string; org: string; events: number; cost_cents: number }>
 }
 
-/** FinOps 空转检测 v1（近似口径：「无后续动作的模型调用」）聚合结果。 */
+/** Résultat agrégé de la détection de ralenti FinOps v1 (référentiel approximatif : « appels de modèle sans action ultérieure »). */
 export interface FinOpsIdleAnalysis {
   month?: string
   from: string
   to: string
   idleWindowMinutes: number
-  /** 窗口内模型调用全口径（分母）。 */
+  /** Référentiel complet des appels de modèle dans la fenêtre (dénominateur). */
   totals: { events: number; cost_cents: number; tokens: number }
-  /** 疑似空转汇总（share_pct = 空转成本占模型调用总成本比例）。 */
+  /** Synthèse du ralenti suspecté (share_pct = part du coût ralenti dans le coût total des appels de modèle). */
   idle: { events: number; cost_cents: number; tokens: number; share_pct: number }
   byModel: Array<{ model: string; events: number; cost_cents: number; idle_events: number; idle_cost_cents: number }>
   byOrg: Array<{ org: string; events: number; cost_cents: number; idle_events: number; idle_cost_cents: number }>
-  /** 最近空转样本（≤20 条，供人工复核近似口径误报）。 */
+  /** Échantillons ralentis récents (≤20, pour revue manuelle des faux positifs du référentiel approximatif). */
   samples: Array<{ occurred_at: string; subject: string; org: string; resource: string; cost_cents: number; tokens: number }>
 }
 
-/** 月度报表期间边界：[当月 1 日 00:00, 次月 1 日 00:00)。 */
+/** Bornes de la période du rapport mensuel : [1er du mois courant 00:00, 1er du mois suivant 00:00). */
 function periodBoundsIso(period: string): [string, string] {
   const [year, month] = period.split('-').map(Number)
   const next = month === 12 ? `${year + 1}-01` : `${year}-${String(month + 1).padStart(2, '0')}`
   return [`${period}-01T00:00:00`, `${next}-01T00:00:00`]
 }
 
-/** 上一月期间边界（FinOps 环比分母窗口）。 */
+/** Bornes de la période du mois précédent (fenêtre dénominateur de l'évolution FinOps). */
 function prevMonthBoundsIso(period: string): [string, string] {
   const [year, month] = period.split('-').map(Number)
   const prev = month === 1 ? `${year - 1}-12` : `${year}-${String(month - 1).padStart(2, '0')}`
   return periodBoundsIso(prev)
 }
 
-/** 当前月与上一月的边界（month 未显式指定时的环比口径）。 */
+/** Bornes du mois courant et du mois précédent (référentiel d'évolution quand month n'est pas explicitement fourni). */
 function currentPrevMonthBoundsIso(): [string, string] {
   return prevMonthBoundsIso(new Date().toISOString().slice(0, 7))
 }
@@ -1441,9 +1441,9 @@ interface UsageRow {
   meters_json: string
   pricing_json: string
   trace_id: string
-  /** D3（组7 additive）：存量库迁移前该列不存在，读侧按 undefined 容忍。 */
+  /** D3 (groupe 7, additive) : colonne inexistante avant la migration des bases existantes, la lecture tolère undefined. */
   invocation_id?: string
-  /** C4（additive）：存量库迁移前该列不存在，读侧按 undefined 容忍。 */
+  /** C4 (additive) : colonne inexistante avant la migration des bases existantes, la lecture tolère undefined. */
   context_id?: string
 }
 
@@ -1473,9 +1473,9 @@ function rowToEvent(row: UsageRow): UsageEvent {
     event_id: row.id,
     idempotency_key: row.idempotency_key,
     ...(row.trace_id !== '' ? { trace_id: row.trace_id } : {}),
-    // D3 读路径同步：存量行（迁移前列缺省 ''）不下发该键，新行原样带回（重放/消费方不丢关联）
+    // D3 synchronisation du chemin de lecture : les lignes historiques (colonne absente avant migration, défaut '') n'émettent pas la clé, les nouvelles lignes la ramètent telle quelle (rejeu/consommateurs ne perdent pas l'association)
     ...(row.invocation_id !== undefined && row.invocation_id !== '' ? { invocationId: row.invocation_id } : {}),
-    // C4 读路径同步：存量行（迁移前列缺省 ''）不下发该键，新行原样带回
+    // C4 synchronisation du chemin de lecture : les lignes historiques (colonne absente avant migration, défaut '') n'émettent pas la clé, les nouvelles lignes la ramètent telle quelle
     ...(row.context_id !== undefined && row.context_id !== '' ? { contextId: row.context_id } : {}),
     occurred_at: row.occurred_at,
     tenant_id: row.tenant_id,
@@ -1489,7 +1489,7 @@ function rowToEvent(row: UsageRow): UsageEvent {
 }
 
 // ---------------------------------------------------------------------------
-// 插件
+// Extension
 // ---------------------------------------------------------------------------
 
 declare module '@deepseek-ai/cordis' {

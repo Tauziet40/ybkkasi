@@ -1,4 +1,4 @@
-/** 回归：心跳定时器生命周期与只读员工的唤醒准入。 */
+/** Régression : cycle de vie du minuteur de battement et admission de réveil d'un employé en lecture seule. */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { Context } from '@deepseek-ai/cordis'

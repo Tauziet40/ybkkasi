@@ -1,10 +1,10 @@
 /**
- * AI 应用资源适配器（§4.6：有统一登录，不代表有机器可调用 API）。
+ * Adaptateur de ressources d'applications IA (§4.6 : disposer de la connexion unifiée ne signifie pas disposer d'une API appelable par machine).
  *
- * 仅登记 entryUrl 的应用不能被当作函数调用；具备机器 API 的应用应经
- * MCP／Connector／专用适配器显式接入。一期诚实未支持——probeGrant/invoke
- * 一律返回 ok:false，不以空实现冒充成功，也不让运行时提交任意 URL
- * 由平台携带内部凭证代为请求。
+ * Une application qui ne fait qu'enregistrer une entryUrl ne peut être appelée comme une fonction ; les applications dotées d'une API machine doivent être
+ * raccordées explicitement via MCP／Connector／un adaptateur dédié. Non pris en charge honnêtement en phase 1 — probeGrant/invoke
+ * renvoient toujours ok:false, sans faire passer une implémentation vide pour un succès, et sans laisser le runtime soumettre une URL arbitraire
+ * que la plateforme solliciterait à sa place avec des identifiants internes.
  */
 import type {
   AdapterInvokeInput,

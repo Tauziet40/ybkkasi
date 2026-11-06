@@ -1,5 +1,5 @@
 /**
- * usage 插件对模型暴露的工具。
+ * Outils exposés au modèle par l'extension usage.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type CallerInfo } from '../../platform-core/src/index.ts'
@@ -8,9 +8,9 @@ import { prepareAssetUsageReport, type AssetUsageCheckCtx, type AssetUsageReport
 export const name = 'usage-tools'
 export const inject = ['tools', 'usage']
 
-/** asset_usage_report 的授权编排需要 skillHub/mcpRegistry/resourceCore——三者均注入 usage
- *  （装配晚于本插件），静态 inject 会成环且被 boot-order lint 拦截；按 exec-hub softRead 先例
- *  经 ctx.reflect.get 运行时软读（工具调用发生在启动完成后，服务必然已装配；未装配则拒绝提报）。 */
+/** L'orchestration d'autorisation d'asset_usage_report exige skillHub/mcpRegistry/resourceCore — tous trois injectent usage
+ *  (assemblés après cette extension) : un inject statique ferait une boucle et serait intercepté par le lint d'ordre de boot ; sur le précédent softRead d'exec-hub,
+ *  lecture souple à l'exécution via ctx.reflect.get (l'appel d'outil a lieu après le démarrage, les services sont nécessairement assemblés ; sinon la soumission est refusée). */
 function softRead(ctx: Context, key: string): unknown {
   try {
     const reflect = (ctx as unknown as { reflect?: { get?: (k: string, optional?: boolean) => unknown } }).reflect
@@ -27,8 +27,8 @@ export function apply(ctx: Context) {
   t.register(defineTool({
     name: 'usage_query',
     description: '查询资源消耗计量事件（按主体/资源/时间窗过滤，返回事件数与应收金额）。',
-    // REL-07：此前未声明权限点（缺省仅登录），audit 等无 usage.read 主体可经工具桥读到全平台计量——
-    // 与 REST 面 GET /api/usage/totals（usage.read）口径对齐
+    // REL-07 : auparavant sans point de permission déclaré (simple connexion par défaut), des sujets sans usage.read comme audit pouvaient lire par le pont d'outils le metering de toute la plateforme —
+    // alignement sur le référentiel de la face REST GET /api/usage/totals (usage.read)
     permission: 'usage.read',
     parameters: {
       principal: { type: 'string', description: '计费责任主体过滤（org:<id> / plugin:<id>）' },
@@ -80,9 +80,9 @@ export function apply(ctx: Context) {
     },
   }))
 
-  // 资产使用凭证（2026-10-31）：Agent 使用 skill/MCP 后主动提报使用事实（台账 usageReports30d /
-  // 审计逐次留痕）。授权闭环：机器主体必须已获取该资产（skill install/download；mcp 权限组），
-  // 校验编排与 REST 面共用 prepareAssetUsageReport（见 asset-reports.ts）。
+  // Justificatif d'utilisation d'actif (2026-10-31) : l'Agent rapporte activement le fait d'utilisation après usage d'un skill/MCP (registre usageReports30d /
+  // trace d'audit à chaque fois). Boucle d'autorisation : le principal machine doit avoir déjà acquis l'actif (skill install/download ; groupe de permissions mcp),
+  // l'orchestration de validation est partagée avec la face REST via prepareAssetUsageReport (voir asset-reports.ts).
   t.register(defineTool({
     name: 'asset_usage_report',
     description: '提报资产使用凭证（skill/MCP 使用事实）：每次使用平台资产后上报，形成资产经营侧的使用凭证。要求本 Agent 已获取该资产（skill 已 install/download；MCP 已权限组绑定），未获取先提报会被拒绝。幂等键约定 <agent标识>:<业务单号>，同键同内容重放安全。',
@@ -102,7 +102,7 @@ export function apply(ctx: Context) {
     },
     output: { type: 'object', additionalProperties: true },
     async execute(args, exec) {
-      // 身份 fail-closed：无调用者上下文（非桥接宿主）不降级、直接拒绝
+      // Identité fail-closed : sans contexte d'appelant (hôte non ponté), pas de dégradation, refus direct
       if (!exec.principal) throw new Error('调用者身份缺失，无法提报使用凭证（本工具必须在携带调用者身份的宿主中使用）')
       const checkCtx = {
         skillHub: softRead(ctx, 'skillHub'),

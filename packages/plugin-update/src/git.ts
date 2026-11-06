@@ -1,7 +1,7 @@
 /**
- * 本地 git 事实读取与安全执行（platform-update 专用，不做通用 git 封装）。
- * 只读 .git 文件而非 spawn `git` —— 启动期的 HEAD 定位必须零子进程、零依赖，
- * 且在 git 不在 PATH 的环境（部分容器/最小安装）下依然可用。
+ * Lecture des faits git locaux et exécution sûre (dédié à platform-update, pas d'enveloppe git générique).
+ * Lit les fichiers .git plutôt que de spawner `git` — le repérage de HEAD au démarrage doit être zéro sous-processus, zéro dépendance,
+ * et rester utilisable dans les environnements où git n'est pas dans le PATH (certains conteneurs/installations minimales).
  */
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
@@ -13,18 +13,18 @@ const execFileAsync = promisify(execFile)
 export interface LocalGitInfo {
   sha: string
   branch: string
-  /** detached HEAD 或无法识别分支名时为 false。 */
+  /** false en detached HEAD ou nom de branche méconnaissable. */
   onBranch: boolean
 }
 
-/** 读取工作树当前 HEAD（sha + 分支）。读不到（bundle 安装/浅克隆异常）返回 null。 */
+/** Lit le HEAD courant de l'arbre de travail (sha + branche). Illisible (installation bundle/clone superficiel anormal) = null. */
 export function readGitHead(rootDir: string): LocalGitInfo | null {
   const dotGit = join(rootDir, '.git')
   let gitDir = dotGit
   try {
     const stat = statSync(dotGit)
     if (stat.isFile()) {
-      // worktree/submodule：.git 是指回主 gitdir 的指针文件
+      // worktree/submodule : .git est un fichier pointeur vers le gitdir principal
       const target = readFileSync(dotGit, 'utf8').trim().match(/^gitdir:\s*(\S+)/)?.[1]
       if (!target) return null
       gitDir = isAbsolute(target) ? target : join(rootDir, target)
@@ -46,7 +46,7 @@ export function readGitHead(rootDir: string): LocalGitInfo | null {
       const sha = readFileSync(refPath, 'utf8').trim()
       if (/^[0-9a-f]{40}$/.test(sha)) return { sha, branch, onBranch: true }
     }
-    // 分支引用未展开时兜底 packed-refs
+    // repli packed-refs quand la référence de branche n'est pas expansée
     if (existsSync(join(gitDir, 'packed-refs'))) {
       const packed = readFileSync(join(gitDir, 'packed-refs'), 'utf8')
       const line = packed.split('\n').find((row) => row.endsWith(` refs/heads/${branch}`))
@@ -59,13 +59,13 @@ export function readGitHead(rootDir: string): LocalGitInfo | null {
   }
 }
 
-/** 在指定目录执行 git 命令（超时保护；stdout+stderr 截断返回）。 */
+/** Exécute une commande git dans le répertoire indiqué (protection de timeout ; retour stdout+stderr tronqué). */
 export async function runGit(rootDir: string, args: string[], timeoutMs = 120_000): Promise<string> {
   const { stdout, stderr } = await execFileAsync('git', args, { cwd: rootDir, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 })
   return `${stdout}${stderr ? `\n${stderr}` : ''}`.trim()
 }
 
-/** 在指定目录执行 npm 命令。Windows 下 npm 是 .cmd 脚本，必须经 shell 调用。 */
+/** Exécute une commande npm dans le répertoire indiqué. Sous Windows, npm est un script .cmd, l'appel doit passer par le shell. */
 export async function runNpm(rootDir: string, args: string[], timeoutMs = 600_000): Promise<string> {
   const { stdout, stderr } = await execFileAsync('npm', args, {
     cwd: rootDir,

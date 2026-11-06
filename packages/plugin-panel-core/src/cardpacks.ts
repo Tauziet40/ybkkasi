@@ -1,17 +1,17 @@
 /**
- * @ybkk/plugin-panel-core —— 卡片包（card pack）模型与加载（action-plan-dsh-frontend WP-05）。
+ * @ybkk/plugin-panel-core — modèle et chargement des paquets de cartes (action-plan-dsh-frontend WP-05).
  *
- * 目标 3（多平台差异化交互）的配置底座：新增/调整卡片零前端代码改动——
- * 卡片包是纯 JSON 配置（默认目录 packages/platform-core/cardpacks/*.json，可经 CARDPACK_DIR 覆盖），
- * 服务端按「角色 × 平台」过滤下发，首页上限 6 张；资产 ref 存活性由端点侧注入的解析器裁决
- * （platform-core 不反向依赖业务插件，见下方 setRefAliveResolver）。
+ * Socle de configuration de l'objectif 3 (interactions différenciées multi-plateformes) : ajouter/ajuster une carte = zéro modification du code front —
+ * un paquet de cartes est une pure configuration JSON (répertoire par défaut packages/platform-core/cardpacks/*.json, surchargeable via CARDPACK_DIR),
+ * le serveur filtre et délivre selon « rôle × plateforme », plafond de 6 cartes en page d'accueil ; la survie des refs d'actifs est tranchée par le résolveur injecté côté endpoint
+ * (platform-core ne dépend pas en retour des plugins métier, voir setRefAliveResolver ci-dessous).
  *
- * 契约（WP-05/B1）：
+ * Contrat (WP-05/B1) :
  *   CardPack { platform, roles, cards[] }；Card { id, title, description, badge, href, ref?, order? }
- *   —— badge 为类型徽标（skill/app/mcp/nas/kb/data/model）；ref 为资产引用（type:idOrSlug），
- *   失效 ref 在下发时被静默过滤并告警一次；首页卡片上限 HOME_CARD_LIMIT=6。
- * 端点归属说明（对计划 D6 惯例条款的留痕）：过滤核心在本文件；REST 端点按仓库惯例由
- * console 聚合注册（console 持有 iam 角色与各资产注册表，才能做角色×平台×存活性三维过滤）。
+ *   — badge est un badge de type (skill/app/mcp/nas/kb/data/model) ; ref est une référence d'actif (type:idOrSlug),
+ *   une ref morte est silencieusement filtrée à la délivrance avec une alerte unique ; plafond de cartes d'accueil HOME_CARD_LIMIT=6.
+ * Note d'appartenance d'endpoint (trace pour la clause d'usage D6 du plan) : le cœur du filtrage est dans ce fichier ; l'endpoint REST est, selon l'usage du dépôt, enregistré de façon
+ * agrégée par console (console détient les rôles iam et les registres d'actifs, seuls capables du filtrage en trois dimensions rôle × plateforme × survie).
  */
 import { readdir, readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
@@ -21,37 +21,37 @@ import { Service } from '@deepseek-ai/cordis'
 
 export const CARDPACK_HOME_LIMIT = 6
 
-/** 五平台差异化（WP-05/B3 主题色一一对应）：战略/营销/智造/研发/质量。 */
+/** Différenciation cinq plateformes (correspondance un-un des couleurs de thème WP-05/B3) : stratégie/marketing/production intelligente/R&D/qualité. */
 export const CARD_PLATFORMS = ['strategy', 'marketing', 'manufacturing', 'rd', 'quality'] as const
 export type CardPlatform = (typeof CARD_PLATFORMS)[number]
 
-/** 类型徽标（与登记引导页磁贴一致的目标 1 资产全覆盖；agent 为宿主数字员工入口卡）。 */
+/** Badges de type (couverture complète des actifs de l'objectif 1, alignée sur les tuiles de la page de guidage d'enregistrement ; agent est la carte d'entrée de l'employé numérique hôte). */
 export const CARD_BADGES = ['skill', 'app', 'mcp', 'nas', 'kb', 'data', 'model', 'agent'] as const
 export type CardBadge = (typeof CARD_BADGES)[number]
 
 export interface CardpackCard {
   id: string
   title: string
-  /** 一句话说明（≤40 字）。 */
+  /** Explication en une phrase (≤40 caractères). */
   description: string
   badge: CardBadge
-  /** 跳转目标（控制台 hash 路由或外链）。 */
+  /** Cible du saut (route hash de la console ou lien externe). */
   href: string
-  /** 资产引用（type:idOrSlug，如 mcp:datawise / agent:dev-coder / kb:<orgId>）；失效即过滤。 */
+  /** Référence d'actif (type:idOrSlug, ex. mcp:datawise / agent:dev-coder / kb:<orgId>) ; morte = filtrée. */
   ref?: string
-  /** 展示顺序（小者靠前，缺省按声明序）。 */
+  /** Ordre d'affichage (le plus petit devant, défaut selon l'ordre de déclaration). */
   order?: number
 }
 
 export interface CardPack {
   platform: CardPlatform
-  /** 可见角色代码；'*'=全员。 */
+  /** Codes de rôles voyeurs ; '*' = tout le monde. */
   roles: string[]
   label?: string
   cards: CardpackCard[]
 }
 
-/** 校验单包：非法即抛错（列出全部问题，供 lint:manifests 与装载期共用）。 */
+/** Valide un paquet : illégal = erreur levée (liste de tous les problèmes, partagé par lint:manifests et le chargement). */
 export function validateCardpack(input: unknown, source = 'cardpack'): string[] {
   const errors: string[] = []
   const pack = input as CardPack
@@ -83,14 +83,14 @@ export function validateCardpack(input: unknown, source = 'cardpack'): string[] 
   return errors
 }
 
-/** 角色匹配：包声明 '*' 或与主体角色有交集。 */
+/** Correspondance de rôle : le paquet déclare '*' ou une intersection avec les rôles du principal. */
 export function packVisibleForRoles(pack: CardPack, roles: string[]): boolean {
   return pack.roles.includes('*') || pack.roles.some((role) => roles.includes(role))
 }
 
 /**
- * 纯过滤：平台内可见包 → 卡片展平（order 升序、同 id 去重、失效 ref 过滤）→ 截取首页上限。
- * refAlive 缺省视为存活（无解析器的最小树不误伤）。
+ * Filtrage pur : paquets visibles dans la plateforme → aplatissement en cartes (order croissant, dédoublonnage par id, refs mortes filtrées) → troncature au plafond d'accueil.
+ * refAlive absent = considérée vivante (un arbre minimal sans résolveur n'est pas pénalisé).
  */
 export function filterCards(input: {
   packs: CardPack[]
@@ -115,7 +115,7 @@ export function filterCards(input: {
   return { cards, droppedDeadRefs }
 }
 
-/** 默认卡片包目录：本包同级 cardpacks/（源码形态与安装形态均成立）。 */
+/** Répertoire par défaut des paquets de cartes : cardpacks/ au même niveau que le présent paquet (vrai en forme source comme en forme installée). */
 export function defaultCardpackDir(): string {
   return join(dirname(fileURLToPath(import.meta.url)), '..', 'cardpacks')
 }
@@ -132,7 +132,7 @@ export class CardpackService extends Service {
     void this.loadFromDir(config.dir ?? process.env.CARDPACK_DIR ?? defaultCardpackDir())
   }
 
-  /** 装载目录内全部 *.json：单文件非法跳过并记录（不阻断启动），lint:manifests 负责红线。 */
+  /** Charge tous les *.json du répertoire : un fichier illégal est sauté et consigné (sans interrompre le démarrage), lint:manifests porte la ligne rouge. */
   async loadFromDir(dir: string): Promise<void> {
     const errors: string[] = []
     const packs: CardPack[] = []
@@ -170,7 +170,7 @@ export class CardpackService extends Service {
     return this.packs.filter((pack) => pack.platform === platform)
   }
 
-  /** 注入资产 ref 存活性解析器（console 装配时用 iam/resourceCore/skillhub/mcp 构建）。 */
+  /** Injecte le résolveur de survie des refs d'actifs (utilisé à l'assemblage console avec iam/resourceCore/skillhub/mcp). */
   setRefAliveResolver(resolver: (ref: string) => boolean): void {
     this.refAliveResolver = resolver
   }
@@ -179,7 +179,7 @@ export class CardpackService extends Service {
     return this.refAliveResolver ? this.refAliveResolver(ref) : true
   }
 
-  /** 装载期被跳过文件的问题清单（坏 JSON / schema 违规），观测用。 */
+  /** Liste des problèmes des fichiers sautés au chargement (mauvais JSON / violation de schéma), pour observation. */
   loadProblems(): string[] {
     return this.loadErrors
   }

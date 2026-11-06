@@ -1,42 +1,42 @@
 /**
- * 执行中枢纯决策层（domain）—— 无 IO、无时钟、无数据库。
+ * Couche de décision pure du centre d'exécution (domain) — pas d'IO, pas d'horloge, pas de base.
  *
- * 移植自 Paperclip wake-queue 的核心设计：策略从 IO 中彻底剥离，
- * 因此可以表驱动穷举边界（对齐其 policy.test.ts 的测试强度思路）。
- * 这里只放决策函数与纯工具；任何「读库/读时钟」的逻辑一律留在服务层
- * （application），把事实（facts）算好再喂进来。
- * 例外：面向用户的拒绝文案经 platform-i18n t()（以请求/安装级 locale 输出，词典未命中降级中文）。
+ * Portage du cœur de conception Paperclip wake-queue : la politique est totalement décollée de l'IO,
+ * ce qui permet une énumération exhaustive des frontières par tables (alignée sur l'intensité de test de son policy.test.ts).
+ * Ici ne vivent que fonctions de décision et outils purs ; toute logique « lire la base/lire l'horloge » reste dans la couche service
+ * (application), qui calcule les faits (facts) avant de les nourrir ici.
+ * Exception : les libellés de refus tournés vers l'utilisateur passent par t() de platform-i18n (sortie selon la locale de requête/d'installation, repli chinois si la clé manque au dictionnaire).
  */
 import { t } from '../../platform-i18n/src/index.ts'
 
 // ---------------------------------------------------------------------------
-// 唤醒准入（Paperclip decideWakeAdmission 三态）
+// Admission de réveil (trois états decideWakeAdmission de Paperclip)
 // ---------------------------------------------------------------------------
 
 export type WakeAdmissionFacts = {
-  /** 目标 issue 的执行锁持有者是否为同一 Agent（按归一化名称键比较）。 */
+  /** Si le détenteur du verrou d'exécution de l'issue cible est le même Agent (comparaison par clé de nom normalisée). */
   isSameExecutionAgent: boolean
-  /** 该唤醒是否应推迟（上游显式要求，如审批未决）。 */
+  /** Si ce réveil doit être différé (demande explicite de l'amont, ex. approbation en attente). */
   shouldDeferFollowupWake: boolean
-  /** 是否应并入正在运行的唤醒（跟随唤醒语义）。 */
+  /** Si l'on doit fusionner dans le réveil en cours (sémantique de réveil suivi). */
   shouldQueueFollowupForRunningWake: boolean
-  /** 目标 issue 上是否存在活跃执行 run（executionRunId 非空即视为存在）。 */
+  /** S'il existe un run d'exécution actif sur l'issue cible (executionRunId non vide = existence). */
   availableActiveExecutionRunPresent: boolean
-  /** 是否允许 run 合并（缺省允许）。 */
+  /** Si la fusion de run est permise (permise par défaut). */
   allowRunCoalescing?: boolean
-  /** 是否同一持久执行者（缺省视为是；跨执行者合并是治理风险）。 */
+  /** Si même exécutant persistant (considéré comme oui par défaut ; fusionner entre exécutants est un risque de gouvernance). */
   sameDurableActor?: boolean
 }
 
 export type WakeAdmissionDecision =
-  | { kind: 'proceed' }   // 无活跃 run → 正常起新 run
-  | { kind: 'coalesce' }  // 同 Agent + 可合并 → 并入现有 run
-  | { kind: 'defer' }     // 有活跃 run 但不满足合并条件 → 进延迟队列
+  | { kind: 'proceed' }   // pas de run actif → démarrage normal d'un nouveau run
+  | { kind: 'coalesce' }  // même Agent + fusionnable → fusion dans le run existant
+  | { kind: 'defer' }     // run actif mais conditions de fusion non remplies → file différée
 
 /**
- * 唤醒准入三态裁决。决策与 CAS 是两层机制：
- * 本函数在事务外给出决策；存储层的 `executionRunId IS NULL` 守卫只是
- * 防重复取锁的兜底护栏，不作为决策信号（Paperclip 原设计）。
+ * Arbitrage trois états de l'admission de réveil. Décision et CAS sont deux mécanismes :
+ * cette fonction rend sa décision hors transaction ; la garde `executionRunId IS NULL` de la couche stockage n'est
+ * qu'un garde-fou anti-double-prise-de-verrou, pas un signal de décision (conception Paperclip d'origine).
  */
 export function decideWakeAdmission(f: WakeAdmissionFacts): WakeAdmissionDecision {
   if (
@@ -56,22 +56,22 @@ export function decideWakeAdmission(f: WakeAdmissionFacts): WakeAdmissionDecisio
 }
 
 // ---------------------------------------------------------------------------
-// 释放恢复（Paperclip decideReleaseRecovery 裁剪版）
+// Récupération de libération (version élaguée de decideReleaseRecovery de Paperclip)
 // ---------------------------------------------------------------------------
 
 export type ReleaseRecoveryFacts = {
-  /** 持有锁的 run 记录是否已不存在（数据丢失/被清理）。 */
+  /** Si l'enregistrement du run détenteur du verrou n'existe plus (données perdues/nettoyées). */
   runMissing: boolean
-  /** run 是否已终态（completed/failed/timeout）但锁未释放。 */
+  /** Si le run est déjà en état terminal (completed/failed/timeout) mais verrou non libéré. */
   runSettled: boolean
-  /** run 仍 running 但锁已超时（超过回收阈值）。 */
+  /** Si le run est toujours running mais que le verrou a expiré (au-delà du seuil de récupération). */
   lockTimedOut: boolean
 }
 
 export type ReleaseRecoveryDecision =
-  | { kind: 'keep' }             // 一切正常，不动
-  | { kind: 'force-release' }    // 强制释放锁（run 消失/终态/超时）
-  | { kind: 'timeout-run' }      // run 超时：先记 timeout 终态再强制释放
+  | { kind: 'keep' }             // tout va bien, on n'y touche pas
+  | { kind: 'force-release' }    // libération forcée du verrou (run disparu/terminal/expiré)
+  | { kind: 'timeout-run' }      // run expiré : d'abord marquer l'état terminal timeout puis libération forcée
 
 export function decideReleaseRecovery(f: ReleaseRecoveryFacts): ReleaseRecoveryDecision {
   if (f.runMissing || f.runSettled) return { kind: 'force-release' }
@@ -80,33 +80,33 @@ export function decideReleaseRecovery(f: ReleaseRecoveryFacts): ReleaseRecoveryD
 }
 
 // ---------------------------------------------------------------------------
-// 名称归一化（Paperclip normalizeAgentKey 同义）
+// Normalisation des noms (synonyme normalizeAgentKey de Paperclip)
 // ---------------------------------------------------------------------------
 
-/** Agent 名称规范键：比较「是否同一 Agent 的连续唤醒」用，避免大小写/空白抖动。 */
+/** Clé canonique de nom d'Agent : pour comparer « réveils consécutifs du même Agent », évite le tremblement casse/blancs. */
 export function normalizeAgentKey(name: string): string {
   return String(name ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
 // ---------------------------------------------------------------------------
-// 目标血缘物化
+// Matérialisation de la lignée d'objectifs
 // ---------------------------------------------------------------------------
 
 /**
- * 血缘物化：goalChain（根→父→本目标）+ projectId 拼为 issue.goalAncestry，
- * 读取血缘不需递归查库（目标树很浅，写时物化、读时直读）。
+ * Matérialisation : goalChain (racine→parent→objectif courant) + projectId assemblés en issue.goalAncestry,
+ * la lecture de lignée n'a plus besoin de requêtes récursives (l'arbre d'objectifs est peu profond : matérialisation à l'écriture, lecture directe).
  */
 export function materializeGoalAncestry(goalChain: string[], projectId?: string): string[] {
   return [...goalChain, ...(projectId ? [projectId] : [])]
 }
 
-/** 血缘摘要（注入 Agent 上下文用）：[目标链…] → 「根 › 父 › 目标 › 项目」。 */
+/** Résumé de lignée (à injecter dans le contexte Agent) : [chaîne d'objectifs…] → « racine › parent › objectif › projet ». */
 export function lineageSummary(ancestry: string[], titles: Record<string, string>): string {
   return ancestry.map((id) => titles[id] ?? id).join(' › ') || '（未挂目标/项目）'
 }
 
 // ---------------------------------------------------------------------------
-// Agent 上下文装配（goal-aware execution 的落地形态）
+// Assemblage du contexte Agent (forme d'atterrissage de l'exécution goal-aware)
 // ---------------------------------------------------------------------------
 
 export interface ContextPackInput {
@@ -120,7 +120,7 @@ export interface ContextPackInput {
   permissionNote?: string
 }
 
-/** 拼装「为什么而干」的上下文包：目标/项目/任务/前置 + 治理范围注记。 */
+/** Assemble le paquet de contexte du « pourquoi on le fait » : objectif/projet/tâche/prérequis + annotation de périmètre de gouvernance. */
 export function buildIssueContextPack(input: ContextPackInput): string {
   const lines: string[] = ['【本任务服务于】']
   lines.push(input.goalTitle
@@ -139,7 +139,7 @@ export function buildIssueContextPack(input: ContextPackInput): string {
 }
 
 // ---------------------------------------------------------------------------
-// Agent 健康度（R9：心跳数据入 Agent 健康度）
+// Santé de l'Agent (R9 : les données de battement entrent dans la santé de l'Agent)
 // ---------------------------------------------------------------------------
 
 export type AgentHealthLevel = 'healthy' | 'stale' | 'silent' | 'frozen' | 'offline'
@@ -147,19 +147,19 @@ export type AgentHealthLevel = 'healthy' | 'stale' | 'silent' | 'frozen' | 'offl
 export interface AgentHealthFacts {
   agentStatus: string
   frozen: boolean
-  /** 最近一次心跳时点（ms epoch；无=null）。 */
+  /** Datation du dernier battement (ms epoch ; null si absent). */
   lastHeartbeatAt: number | null
-  /** 最近一次纳管指标提报时点（ms epoch；无=null）。 */
+  /** Datation du dernier rapport de métriques géré (ms epoch ; null si absent). */
   lastMetricsReportAt: number | null
   nowMs: number
-  /** 心跳周期（分钟；0/缺省=未配置心跳，按 24h 宽松口径）。 */
+  /** Période de battement (minutes ; 0/absent = battement non configuré, référentiel tolérant 24 h). */
   heartbeatIntervalMinutes?: number
 }
 
 /**
- * 健康分档：offline（非运行态）→ frozen（冻结）→ healthy（心跳新鲜）
- * → stale（心跳迟滞）→ silent（长期无心跳）。新鲜窗口取心跳周期的 3 倍
- * （容忍两轮漏报），迟滞窗口 9 倍；未配置心跳的 Agent 按 24h/72h 宽松两档（提报义务口径）。
+ * Gradation de santé : offline (hors état de marche) → frozen (gelé) → healthy (battement frais)
+ * → stale (battement à la traîne) → silent (long silence de battement). Fenêtre de fraîcheur = 3× la période de battement
+ * (tolère deux tours manqués), fenêtre de traîne 9× ; les Agents sans battement configuré suivent deux paliers tolérants 24 h/72 h (référentiel d'obligation de rapport).
  */
 export function computeAgentHealth(f: AgentHealthFacts): AgentHealthLevel {
   if (f.agentStatus !== 'online' && f.agentStatus !== 'trial') return 'offline'
@@ -174,12 +174,12 @@ export function computeAgentHealth(f: AgentHealthFacts): AgentHealthLevel {
 }
 
 // ---------------------------------------------------------------------------
-// 任务状态机（exec:issues）
+// Machine à états des tâches (exec:issues)
 // ---------------------------------------------------------------------------
 
 export type IssueStatus = 'todo' | 'in_progress' | 'review' | 'done' | 'cancelled'
 
-/** 显式流转表：done/cancelled 为终态；review 可打回 in_progress。 */
+/** Table de transitions explicite : done/cancelled terminaux ; review peut être renvoyé en in_progress. */
 export const ISSUE_TRANSITIONS: Record<IssueStatus, IssueStatus[]> = {
   todo: ['in_progress', 'cancelled'],
   in_progress: ['review', 'cancelled'],
@@ -192,16 +192,16 @@ export function issueCanTransition(from: IssueStatus, to: IssueStatus): boolean 
   return ISSUE_TRANSITIONS[from]?.includes(to) ?? false
 }
 
-/** 前置依赖是否已解除：blocker 全部终态（done 视为解除，cancelled 也解除等待——不再无限挂起）。 */
+/** Si la dépendance bloquante est levée : tous les blockers en état terminal (done compte comme levé, cancelled lève aussi l'attente — plus de suspension indéfinie). */
 export function blockersResolved(blockerStatuses: IssueStatus[]): boolean {
   return blockerStatuses.every((status) => status === 'done' || status === 'cancelled')
 }
 
 // ---------------------------------------------------------------------------
-// 例行调度：最小 5 段 cron（分钟粒度）
+// Planification de routine : cron minimal à 5 champs (granularité minute)
 // ---------------------------------------------------------------------------
 
-/** 单字段匹配：`*`、`a`、`a-b`、`a/b`（步进）、逗号列表。 */
+/** Correspondance d'un champ : `*`, `a`, `a-b`, `a/b` (pas), liste à virgules. */
 export function cronFieldMatches(field: string, value: number, min: number, max: number): boolean {
   for (const part of field.split(',')) {
     const [range, stepRaw] = part.split('/')
@@ -226,7 +226,7 @@ export function cronFieldMatches(field: string, value: number, min: number, max:
   return false
 }
 
-/** 5 段 cron（分 时 日 月 周）在给定时刻是否命中。周 0/7 均为周日。 */
+/** Si un cron à 5 champs (min heure jour mois semaine) correspond à l'instant donné. 0/7 pour dimanche tous deux. */
 export function cronMatches(expr: string, at: Date): boolean {
   const fields = expr.trim().split(/\s+/)
   if (fields.length !== 5) return false
@@ -240,24 +240,24 @@ export function cronMatches(expr: string, at: Date): boolean {
   if (!cronFieldMatches(fMinute ?? '', minute, 0, 59)) return false
   if (!cronFieldMatches(fHour ?? '', hour, 0, 23)) return false
   if (!cronFieldMatches(fMonth ?? '', month, 1, 12)) return false
-  // 日与周的 POSIX 语义：两者都收窄（非 *）时命中其一即可
+  // Sémantique POSIX jour et semaine : quand les deux restreignent (non *), une correspondance suffit
   const domRestricted = fDom !== undefined && fDom !== '*' && fDom !== ''
   const dowRestricted = fDow !== undefined && fDow !== '*' && fDow !== ''
   const domHit = cronFieldMatches(fDom ?? '', dom, 1, 31)
-  // 周日兼容 0 与 7 两种写法（value 侧已归一到 7，字段写 0 时按 0 再试一次）
+  // Dimanche accepte les deux écritures 0 et 7 (le côté valeur est déjà normalisé à 7 ; si le champ écrit 0, on retente avec 0)
   const dowHit = cronFieldMatches(fDow ?? '', dow, 0, 7) || (dowRaw === 0 && cronFieldMatches(fDow ?? '', 0, 0, 0))
   if (domRestricted && dowRestricted) return domHit || dowHit
   return domHit && dowHit
 }
 
-/** cron 合法性校验（登记时用，给用户即时反馈）。 */
+/** Validation de légalité du cron (à l'enregistrement, retour immédiat à l'utilisateur). */
 export function cronIsValid(expr: string): boolean {
   const fields = expr.trim().split(/\s+/)
   if (fields.length !== 5) return false
   const ranges: Array<[number, number]> = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 7]]
   return fields.every((field, index) => {
     const [min, max] = ranges[index]!
-    // 逐 part 试匹配一个必然落在范围内的值不充分——校验词法结构即可
+    // Tester chaque part sur une valeur nécessairement dans l'intervalle ne suffit pas — valider la structure lexicale
     return field.split(',').every((part) => {
       const [range, stepRaw] = part.split('/')
       if (stepRaw !== undefined && (!/^\d+$/.test(stepRaw) || Number(stepRaw) < 1)) return false
@@ -272,7 +272,7 @@ export function cronIsValid(expr: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// 唤醒幂等键
+// Clé d'idempotence de réveil
 // ---------------------------------------------------------------------------
 
 export function wakeIdempotencyKey(trigger: string, parts: Array<string | number | undefined>): string {
@@ -280,39 +280,39 @@ export function wakeIdempotencyKey(trigger: string, parts: Array<string | number
 }
 
 // ---------------------------------------------------------------------------
-// 执行租约纯决策（附录 A 决策 3：exec_run_leases 为权威，issue 三字段为投影）
+// Décision pure des baux d'exécution (décision 3 de l'annexe A : exec_run_leases fait autorité, les trois champs d'issue sont une projection)
 //
-// 施工蓝本 §6.2/§7-D05/D06：认领＝「幂等确认已分配租约」——同员工同任务重复认领
-// 返回既有 run/租约（不报「他人持有」）；他主体、旧租约、已关闭任务拒绝。
-// 决策与存储分层：本组函数只吃事实（facts），IO 与事务在 lease-store.ts / 服务层。
+// Blueprint §6.2/§7-D05/D06 : réclamer = « confirmation idempotente d'un bail déjà attribué » — réclamer deux fois le même employé sur la même tâche
+// renvoie le run/bail existant (pas d'erreur « tenu par autrui ») ; autre principal, bail périmé, tâche fermée : refus.
+// Décision et stockage séparés : ce groupe de fonctions ne consomme que des faits (facts), IO et transactions dans lease-store.ts / couche service.
 // ---------------------------------------------------------------------------
 
-/** 租约状态（结构对齐 plugin-workforce contract.ts 的 LeaseStatus，防循环不 import）。 */
+/** État du bail (structure alignée sur le LeaseStatus de plugin-workforce contract.ts, pas d'import pour éviter la boucle). */
 export type LeaseStatusLite = 'active' | 'released' | 'superseded'
 
 export interface LeaseClaimFacts {
-  /** 该 issue 在权威表中是否存在 active 租约。 */
+  /** Si l'issue a un bail actif dans la table d'autorité. */
   activeLeasePresent: boolean
-  /** 既有 active 租约是否已过 expiresAt（过期＝无人实际持有，可被新租约取代）。 */
+  /** Si le bail actif existant a dépassé expiresAt (expiré = personne ne détient effectivement, remplaçable par un nouveau bail). */
   activeLeaseExpired: boolean
-  /** 既有租约归属员工（legacy 机器直认领为空串）。 */
+  /** Employé détenteur du bail existant (chaîne vide en réclamation directe legacy par machine). */
   existingEmployeeId: string
-  /** 既有租约归属 agentKey。 */
+  /** agentKey détenteur du bail existant. */
   existingAgentKey: string
-  /** 本次认领员工。 */
+  /** Employé de la présente réclamation. */
   requestedEmployeeId: string
-  /** 本次认领 agentKey。 */
+  /** agentKey de la présente réclamation. */
   requestedAgentKey: string
 }
 
 export type LeaseClaimDecision =
-  | { kind: 'idempotent' }                    // 同持有者重复认领 → 幂等续期既有租约（created=false）
-  | { kind: 'held-by-other'; holder: string } // 他人/他 Agent 持有 → 拒绝
-  | { kind: 'acquire' }                       // 无有效租约（含过期）→ 新取（版本+1）
+  | { kind: 'idempotent' }                    // réclamation répétée du même détenteur → renouvellement idempotent du bail existant (created=false)
+  | { kind: 'held-by-other'; holder: string } // détenu par un autre/autre Agent → refus
+  | { kind: 'acquire' }                       // aucun bail valide (expiré compris) → nouvelle prise (version+1)
 
 /**
- * 认领幂等裁决（D05/D06）：受管员工按 employeeId 判同（换绑 Agent 不影响幂等）；
- * legacy 机器直认领（employeeId 为空串）按 agentKey 判同。过期租约不算持有。
+ * Arbitrage d'idempotence de réclamation (D05/D06) : l'employé géré est identifié par employeeId (changer l'Agent lié ne casse pas l'idempotence) ;
+ * la réclamation directe legacy par machine (employeeId chaîne vide) est identifiée par agentKey. Un bail expiré ne compte pas comme détenu.
  */
 export function decideLeaseClaim(f: LeaseClaimFacts): LeaseClaimDecision {
   if (f.activeLeasePresent && !f.activeLeaseExpired) {
@@ -329,23 +329,23 @@ export interface LeaseRenewalFacts {
   status: LeaseStatusLite
   /** now > expiresAt。 */
   expired: boolean
-  /** 请求主体与租约 principalId 一致（主体缺席视为不一致，fail-closed）。 */
+  /** Le principal appelant coïncide avec le principalId du bail (principal absent = divergence, fail-closed). */
   principalMatches: boolean
 }
 
 export type LeaseRenewalDecision = { kind: 'renew' } | { kind: 'stale' }
 
-/** 续租裁决（§11.6）：同主体 + active + 未过期才能续；旧租约/他主体/已释放一律 stale。 */
+/** Arbitrage de renouvellement (§11.6) : même principal + actif + non expiré ; bail périmé/autre principal/libéré = toujours stale. */
 export function decideLeaseRenewal(f: LeaseRenewalFacts): LeaseRenewalDecision {
   return f.status === 'active' && !f.expired && f.principalMatches ? { kind: 'renew' } : { kind: 'stale' }
 }
 
 export interface CompleteOwnershipFacts {
-  /** run 是否存在租约记录（任意状态）。无记录＝旧路径 run，保持兼容放行（D07 口径）。 */
+  /** Si le run a un enregistrement de bail (quel que soit l'état). Sans enregistrement = run de l'ancien chemin, passage compatible (référentiel D07). */
   hasLeaseRecord: boolean
   status: LeaseStatusLite
   expired: boolean
-  /** 调用主体 principalId（exec.principal 缺失时为空串）。 */
+  /** principalId appelant (chaîne vide si exec.principal absent). */
   callerPrincipalId: string
   leasePrincipalId: string
 }
@@ -355,9 +355,9 @@ export type CompleteOwnershipDecision =
   | { kind: 'deny'; code: 'LEASE_STALE' | 'RUN_NOT_OWNED'; reason: string }
 
 /**
- * complete 主体校验（D07/§6.5/V06）：run 有租约记录时必须主体一致；
- * 旧租约（released/superseded/过期）先判 LEASE_STALE，再判主体 RUN_NOT_OWNED；
- * 无租约记录的 run 走旧路径兼容放行（校验在调用侧按需收紧）。
+ * Validation de principal du complete (D07/§6.5/V06) : un run avec enregistrement de bail exige la coïncidence des principaux ;
+ * bail périmé (released/superseded/expiré) : d'abord LEASE_STALE, puis divergence de principal RUN_NOT_OWNED ;
+ * un run sans enregistrement de bail suit l'ancien chemin compatible (resserrage à la discrétion de l'appelant).
  */
 export function decideCompleteOwnership(f: CompleteOwnershipFacts): CompleteOwnershipDecision {
   if (!f.hasLeaseRecord) return { kind: 'allow' }
@@ -371,17 +371,17 @@ export function decideCompleteOwnership(f: CompleteOwnershipFacts): CompleteOwne
 }
 
 export interface RunAdoptionFacts {
-  /** issue 投影字段 executionRunId 是否非空。 */
+  /** Si le champ de projection executionRunId de l'issue est non vide. */
   projectedRunIdPresent: boolean
-  /** 投影指向的 run 是否仍处于 running（终态/消失＝脏投影）。 */
+  /** Si le run pointé par la projection est toujours running (terminal/disparu = projection sale). */
   projectedRunRunning: boolean
 }
 
 export type RunAdoptionDecision = { kind: 'adopt' } | { kind: 'create' }
 
 /**
- * get-or-create 裁决（V05）：调度预取锁留下的 run 直接被运行时认领采用（不再另造 run），
- * 只有投影缺席或脏投影（run 终态/消失）才新建——「认领已分配租约」的 run 侧语义。
+ * Arbitrage get-or-create (V05) : le run laissé par la préemption de verrou par l'ordonnanceur est directement adopté par le runtime (plus de run recréé),
+ * seul un projet absent ou une projection sale (run terminal/disparu) fait créer — la sémantique côté run de « réclamer un bail déjà attribué ».
  */
 export function decideRunAdoption(f: RunAdoptionFacts): RunAdoptionDecision {
   return f.projectedRunIdPresent && f.projectedRunRunning ? { kind: 'adopt' } : { kind: 'create' }

@@ -1,15 +1,15 @@
 /**
- * 员工域服务（employee-service）—— 员工档案、技术 Agent 一对一运行绑定、停职/复岗/离岗联动。
+ * Service du domaine des employés (employee-service) — dossier de l'employé, liaison d'exécution un-à-un avec l'Agent technique, chaînage suspension/reprise/départ.
  *
- * 职责（蓝本 §5/§8.1/§D.4，附录 A 决策 1）：
- *   - 员工↔Agent 一对一有效绑定：同 Agent 全平台仅一条 active 绑定（事务内校验 + 唯一域预检）；
- *   - employees.primaryAgentId 为冗余指针，由本服务在绑定事务内同步维护；
- *   - 停职/离岗联动：撤全部工作授权（permit）→ 释放执行租约（经 exec-hub 集成端口，
- *     结构化探测、不产生反向 import）→ 状态机流转 → 事件广播；
- *   - 订阅 agent.frozen：技术 Agent 被预算联动等冻结时，撤该 Agent 绑定员工的全部有效 permit。
+ * Responsabilités (canevas §5/§8.1/§D.4, annexe A décision 1) :
+ *   - liaison valide un-à-un employé↔Agent : un seul active par Agent sur toute la plateforme (vérification en transaction + précontrôle d'unicité de domaine) ;
+ *   - employees.primaryAgentId est un pointeur redondant, maintenu synchrone par ce service dans la transaction de liaison ;
+ *   - chaînage suspension/départ : révocabation de toutes les autorisations de travail (permit) → libération des baux d'exécution (via le port d'intégration exec-hub,
+ *     sondage structuré, sans import inverse) → transition de la machine à états → diffusion d'événement ;
+ *   - abonnement à agent.frozen : quand l'Agent technique est gelé (notamment par le chaînage budget), révoquer tous les permits valides des employés liés à cet Agent.
  *
- * 失败语义诚实：联动链上「撤 permit」失败即中止停职（fail-closed）；
- * 「释放租约」经结构化探测，exec-hub 缺席时记录可观测事件（僵尸锁回收兜底），不冒充已释放。
+ * Sémantique d'échec honnête : sur la chaîne de chaînage, un échec de « révocation des permits » interrompt la suspension (fail-closed) ;
+ * la « libération des baux » passe par un sondage structuré, en cas d'absence d'exec-hub un événement observable est consigné (rattrapage par récupération des verrous zombies), sans simuler une libération.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -31,7 +31,7 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
-/** exec-hub 员工工作路径的结构化探测形状（ExecHubWorkIntegration 子集；缺席＝联动能力缺失）。 */
+/** Forme du sondage structuré du chemin de travail employé d'exec-hub (sous-ensemble d'ExecHubWorkIntegration ; absence = capacité de chaînage manquante). */
 interface ExecHubReleaseProbe {
   releaseForRun?(runId: string, reason: string): void
 }
@@ -42,18 +42,18 @@ export class EmployeeService extends Service implements WorkforceEmployees {
   constructor(ctx: Context) {
     super(ctx, 'workforceEmployees')
 
-    // Agent 冻结联动（R10）：撤销该 agentId 绑定员工的全部有效 permit 并广播事件。
-    // platformBus 未注入当前 fiber（独立单测形态）时防御跳过——联动缺失必须可观测，但不阻塞装配。
+    // Chaînage au gel de l'Agent (R10) : révoquer tous les permits valides de l'employé lié à cet agentId et diffuser l'événement.
+    // platformBus non injecté dans la fiber courante (forme test unitaire autonome) : saut défensif — le chaînage manquant doit être observable, sans bloquer l'assemblage.
     try {
       ctx.platformBus.on('agent.frozen', (payload) => {
         this.handleAgentFrozen(payload)
       })
     } catch {
-      /* 事件总线缺席：跳过订阅（服务在 index.ts 装配时依赖清单已含 platformBus） */
+      /* bus d'événements absent : abonnement sauté (la liste de dépendances du service assemblé dans index.ts inclut déjà platformBus) */
     }
   }
 
-  // -- 内部取用 -----------------------------------------------------------
+  // -- Accès internes -----------------------------------------------------------
 
   private get store(): WorkforceStoreService {
     return this.ctx.workforceStore
@@ -72,7 +72,7 @@ export class EmployeeService extends Service implements WorkforceEmployees {
       const bus = (this.ctx as unknown as { platformBus?: { emit(event: string, payload: unknown): unknown } }).platformBus
       bus?.emit(name, { ...payload, at: nowIso() })
     } catch {
-      /* 事件总线缺席时跳过通知：状态事实已落库，联动方可经列表/审计补偿 */
+      /* bus d'événements absent : notification sautée — le fait d'état est déjà en base, le chaînage peut être compensé par liste/audit */
     }
   }
 
@@ -80,9 +80,9 @@ export class EmployeeService extends Service implements WorkforceEmployees {
     return caller?.userId ?? caller?.principalId ?? ''
   }
 
-  // -- Agent 冻结联动 ------------------------------------------------------
+  // -- Chaînage au gel de l'Agent ------------------------------------------------------
 
-  /** agent.frozen 处理：该 agentId 的 active 绑定员工 → 撤全部 permit + 发 workforce.permit.revoked。 */
+  /** Traitement d'agent.frozen : employé à liaison active sur cet agentId → révocation de tous les permits + émission de workforce.permit.revoked. */
   private handleAgentFrozen(payload: unknown): void {
     try {
       const p = (payload ?? {}) as { agentId?: string; reason?: string }
@@ -98,12 +98,12 @@ export class EmployeeService extends Service implements WorkforceEmployees {
         this.emitEvent('workforce.permit.revoked', { agentId: p.agentId, employeeId: binding.employeeId, revoked, reason })
       }
     } catch (error) {
-      // 监听器异常由总线死信机制兜底；此处不再抛出以免放大故障
+      // Une exception de l'écouteur est rattrapée par le mécanisme de lettres mortes du bus ; on ne relève pas ici pour ne pas amplifier la panne
       this.emitEvent('workforce.permit.revoked', { note: `Agent 冻结联动失败：${error instanceof Error ? error.message : String(error)}` })
     }
   }
 
-  // -- 员工档案 ------------------------------------------------------------
+  // -- Dossier de l'employé ------------------------------------------------------------
 
   create(input: {
     name: string
@@ -147,7 +147,7 @@ export class EmployeeService extends Service implements WorkforceEmployees {
       updatedAt: createdAt,
     }
 
-    // 同事务完成「唯一性域校验 + 员工建档 + 绑定建立」：一对一绑定是冻结决策（附录 A 决策 1）
+    // Même transaction pour « validation d'unicité de domaine + création du dossier de l'employé + établissement de la liaison » : la liaison un-à-un est une décision figée (annexe A décision 1)
     this.store.txn(() => {
       const conflict = this.store.bindings.findWhere({ agentId, status: 'active' })
       if (conflict.length > 0) {
@@ -175,39 +175,39 @@ export class EmployeeService extends Service implements WorkforceEmployees {
   }
 
   /**
-   * 停职/复岗/离岗：状态机流转 + 联动。
-   * 顺序纪律（fail-closed）：先收扰动面（撤 permit → 释放租约），后落状态——
-   * 撤 permit 失败即中止停职（宁可员工保持在岗，不可留下「停职但 permit 横行」的窗口）；
-   * 释放租约经 exec-hub 结构化探测，缺席/失败记录事件（僵尸锁回收兜底），不中止流程。
+   * Suspension/reprise/départ : transition de la machine à états + chaînage.
+   * Discipline d'ordre (fail-closed) : replier d'abord la face perturbatrice (révocation des permits → libération des baux), écrire l'état ensuite —
+   * un échec de révocation des permits interrompt la suspension (mieux vaut un employé maintenu en poste qu'une fenêtre « suspendu mais permits agissants ») ;
+   * la libération des baux passe par le sondage structuré exec-hub, absence/échec consigné en événement (rattrapage par récupération des verrous zombies), sans interrompre le flux.
    */
   setStatus(caller: WorkCallerRef, id: string, status: EmployeeStatus, reason: string): EmployeeRecord {
     const employee = this.get(id)
-    employeeStatusTransition(employee.status, status) // 非法流转在此抛中文错误
+    employeeStatusTransition(employee.status, status) // une transition illégale lève ici une erreur en chinois
     const trimmedReason = String(reason ?? '').trim()
     if ((status === 'suspended' || status === 'offboarded') && trimmedReason === '') {
       throw new Error(t('停职/离岗必须登记原因（审计与解冻依据）'))
     }
     const actionLabel = status === 'suspended' ? t('停职') : status === 'offboarded' ? t('离岗') : t('复岗')
 
-    // 1. 收集该员工当前持有 active permit 的 run（去重），并在撤销前经 activeForRun 复核归属
-    //    （复核必须在撤销 permit 之前完成——撤销后 activeForRun 即为空）
+    // 1. Collecter les runs détenant un permit active pour cet employé (dédupliqués), et revérifier le rattachement via activeForRun avant révocation
+    //    (la revérification doit précéder la révocation — après révocation, activeForRun est vide)
     const activePermits = this.store.permits.findWhere({ employeeId: id, status: 'active' })
     const permits = this.permits()
     const runIds: string[] = []
     if (status === 'suspended' || status === 'offboarded') {
       for (const runId of new Set(activePermits.map((permit) => permit.runId).filter((item) => item !== ''))) {
         const active = permits?.activeForRun(runId)
-        if (permits && (!active || active.employeeId !== id)) continue // activeForRun 复核不过：不释放该 run
+        if (permits && (!active || active.employeeId !== id)) continue // revérification activeForRun non convaincante : ce run n'est pas libéré
         runIds.push(runId)
       }
     }
 
-    // 2. 撤销全部工作授权（工作策略层先失效：新动作立即被拒，V07）
+    // 2. Révoquer toutes les autorisations de travail (la couche de politique de travail cesse la première : toute nouvelle action est immédiatement refusée, V07)
     if (permits && activePermits.length > 0) {
       permits.revokeForEmployee(id, t('员工{action}：{reason}', { action: actionLabel, reason: trimmedReason }))
     }
 
-    // 3. 释放执行租约（exec-hub 集成端口，结构化探测——不产生反向 import）
+    // 3. Libérer les baux d'exécution (port d'intégration exec-hub, sondage structuré — pas d'import inverse)
     if (status === 'suspended' || status === 'offboarded') {
       const execHub = this.execHub()
       const releaseReason = t('员工{action}：{reason}', { action: actionLabel, reason: trimmedReason })
@@ -229,7 +229,7 @@ export class EmployeeService extends Service implements WorkforceEmployees {
       }
     }
 
-    // 4. 状态机落库（复岗 reactivate 仅 suspended→active，转换表已约束）
+    // 4. Écriture en base de la machine à états (la reprise reactivate est uniquement suspended→active, contrainte par la table de transition)
     const updatedAt = nowIso()
     this.store.txn(() => {
       this.store.employees.update(id, { status, updatedAt })
@@ -242,7 +242,7 @@ export class EmployeeService extends Service implements WorkforceEmployees {
     return { ...employee, status, updatedAt }
   }
 
-  // -- 运行绑定 ------------------------------------------------------------
+  // -- Liaison d'exécution ------------------------------------------------------------
 
   bindingsFor(employeeId: string): BindingRecord[] {
     return this.store.bindings
@@ -251,10 +251,10 @@ export class EmployeeService extends Service implements WorkforceEmployees {
   }
 
   /**
-   * 换绑（事务内保证同 Agent 全平台仅一条 active）：
-   * 旧 active 绑定 → inactive；目标 Agent 若被其他员工占用 → 拒绝；
-   * 同 Agent 重复换绑视为幂等更新（回填 principalId/runtime）。
-   * 离岗（终态）员工不允许换绑；停职员工允许（为复岗做准备）。
+   * Changement de liaison (la transaction garantit un seul active par Agent sur toute la plateforme) :
+   * l'ancienne liaison active → inactive ; si l'Agent cible est occupé par un autre employé → refus ;
+   * un re-liage répété du même Agent vaut mise à jour idempotente (reconstitution de principalId/runtime).
+   * Un employé parti (état terminal) ne peut pas être re-lié ; un employé suspendu le peut (en préparation de la reprise).
    */
   bindAgent(caller: WorkCallerRef, employeeId: string, agentId: string, principalId?: string, runtime?: string): BindingRecord {
     const employee = this.get(employeeId)
@@ -270,7 +270,7 @@ export class EmployeeService extends Service implements WorkforceEmployees {
 
       const sameAgent = occupied.find((binding) => binding.employeeId === employeeId)
       if (sameAgent) {
-        // 幂等：同 Agent 重复换绑，仅回填主体/运行时信息
+        // Idempotent : re-liage répété du même Agent, simple reconstitution des informations sujet/runtime
         const patch: Partial<BindingRecord> = { updatedAt: createdAt }
         const trimmedPrincipal = String(principalId ?? '').trim()
         if (trimmedPrincipal !== '') patch.principalId = trimmedPrincipal

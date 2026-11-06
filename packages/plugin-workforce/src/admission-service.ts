@@ -1,10 +1,10 @@
 /**
- * 准入与认领服务（实施路径 §6.2/附录 A 决策 3：认领＝幂等确认已分配租约）。
+ * Service d'admission et de réclamation (chemin d'implémentation §6.2/annexe A décision 3 : réclamation = confirmation idempotente d'un bail déjà attribué).
  *
- * claimWork 是 REST /claims 与 exec_claim 兼容包装共用的统一入口：
- * 可信 caller 反查员工 → 任用生效 → 能力清单 → exec-hub 幂等认领（租约权威在
- * exec_run_leases）→ 签发 permit（同 run 幂等，不重复签）。
- * exec-hub 经结构化探测消费（ExecHubWorkIntegration，无反向 import）。
+ * claimWork est l'entrée unifiée partagée par REST /claims et l'enveloppe de compatibilité exec_claim :
+ * recherche inverse de l'employé par caller de confiance → nomination en vigueur → inventaire de capacités → réclamation idempotente exec-hub (référence des baux dans
+ * exec_run_leases) → émission du permit (idempotent pour un même run, pas de double émission).
+ * exec-hub est consommé par sondage structuré (ExecHubWorkIntegration, sans import inverse).
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -26,13 +26,13 @@ import type {
   WorkforceStore,
 } from './contract.ts'
 import { appointmentInEffect } from './domain.ts'
-// WorkforceError 为值导入（领域错误类）：本文件全部拒绝路径（灰度关闭/服务未就绪/任用失效/所有权）共用。
-// 此前遗漏该导入为潜伏缺陷——未触发拒绝路径时不暴露，灰度收口（W7）首次踩中并修复。
+// WorkforceError est un import de valeur (classe d'erreur de domaine) : commun à tous les chemins de refus de ce fichier (déploiement progressif désactivé/service non prêt/nomination invalide/propriété).
+// Son omission antérieure était un défaut latent — invisible tant qu'aucun chemin de refus n'était déclenché, rencontré et corrigé pour la première fois lors du verrouillage progressif (W7).
 import { WorkforceError } from './contract.ts'
 import { t } from '../../platform-i18n/src/index.ts'
 import type { WorkCallerRef, WorkDenyCode, WorkExecutionContext } from '../../platform-core/src/workforce-port.ts'
 
-/** exec-hub 员工工作集成结构化探针（组3 additive：ctx.execHub.claimForEmployee）。 */
+/** Sonde structurée de l'intégration du travail employé d'exec-hub (additive groupe 3 : ctx.execHub.claimForEmployee). */
 interface ExecHubProbe {
   claimForEmployee?: ExecHubWorkIntegration['claimForEmployee']
   renewLease?: ExecHubWorkIntegration['renewLease']
@@ -48,7 +48,7 @@ function probeExecHub(ctx: Context): ExecHubProbe {
 export class AdmissionService extends Service implements WorkforceAdmission {
   static readonly provide = 'workforceAdmission'
 
-  /** 灰度开关（W7 契约 D-② 组织级）：index.ts 装配传入全量 config，缺省 {}＝off 全开（向后兼容）。 */
+  /** Commutateur de déploiement progressif (contrat W7 D-② niveau organisation) : l'assemblage de index.ts passe la config complète, défaut {} = off tout ouvert (rétrocompatible). */
   private readonly grayConfig: WorkforceGrayConfig
 
   constructor(ctx: Context, config: WorkforceGrayConfig = {}) {
@@ -56,7 +56,7 @@ export class AdmissionService extends Service implements WorkforceAdmission {
     this.grayConfig = config
   }
 
-  // -- 依赖 -------------------------------------------------------------
+  // -- Dépendances -------------------------------------------------------------
 
   private get store(): WorkforceStore {
     const store = (this.ctx as unknown as { workforceStore?: WorkforceStore }).workforceStore
@@ -95,11 +95,11 @@ export class AdmissionService extends Service implements WorkforceAdmission {
       ;(this.ctx as unknown as { platformBus?: { emit(name: string, payload: unknown): unknown } })
         .platformBus?.emit(event, payload)
     } catch {
-      // platformBus 未注入当前 fiber 时跳过
+      // platformBus non injecté dans la fiber courante : ignoré
     }
   }
 
-  /** 任用失效细分：未生效（准备中/撤销中）与已过期是两种「等待/停止」语义（§13.3）。 */
+  /** Distingue les motifs de nullité de la nomination : non en vigueur (préparation/révocation en cours) et expirée relèvent de deux sémantiques « attente/arrêt » (§13.3). */
   private assertAppointmentEffective(appointment: AppointmentRecord): void {
     if (appointmentInEffect(appointment)) return
     const expired = appointment.effectiveUntil !== '' && appointment.effectiveUntil <= new Date().toISOString()
@@ -109,11 +109,11 @@ export class AdmissionService extends Service implements WorkforceAdmission {
     )
   }
 
-  // -- 灰度开关（W7 契约 D-②，与 port.authorizeWorkAction 同口径） -----------------------
+  // -- Commutateur de déploiement progressif (contrat W7 D-②, même référentiel que port.authorizeWorkAction) -----------------------
 
   /**
-   * 灰度拒绝判定：allowlist 模式且 orgId 不在名单 → true。off 模式（默认）全组织开放，
-   * 等价一期行为。查询面（拉取 work-items、状态查询）不拦——观测面保持开放。
+   * Jugement de refus progressif : mode allowlist et orgId hors liste → true. Mode off (défaut) tout ouvert,
+   * équivalent au comportement de phase 1. La face de requête (récupération des work-items, requêtes d'état) n'est pas interceptée — la face d'observation reste ouverte.
    */
   private grayDenied(orgId: string): boolean {
     return (this.grayConfig.grayMode ?? 'off') === 'allowlist'
@@ -121,9 +121,9 @@ export class AdmissionService extends Service implements WorkforceAdmission {
   }
 
   /**
-   * 灰度关闭组织的显式拒绝（拒绝语义＝显式拒绝而非静默回落 legacy，V29 同口径：拒绝并可观测）：
-   * emit workforce.gray.denied（surface:'admission'，payload 对齐 port 侧）后抛
-   * WORKFORCE_DISABLED（403）。认领/续租是新工作路径入口，此处收口在确认/延长之前。
+   * Refus explicite des organisations désactivées dans le déploiement progressif (sémantique = refus explicite et non repli silencieux vers legacy, même référentiel V29 : refus observable) :
+   * émet workforce.gray.denied (surface:'admission', payload aligné sur le côté port) puis lève
+   * WORKFORCE_DISABLED (403). Réclamation/prolongation sont les entrées du nouveau chemin de travail, le verrouillage se fait ici avant confirmation/prolongation.
    */
   private assertGrayOpen(orgId: string, employeeId: string): void {
     if (!this.grayDenied(orgId)) return
@@ -135,30 +135,30 @@ export class AdmissionService extends Service implements WorkforceAdmission {
         at: new Date().toISOString(),
       })
     } catch {
-      // 通知失败不影响拒绝本身（拒绝先于可观测，fail-closed）
+      // L'échec de notification n'affecte pas le refus lui-même (le refus prime sur l'observabilité, fail-closed)
     }
     throw new WorkforceError('WORKFORCE_DISABLED', t('数字员工域对组织 {orgId} 处于灰度关闭（仅白名单组织开放）', { orgId }), 403)
   }
 
-  // -- 认领 -------------------------------------------------------------
+  // -- Réclamation -------------------------------------------------------------
 
   async claimWork(caller: WorkCallerRef, input: ClaimInput): Promise<ClaimOutcome> {
-    // 1. 可信 caller 反查员工（防绕行：与请求是否携带 work 上下文无关，D.5）
+    // 1. Recherche inverse de l'employé par caller de confiance (anti-contournement : indépendant du fait que la requête porte un contexte work, D.5)
     const resolution = await this.identity.resolveByCaller(caller)
     if (!resolution) {
       return { ok: false, code: 'EMPLOYEE_NOT_ACTIVE', message: t('非受管数字员工或绑定缺失') }
     }
-    // 2. 灰度开关（W7 契约 D-②）：关闭组织在确认前显式拒绝——认领＝幂等确认已分配租约，
-    //    灰度拒绝发生在确认之前（新工作路径入口收口，payload/语义与 port 侧对齐）
+    // 2. Commutateur de déploiement progressif (contrat W7 D-②) : organisation désactivée = refus explicite avant confirmation — réclamation = confirmation idempotente d'un bail déjà attribué,
+    //    le refus progressif survient avant la confirmation (verrouillage à l'entrée du nouveau chemin de travail, payload/sémantique alignés sur le côté port)
     this.assertGrayOpen(resolution.appointment.orgId, resolution.employee.id)
-    // 3. 任用生效
+    // 3. Nomination en vigueur
     try {
       this.assertAppointmentEffective(resolution.appointment)
     } catch (error) {
       if (error instanceof WorkforceError) return { ok: false, code: error.code, message: error.message }
       throw error
     }
-    // 4. 能力清单（active 复用，否则按生效授权构建——构建含 skill 版本锁定探针，失败即认领失败）
+    // 4. Inventaire de capacités (réutilise l'active, sinon construit depuis les autorisations en vigueur — la construction inclut la sonde de verrouillage de version des skills, échec = échec de la réclamation)
     let manifest: ManifestRecord
     try {
       manifest = this.capabilities.activeForAppointment(resolution.appointment.id)
@@ -166,7 +166,7 @@ export class AdmissionService extends Service implements WorkforceAdmission {
     } catch (error) {
       return { ok: false, code: 'APPOINTMENT_NOT_EFFECTIVE', message: t('能力清单构建失败：{message}', { message: error instanceof Error ? error.message : String(error) }) }
     }
-    // 5. exec-hub 集成（结构化探测；缺席＝工作路径不可用，不静默降级）
+    // 5. Intégration exec-hub (sondage structuré ; absence = chemin de travail indisponible, pas de dégradation silencieuse)
     const hub = probeExecHub(this.ctx)
     if (typeof hub.claimForEmployee !== 'function') {
       return { ok: false, code: 'WORKFORCE_NOT_READY', message: t('执行中枢未提供员工工作集成（execHub.claimForEmployee 缺席），工作路径暂不可用') }
@@ -187,7 +187,7 @@ export class AdmissionService extends Service implements WorkforceAdmission {
     if (!claim.ok) {
       return this.mapClaimFailure(claim)
     }
-    // 6. permit 幂等：该 run 已有本员工 active 且未过期的 permit → 直接复用，不重复签发
+    // 6. Idempotence du permit : ce run a déjà un permit active non expiré pour cet employé → réutilisation directe, pas de double émission
     const existing = this.store.permits.findWhere({ runId: claim.runId }).find((permit) =>
       permit.status === 'active'
       && permit.employeeId === resolution.employee.id
@@ -239,7 +239,7 @@ export class AdmissionService extends Service implements WorkforceAdmission {
     }
   }
 
-  /** exec-hub 认领失败 → 统一拒绝码映射（错误要能指导「停止/申请/等待/核验/重试」，§13.3）。 */
+  /** Échec de réclamation exec-hub → mapping vers codes de refus unifiés (l'erreur doit pouvoir guider « arrêter/demander/attendre/vérifier/retenter », §13.3). */
   private mapClaimFailure(claim: Extract<EmployeeClaimResult, { ok: false }>): ClaimOutcome {
     switch (claim.code) {
       case 'LEASE_HELD_BY_OTHER':
@@ -260,14 +260,14 @@ export class AdmissionService extends Service implements WorkforceAdmission {
     }
   }
 
-  // -- 续租 -------------------------------------------------------------
+  // -- Prolongation du bail -------------------------------------------------------------
 
   async renewWorkLease(caller: WorkCallerRef, permitId: string, ttlMs?: number): Promise<EmployeeLeaseResult> {
-    // D3 修复：verifyPermit 返回 Promise，必须 await 取值——此前 permit.runId 为 undefined，
-    // 续租全路径被 exec-hub「参数不足」守卫拒绝（恒 LEASE_STALE）
+    // Correctif D3 : verifyPermit renvoie une Promise, il faut l'awaiter pour obtenir la valeur — auparavant permit.runId valait undefined,
+    // tout le chemin de prolongation était refusé par la garde « paramètres insuffisants » d'exec-hub (systématiquement LEASE_STALE)
     const permit = await this.verifyPermit(caller, permitId, { requireRun: true })
-    // 灰度收口（W7 契约 D-②，与认领/port 同口径）：关闭组织不得续租延长工作——
-    // orgId 从 permit 绑定的任用回查（不依赖 identity 解析窗口，任用非生效时同样可判）
+    // Verrouillage progressif (contrat W7 D-②, même référentiel que réclamation/port) : une organisation désactivée ne peut prolonger le travail —
+    // orgId est revérifié depuis la nomination liée au permit (indépendant de la fenêtre de résolution identity, jugable même si la nomination n'est plus en vigueur)
     const appointment = this.store.appointments.get(permit.appointmentId)
     if (appointment) this.assertGrayOpen(appointment.orgId, permit.employeeId)
     const hub = probeExecHub(this.ctx)
@@ -277,15 +277,15 @@ export class AdmissionService extends Service implements WorkforceAdmission {
     return hub.renewLease({ runId: permit.runId, principalId: caller.principalId, ...(ttlMs !== undefined ? { ttlMs } : {}) })
   }
 
-  // -- permit 校验与 run 所有权 ---------------------------------------------
+  // -- Vérification du permit et propriété du run ---------------------------------------------
 
   /**
-   * 网关折叠身份归一（D1 配套，附录 A 决策 10）：资源网关 InvokeCaller 只有单一 id 位，
-   * workCallerRefFromInvokeCaller 把机器主体折叠为 principalId=refId=技术身份 agentId，
-   * 而 permit 绑定的主体是绑定 principalId（已验证机器凭证主体）。此类折叠 caller 已由
-   * 网关按已验证凭证反查产出（refId 可信），主体一致性以绑定 principalId 归一后核验；
-   * 归一不可得（无有效绑定/绑定未回填主体）保持原样 fail-closed。真人 caller 与双位身份
-   * 的运行时 caller（principalId≠refId，如 exec.principal）不受影响——主体不匹配照旧抛错。
+   * Normalisation de l'identité repliée des passerelles (volet D1, annexe A décision 10) : l'InvokeCaller des passerelles de ressources n'a qu'une seule place d'id,
+   * workCallerRefFromInvokeCaller replie le sujet machine en principalId=refId=identité technique agentId,
+   * alors que le sujet lié au permit est le principalId de la liaison (sujet du justificatif machine vérifié). Un tel caller replié a été produit
+   * par la passerelle par recherche inverse sur justificatif vérifié (refId de confiance), la cohérence du sujet est vérifiée après normalisation vers le principalId de la liaison ;
+   * normalisation indisponible (aucune liaison valide/liaison sans sujet reconstitué) : on reste tel quel en fail-closed. Les callers humains et les callers de runtime
+   * à double place d'identité (principalId≠refId, ex. exec.principal) ne sont pas concernés — un sujet non concordant continue de lever l'erreur.
    */
   private normalizeCollapsedCaller(caller: WorkCallerRef): WorkCallerRef {
     if (caller.kind !== 'machine' || caller.refType !== 'agent' || !caller.refId) return caller
@@ -300,9 +300,9 @@ export class AdmissionService extends Service implements WorkforceAdmission {
   }
 
   /**
-   * exec_complete/交付路径的 run 所有权断言（D07）：
-   * 该 run 必须存在本主体签发且有效的 permit（主体一致性），
-   * 再经 exec-hub assertRunOwnership 校验租约归属与新旧版本。
+   * Assertion de propriété du run pour les chemins exec_complete/livraison (D07) :
+   * ce run doit avoir un permit valide émis pour ce sujet (cohérence du sujet),
+   * puis assertRunOwnership d'exec-hub vérifie le rattachement du bail et les versions anciennes/récentes.
    */
   async assertRunOwnership(caller: WorkCallerRef, runId: string): Promise<WorkExecutionContext> {
     const permit = this.store.permits.findWhere({ runId }).find((candidate) =>
@@ -326,7 +326,7 @@ export class AdmissionService extends Service implements WorkforceAdmission {
     return this.workContextOf(permit, verdict.lease)
   }
 
-  /** permit + 租约 → 核验后可信执行上下文（§8.3：全部字段服务端回查，不信客户端同形 JSON）。 */
+  /** permit + bail → contexte d'exécution de confiance vérifié (§8.3 : tous les champs revérifiés côté serveur, un JSON client de même forme n'est pas cru). */
   private workContextOf(permit: PermitRecord, lease?: RunLeaseRecord): WorkExecutionContext {
     const appointment = this.store.appointments.get(permit.appointmentId)
     const employee = this.store.employees.get(permit.employeeId)

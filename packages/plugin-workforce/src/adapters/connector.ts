@@ -1,11 +1,11 @@
 /**
- * Connector 资源适配器（§4.3/D.3：外部 SaaS／企业连接器的独立出口）。
+ * Adaptateur de ressources Connector (§4.3/D.3 : sortie dédiée aux connecteurs SaaS externes／d'entreprise).
  *
- * invoke：结构化探测 connectorHub.invokeAction 真实签名并复用其完整六步链
- * （主体授权→ODD→审批→限流→快照校验→数据面），工作级准入已在 invocation 层完成。
- * 稳定幂等键：`wf:<runId>:<handle>:<argsHash>` sha256 截断——当前网关签名
- * 未暴露外部幂等键入参（executeWithRecovery 内部随机生成），先记入 gatewayRef
- * 作对账证据，待组4 additive 后透传（诚实降级，不伪造已生效）。
+ * invoke : sondage structuré de la signature réelle connectorHub.invokeAction et réutilisation de sa chaîne à six étapes complète
+ * (autorisation du sujet→ODD→approbation→limitation→vérification d'instantané→plan de données), l'admission au niveau travail est déjà faite à la couche invocation.
+ * Clé idempotente stable : `wf:<runId>:<handle>:<argsHash>` sha256 tronqué — la signature actuelle de la passerelle
+ * n'expose pas de paramètre de clé idempotente externe (généré aléatoirement en interne par executeWithRecovery), donc consignée d'abord dans gatewayRef
+ * comme preuve de réconciliation, à transmettre après l'additive du groupe 4 (dégradation honnête, sans simuler une effectivité).
  */
 import { sha256Hex } from '../../../platform-core/src/ids.ts'
 import { canonicalJson } from '../domain.ts'
@@ -19,7 +19,7 @@ import type {
 import type { IdentityResolution, ResourceGrantSpec } from '../contract.ts'
 import type { WorkExecutionContext } from '../../../platform-core/src/workforce-port.ts'
 
-/** connectorHub 结构化探测面（真实签名见 plugin-connector/src/index.ts ConnectorHubService）。 */
+/** Face de sondage structurée de connectorHub (signature réelle dans plugin-connector/src/index.ts ConnectorHubService). */
 interface ConnectorHubProbe {
   invokeAction?: (caller: { type: 'user' | 'agent' | 'app'; id: string; name: string; actChain?: Array<{ name: string; type: string }> }, params: {
     actionId: string
@@ -34,7 +34,7 @@ interface ConnectorHubProbe {
   >
 }
 
-/** 稳定业务幂等键（§4.3/§11.5-3：跨请求复用同一业务步骤的同一写入）。 */
+/** Clé idempotente métier stable (§4.3/§11.5-3 : réutilise la même écriture de la même étape métier à travers les requêtes). */
 export function workforceIdempotencyKey(work: WorkExecutionContext, toolHandle: string, args: Record<string, unknown>): string {
   return sha256Hex(`wf:${work.runId}:${toolHandle}:${canonicalJson(args)}`).slice(0, 32)
 }
@@ -47,8 +47,8 @@ export function createConnectorAdapter(ctx: {
   return {
     kind: 'connector',
 
-    // 授权探针：connector 的真实授权在 invokeAction 六步链内逐步核验（快照/ODD/审批），
-    // 平台侧提供 register-型管理面的动作目录核验——这里只核验注册表存在性（不预演网络）。
+    // Sonde d'autorisation : l'autorisation réelle du connector est vérifiée étape par étape dans la chaîne à six étapes d'invokeAction (instantané/ODD/approbation),
+    // le côté plateforme fournit la vérification du catalogue d'actions de la face de gestion register — on ne vérifie ici que l'existence dans le registre (pas de simulation réseau).
     async probeGrant(spec: ResourceGrantSpec, _resolution: IdentityResolution): Promise<AdapterProbeResult> {
       if (typeof hub().invokeAction !== 'function') {
         return { ok: false, message: t('connectorHub 未提供 invokeAction 能力，无法核验连接器授权') }
@@ -79,7 +79,7 @@ export function createConnectorAdapter(ctx: {
           if (result.status === 'dry_run') {
             return { ok: true, value: result.preview, gatewayRef: { dryRun: true, idempotencyKey } }
           }
-          // 数据面 executionId 进 gatewayRef（D.3 最小证据）
+          // L'executionId du plan de données entre dans gatewayRef (preuve minimale D.3)
           return {
             ok: true,
             value: result.data,
@@ -115,7 +115,7 @@ export function createConnectorAdapter(ctx: {
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        // 写动作超时/网络不确定 → 结果未知（§11.5-4：先核验，禁止自动重写）
+        // Action d'écriture en timeout/incertitude réseau → résultat inconnu (§11.5-4 : vérifier d'abord, réécriture automatique interdite)
         const uncertain = input.tool.risk !== 'read' && /超时|timeout|abort|ECONNRESET|ETIMEDOUT/i.test(message)
         return {
           ok: false,

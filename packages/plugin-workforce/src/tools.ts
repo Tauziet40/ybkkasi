@@ -1,9 +1,9 @@
 /**
- * 运行时薄工具（workforce_claim / workforce_invoke / workforce_renew / workforce_submit）。
+ * Outils fins d'exécution (workforce_claim / workforce_invoke / workforce_renew / workforce_submit).
  *
- * 纪律（§10.3/D02）：身份一律取 exec.principal（入口从令牌解析后注入），禁止从 args
- * 读取身份；principal 缺失 fail-closed 返回中文错误。工具只是业务服务的薄封装，
- * REST / MCP / 宿主三端转同一服务，不复制实现（§13.1）。
+ * Discipline (§10.3/D02) : l'identité vient toujours d'exec.principal (injecté par l'entrée après analyse du jeton), la lecture d'identité depuis
+ * args est interdite ; principal manquant = fail-closed avec erreur en chinois. Les outils ne sont que de fines enveloppes des services métier,
+ * les trois extrémités REST / MCP / hôte délèguent au même service, pas d'implémentation dupliquée (§13.1).
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '../../platform-core/src/tools-lite.ts'
@@ -16,7 +16,7 @@ import type {
   InvocationOutcome,
 } from './contract.ts'
 
-/** exec.principal → 可信 caller（缺 refType/refId 时照实缺省——组1 resolver 只认 refType='agent'）。 */
+/** exec.principal → caller de confiance (défaut assumé en l'absence de refType/refId — le resolver du groupe 1 ne reconnaît que refType='agent'). */
 function callerRefOf(principal: ToolPrincipal | undefined): WorkCallerRef {
   if (!principal || !principal.principalId) {
     throw new WorkforceError('PRINCIPAL_BINDING_MISMATCH', t('缺少调用主体身份（fail-closed）：工具不允许从参数读取身份'))
@@ -31,7 +31,7 @@ function callerRefOf(principal: ToolPrincipal | undefined): WorkCallerRef {
   }
 }
 
-/** 服务拒绝 → 结构化失败负载（code 英文枚举 + message 中文，§13.3）。 */
+/** Refus du service → charge utile d'échec structurée (code énumération anglaise + message en chinois, §13.3). */
 function failureOf(error: unknown): { ok: false; code: string; message: string } {
   if (error instanceof WorkforceError) {
     return { ok: false, code: error.code, message: error.message }
@@ -162,7 +162,7 @@ export function registerWorkforceTools(ctx: Context): void {
           arguments: args.arguments,
           ...(typeof args.traceId === 'string' && args.traceId ? { traceId: args.traceId } : {}),
         })
-        // 按领域状态透传（中文 message），不以 HTTP/工具成功冒充业务成功
+        // Transmission selon l'état du domaine (message en chinois), ne pas faire passer un succès HTTP/outil pour un succès métier
         return outcome
       } catch (error) {
         return failureOf(error)

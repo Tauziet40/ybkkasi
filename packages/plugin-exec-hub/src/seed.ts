@@ -1,7 +1,7 @@
 /**
- * 执行中枢演示种子（G3）：DEMO_SEED=1 且 exec:goals 为空时幂等落一批
- * 制造业三部门语境的目标/项目/任务/例行/心跳示例——「一进来就看到完整闭环」。
- * 生产库（无 DEMO_SEED）零落盘；不覆盖既有数据（幂等：以集合空为闸）。
+ * Graines de démonstration du centre d'exécution (G3) : quand DEMO_SEED=1 et exec:goals est vide, dépose idempotemment un lot
+ * d'exemples d'objectifs/projets/tâches/routines/battements dans le contexte manufacturier à trois départements — « voir d'emblée la boucle complète ».
+ * Base de production (sans DEMO_SEED) : zéro écriture ; n'écrase pas les données existantes (idempotent : la collection vide sert de porte).
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { newId } from '../../platform-core/src/index.ts'
@@ -10,7 +10,7 @@ import type { ExecutionHubService, HeartbeatRecord } from './index.ts'
 export function seedExecHub(ctx: Context, hub: ExecutionHubService): void {
   if (process.env.DEMO_SEED !== '1') return
   if (hub.goals().all().length > 0) return
-  // 依赖 console 种子先落 Agent（boot 顺序保证）；找不到就整批放弃（不部分落盘）
+  // Dépend de la graine console pour poser d'abord l'Agent (ordre de boot garanti) ; introuvable = abandon du lot entier (pas d'écriture partielle)
   const agent = ctx.resourceCore.list('agent').find((item) => item.status === 'online')
   const orgId = agent?.orgId ?? ctx.iam.orgs().all()[0]?.id ?? ''
   const now = Date.now()
@@ -55,7 +55,7 @@ export function seedExecHub(ctx: Context, hub: ExecutionHubService): void {
     orgId, projectId: projectA.id, title: '采集数据管道联调',
     priority: 'P2', blockerIds: [i1.id], createdBy: 'seed',
   })
-  // 生命周期演示：一条走完 todo → in_progress → review → done 的完整链
+  // Démonstration de cycle de vie : une chaîne complète todo → in_progress → review → done
   const done = hub.createIssue({
     orgId, projectId: projectA.id, title: '质检看板埋点补齐', priority: 'P3', createdBy: 'seed',
   })
@@ -63,14 +63,14 @@ export function seedExecHub(ctx: Context, hub: ExecutionHubService): void {
   hub.transitionIssue(done.id, 'review', 'seed')
   hub.transitionIssue(done.id, 'done', 'seed')
 
-  // 例行规则：晨间待办巡检（interval 240 分钟）
+  // Règle de routine : inspection des tâches à faire matinales (intervalle 240 minutes)
   if (agent) {
     hub.routines().insert({
       id: newId('rtn'), orgId, agentId: agent.id,
       name: '晨间待办巡检（演示）', kind: 'interval', intervalMinutes: 240,
       enabled: true, createdBy: 'seed',
     })
-    // 心跳留痕：近两轮（一轮唤醒、一轮无待办）撑起健康卡
+    // Traçabilité des battements : les deux derniers tours (un tour de réveil, un tour sans tâche à faire) soutiennent la carte santé
     const heartbeats = hub.heartbeats()
     const rows: Array<Omit<HeartbeatRecord, 'id' | 'createdAt' | 'updatedAt'>> = [
       { agentId: agent.id, orgId, at: iso(-50 * 60_000), outcome: 'woken', detail: '3 项待办', issueCount: 3 },

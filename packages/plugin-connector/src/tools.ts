@@ -1,7 +1,7 @@
 /**
- * connector 插件对模型/CLI/工具桥暴露的工具（defineTool → ctx.tools 三端自动同契约）。
- * 权限点与 REST 对齐；身份与组织范围一律取自执行上下文 exec.principal（入口从令牌解析注入），
- * schema 不声明 caller 星号参数与 orgId——上下文缺失即 fail-closed，杜绝自填身份与跨 org 枚举。
+ * Outils exposés par l'extension connector au modèle/CLI/pont d'outils (defineTool → ctx.tools, même contrat automatiquement aux trois bouts).
+ * Points de permission alignés sur REST ; identité et périmètre organisationnel toujours tirés du contexte d'exécution exec.principal (injecté à l'entrée par analyse du jeton),
+ * le schéma ne déclare ni paramètre étoilé caller ni orgId — contexte absent = fail-closed, fini l'auto-remplissage d'identité et l'énumération inter-org.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '../../platform-core/src/index.ts'
@@ -51,7 +51,7 @@ export function apply(ctx: Context) {
     },
     output: { type: 'object', additionalProperties: true },
     async execute(args, exec) {
-      // org 范围由服务端从执行上下文收敛（与 REST restrictOrgScope 同一逻辑），不接受入参
+      // Le périmètre org est resserré côté serveur depuis le contexte d'exécution (même logique que REST restrictOrgScope), aucun paramètre d'entrée accepté
       const orgScope = ctx.connectorHub.orgScopeFor(exec.principal)
       if (orgScope === null) return { total: 0, connections: [], note: translate('当前身份无组织归属，连接可见范围为空（fail-closed）') }
       const refs = ctx.connectorHub.connections().find((item) =>
@@ -90,7 +90,7 @@ export function apply(ctx: Context) {
     },
     output: { type: 'object', additionalProperties: true },
     async execute(args, exec) {
-      // 调用方身份取自执行上下文（入口从令牌解析），缺失即 fail-closed，不再有共享身份兜底
+      // L'identité de l'appelant vient du contexte d'exécution (analysée à l'entrée depuis le jeton), absente = fail-closed, plus de repli d'identité partagée
       const work = (args.work ?? {}) as { permitId?: unknown; runId?: unknown; stepKey?: unknown }
       const workRef = {
         ...(typeof work.permitId === 'string' && work.permitId ? { permitId: work.permitId } : {}),

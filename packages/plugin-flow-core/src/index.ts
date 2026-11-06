@@ -1,18 +1,18 @@
 /**
- * @dsh-ops/plugin-flow-core —— 事务流引擎（IAW 交接 3-1..3-4，PRD M5/§7.5，宿主新域）。
+ * @dsh-ops/plugin-flow-core — moteur de flux de dossiers (livraison IAW 3-1..3-4, PRD M5/§7.5, nouveau domaine hôte).
  *
- * 事务流（TF）= 从触发到归档的多步编排，任务（panel:tasks）之上的编排层：
- *   - TF CRUD + 步骤状态机（3-1）：步骤型人/Agent/网关三型执行者，
- *     状态机 pending→running→done/blocked/skipped（done 自动推进下一待启步骤）；
- *     每次流转 emit flow.created / flow.step.updated / flow.completed（platformBus，
- *     面板 SSE 经 wireEventBus 扇出可直接消费）。
- *   - 模板库（3-2）：按场景登记模板，一键复制推广实例化；上下文包（contextPack）
- *     随实例化返回供调用方自动注入。
- *   - SLA / 进度（3-3）：slaMinutes + dueAt + 实时 progress（done/(total-skipped)），
- *     逾期=读取时计算（slaBreached），不做后台定时器（诚实口径：查询时点判定）。
- *   - 甘特（3-4）：步骤 startedAt/finishedAt 齐备，前端可直接渲染（本插件只供数据）。
+ * Flux de dossier (TF) = orchestration multi-étapes du déclencheur à l'archivage, couche d'orchestration au-dessus des tâches (panel:tasks) :
+ *   - CRUD de TF + machine à états des étapes (3-1) : étapes à exécutant humain/Agent/passserelle (trois types),
+ *     machine pending→running→done/blocked/skipped (done avance automatiquement la prochaine étape à démarrer) ;
+ *     chaque transition émet flow.created / flow.step.updated / flow.completed (platformBus,
+ *     le SSE du pannel peut consommer directement via l'éventail wireEventBus).
+ *   - Bibliothèque de modèles (3-2) : modèles enregistrés par scénario, instanciation en un clic par copie-déclinaison ; le paquet de contexte (contextPack)
+ *     est renvoyé avec l'instanciation pour injection automatique par l'appelant.
+ *   - SLA / progression (3-3) : slaMinutes + dueAt + progress temps réel (done/(total-skipped)),
+ *     dépassement calculé à la lecture (slaBreached), pas de minuteur en arrière-plan (référentiel honnête : jugement à l'instant de la requête).
+ *   - Gantt (3-4) : startedAt/finishedAt complets sur les étapes, le front peut rendre directement (cette extension ne fournit que les données).
  *
- * 真实化红线：TF 不虚构业务状态——步骤推进必须显式调用，无任何自动「假装完成」逻辑。
+ * Ligne rouge de véridicité : le TF n'invente pas d'état métier — l'avancement des étapes doit être explicitement appelé, aucune logique automatique de « complété simulé ».
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -23,7 +23,7 @@ import { t } from '../../platform-i18n/src/index.ts'
 import type { AuditLogRecord } from '../../plugin-audit/src/index.ts'
 
 // ---------------------------------------------------------------------------
-// 记录模型
+// Modèle d'enregistrements
 // ---------------------------------------------------------------------------
 
 export type FlowStepActorType = 'human' | 'agent' | 'gateway'
@@ -34,7 +34,7 @@ export interface FlowStepRecord {
   key: string
   name: string
   actorType: FlowStepActorType
-  /** human=userId / agent=数字同事名 / gateway=网关动作名。 */
+  /** human = userId / agent = nom du collègue numérique / gateway = nom d'action de passerelle. */
   assignee?: string
   status: FlowStepStatus
   note?: string
@@ -49,14 +49,14 @@ export interface FlowRecord extends RecordBase {
   sceneCode?: string
   dept?: string
   orgId?: string
-  /** 实例化来源模板（自由编排无此字段）。 */
+  /** Modèle source d'instanciation (absent en orchestration libre). */
   templateCode?: string
   steps: FlowStepRecord[]
   status: FlowStatus
-  /** SLA（分钟，3-3）：触发时点起算；dueAt=createdAt+slaMinutes。 */
+  /** SLA (minutes, 3-3) : décompté depuis le déclenchement ; dueAt = createdAt+slaMinutes. */
   slaMinutes?: number
   dueAt?: string
-  /** 停滞标记（C-06）：running 态但 running 步=0 时落时点；恢复推进即清除。只告警不自动重跑。 */
+  /** Marque de stagnation (C-06) : horodatée quand l'état est running mais qu'aucune étape n'est running ; effacée dès reprise de l'avancement. Alerte seule, pas de relance automatique. */
   stalledAt?: string
   createdBy: string
   finishedAt?: string
@@ -70,7 +70,7 @@ export interface FlowTemplateStep {
   note?: string
 }
 
-/** 事务流模板（3-2）：按场景复制推广的母版 + 上下文包声明。 */
+/** Modèle de flux de dossier (3-2) : gabarit à copier-décliner par scénario + déclaration du paquet de contexte. */
 export interface FlowTemplateRecord extends RecordBase {
   code: string
   name: string
@@ -78,7 +78,7 @@ export interface FlowTemplateRecord extends RecordBase {
   description?: string
   steps: FlowTemplateStep[]
   slaMinutes?: number
-  /** 上下文包（实例化时随 contextPack 字段返回，供调用方自动注入首个步骤）。 */
+  /** Paquet de contexte (renvoyé lors de l'instanciation via le champ contextPack, pour injection automatique par l'appelant dans la première étape). */
   contextPack?: Record<string, unknown>
   createdBy: string
 }
@@ -94,13 +94,13 @@ const STEP_TRANSITIONS: Record<FlowStepAction, { from: FlowStepStatus[]; to: Flo
   skip: { from: ['pending', 'running', 'blocked'], to: 'skipped' },
 }
 
-/** SLA 校验（C-07）：必须为正数——非法值会让 dueAt 早于 createdAt（出生即逾期/overdueMinutes 为负）。 */
+/** Validation du SLA (C-07) : doit être positif — une valeur illégale mettrait dueAt avant createdAt (né dépassé/overdueMinutes négatif). */
 const assertSlaMinutes = (value: number): void => {
   if (!Number.isFinite(value) || value <= 0) throw new Error(t('slaMinutes 必须为正数（分钟），收到：{value}', { value }))
 }
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 export class FlowService extends Service {
@@ -110,7 +110,7 @@ export class FlowService extends Service {
     super(ctx, 'flow')
   }
 
-  // -- 集合 -----------------------------------------------------------------
+  // -- Collections -----------------------------------------------------------------
 
   flows(): Collection<FlowRecord> {
     const collection = this.ctx.opsStorage.collection<FlowRecord>('flow:flows')
@@ -124,7 +124,7 @@ export class FlowService extends Service {
     return collection
   }
 
-  // -- 模板库（3-2） ----------------------------------------------------------
+  // -- Bibliothèque de modèles (3-2) ----------------------------------------------------------
 
   upsertTemplate(input: {
     code: string
@@ -179,7 +179,7 @@ export class FlowService extends Service {
       .sort((a, b) => a.code.localeCompare(b.code))
   }
 
-  // -- TF 编排（3-1） -----------------------------------------------------------
+  // -- Orchestration TF (3-1) -----------------------------------------------------------
 
   private validateStepDraft(steps: Array<{ key?: string; name?: string; actorType?: string }>): void {
     if (!Array.isArray(steps) || steps.length === 0) throw new Error(t('事务流至少一个步骤（steps）'))
@@ -195,9 +195,9 @@ export class FlowService extends Service {
   }
 
   /**
-   * 创建 TF：templateCode 实例化（模板库复制推广）或 steps 自由编排。
-   * 首步骤自动 running（startedAt 落时）；slaMinutes 同时折算 dueAt（3-3）。
-   * 返回带 contextPack（模板上下文包，供调用方注入）。
+   * Crée un TF : instanciation de templateCode (copie-déclinaison depuis la bibliothèque) ou orchestration libre via steps.
+   * Première étape automatiquement running (startedAt horodaté) ; slaMinutes converti en même temps en dueAt (3-3).
+   * Renvoie avec contextPack (paquet de contexte du modèle, à injecter par l'appelant).
    */
   createFlow(input: {
     name: string
@@ -222,7 +222,7 @@ export class FlowService extends Service {
       steps = input.steps ?? []
     }
     this.validateStepDraft(steps)
-    // C-07：入参或模板继承的 slaMinutes 都必须为正数（防出生即逾期）
+    // C-07 : le slaMinutes venant de l'entrée ou hérité du modèle doit être positif (contre le « né dépassé »)
     if (slaMinutes !== undefined) assertSlaMinutes(slaMinutes)
     const now = new Date().toISOString()
     const record = this.flows().insert({
@@ -268,7 +268,7 @@ export class FlowService extends Service {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }
 
-  /** 读取态视图（3-3/3-4）：进度 / SLA / 步骤时间轴（甘特数据源）。 */
+  /** Vue à l'état de lecture (3-3/3-4) : progression / SLA / axe temporel des étapes (source de données Gantt). */
   viewOf(flow: FlowRecord): FlowView {
     const executable = flow.steps.filter((step) => step.status !== 'skipped')
     const done = executable.filter((step) => step.status === 'done').length
@@ -286,9 +286,9 @@ export class FlowService extends Service {
   }
 
   /**
-   * 步骤状态机（3-1）：pending→running→done/blocked/skipped；blocked→running（restart）；
-   * done 自动推进下一个 pending 步骤为 running。全链 done/skipped → TF completed。
-   * 每次变更 emit flow.step.updated；完成 emit flow.completed（面板 SSE 扇出）。
+   * Machine à états des étapes (3-1) : pending→running→done/blocked/skipped ; blocked→running (restart) ;
+   * done avance automatiquement la prochaine étape pending en running. Chaîne complète done/skipped → TF completed.
+   * Chaque changement émet flow.step.updated ; l'achèvement émet flow.completed (éventail SSE du panneau).
    */
   stepTransition(flowId: string, stepKey: string, action: FlowStepAction, actor: string, note?: string): { flow: FlowRecord & FlowView; completed: boolean } {
     const rule = STEP_TRANSITIONS[action]
@@ -322,8 +322,8 @@ export class FlowService extends Service {
       }
     }
     const allSettled = steps.every((item) => item.status === 'done' || item.status === 'skipped')
-    // C-06：running 态但 running 步=0（如 skip 掉唯一 running 步且仍有 pending 步）——流程停滞。
-    // 只落标记 + 告警事件，不自动重跑（真实化红线：推进必须显式调用）；恢复推进时清除标记。
+    // C-06 : état running mais aucune étape running (ex. sauter la seule étape running alors qu'il reste des pending) — flux stagnant.
+    // Seulement pose du marqueur + événement d'alerte, pas de relance automatique (ligne rouge de véridicité : l'avancement doit être explicite) ; le marqueur est effacé à la reprise.
     const stalled = !allSettled && !steps.some((item) => item.status === 'running')
     const updated = collection.update(flow.id, {
       steps,
@@ -368,21 +368,21 @@ export class FlowService extends Service {
   }
 }
 
-/** 读取态派生视图（additive 字段，不落库）。 */
+/** Vue dérivée à l'état de lecture (champs additifs, non persistés). */
 export interface FlowView {
-  /** 完成进度百分比（done/(total-skipped)，0-100，一位小数）。 */
+  /** Pourcentage d'avancement (done/(total-skipped), 0-100, une décimale). */
   progress: number
-  /** 当前 running 步骤 key（无=空串）。 */
+  /** Clé de l'étape running courante (vide si aucune). */
   currentStep?: string
   elapsedMinutes: number
   slaBreached: boolean
   overdueMinutes: number
-  /** 停滞（C-06）：running 态但 running 步=0，记录见 stalledAt。 */
+  /** Stagnation (C-06) : état running sans étape running, horodatage voir stalledAt. */
   stalled?: boolean
 }
 
 // ---------------------------------------------------------------------------
-// REST（/api/flow/*：guarded 自注册汇入 routeMatrix，鉴权依赖 console 中间件先行）
+// REST (/api/flow/* : guarded auto-enregistré et fondu dans routeMatrix, l'authentification dépend du middleware console en amont)
 // ---------------------------------------------------------------------------
 
 export function apply(ctx: Context) {
@@ -390,14 +390,14 @@ export function apply(ctx: Context) {
   const flow = new FlowService(ctx)
   const http = ctx.httpServer
 
-  // R5 收敛：caller/requirePermission/guarded/body/actorOf 统一引 platform-core 共享实现（单点修复、单点审计）
+  // Convergence R5 : caller/requirePermission/guarded/body/actorOf importent tous l'implémentation partagée de platform-core (correctif et audit en point unique)
   const { caller, requirePermission, guarded, body, actorOf } = createRestGate(ctx)
   /**
-   * 场景级授权执行点（QA A-01）：checkScene 此前全平台唯一调用方是自查端点——
-   * 自查判 deny 实际动作仍 200。场景已配置策略时（判定非 default）本守卫强制裁决：
-   * deny / fail-closed（有策略无命中）一律 403 并落 audit.authz.denied；
-   * allow 放行；场景未配置策略回落角色 RBAC（存量口径不变）。机器主体暂不入场景域
-   * （权限点 RBAC 已覆盖），口径见 release-notes-2026-09-12。
+   * Point d'exécution de l'autorisation au niveau scénario (QA A-01) : checkScene n'avait jusqu'ici qu'un seul appelant sur toute la plateforme, l'endpoint d'auto-contrôle —
+   * l'auto-contrôle jugeait deny alors que l'action réelle passait quand même en 200. Quand le scénario a une politique configurée (jugement non default), ce garde impose l'arbitrage :
+   * deny / fail-closed (politique sans correspondance) = toujours 403 avec audit.authz.denied ;
+   * allow laisse passer ; scénario sans politique configurée retombe sur le RBAC par rôles (référentiel historique inchangé). Les principaux machine n'entrent pas encore dans le domaine scénario
+   * (le RBAC par points de permission couvre déjà), référentiel voir release-notes-2026-09-12.
    */
   const sceneGuard = (exchange: HttpExchange, sceneCode: string | undefined, action: string): boolean => {
     if (!sceneCode?.trim()) return true
@@ -411,11 +411,11 @@ export function apply(ctx: Context) {
     exchange.fail(403, 'FORBIDDEN', t('场景授权拒绝（{scene} · {action}）：{reason}', { scene: sceneCode, action, reason: decision.reason }))
     return false
   }
-  /** 审计留痕（audit 缺席时静默跳过——dsh-bridge softRead 同款防御）。 */
+  /** Traçabilité d'audit (audit absent = saut silencieux — même défense que softRead de dsh-bridge). */
   const auditSafe = (entry: Omit<AuditLogRecord, 'id' | 'createdAt' | 'updatedAt'>): void => {
     try {
       ctx.audit?.record(entry)
-    } catch { /* 审计面独立降级 */ }
+    } catch { /* dégradation indépendante du plan d'audit */ }
   }
   const changeLog = (exchange: HttpExchange, action: string, resourceName: string, detail = ''): void => {
     const info = caller(exchange)
@@ -426,7 +426,7 @@ export function apply(ctx: Context) {
     })
   }
 
-  // -- 模板库（3-2） ----------------------------------------------------------
+  // -- Bibliothèque de modèles (3-2) ----------------------------------------------------------
   guarded('GET', '/api/flow/templates', 'flow.read', (exchange) => ({
     templates: flow.listTemplates({ ...(exchange.query.get('sceneCode') ? { sceneCode: exchange.query.get('sceneCode')! } : {}) }),
   }))
@@ -444,7 +444,7 @@ export function apply(ctx: Context) {
     return result
   })
 
-  // -- TF CRUD 与状态机（3-1/3-3/3-4） ------------------------------------------
+  // -- CRUD TF et machine à états (3-1/3-3/3-4) ------------------------------------------
   guarded('GET', '/api/flow/flows', 'flow.read', (exchange) => ({
     flows: flow.listFlows({
       ...(exchange.query.get('sceneCode') ? { sceneCode: exchange.query.get('sceneCode')! } : {}),
@@ -456,7 +456,7 @@ export function apply(ctx: Context) {
   guarded('POST', '/api/flow/flows', 'flow.write', (exchange) => {
     const input = body<{ name: string; templateCode?: string; steps?: Array<{ key: string; name: string; actorType: FlowStepActorType; assignee?: string; note?: string }>; sceneCode?: string; dept?: string; slaMinutes?: number }>(exchange)
     const info = caller(exchange)
-    // QA A-01：场景执行点——入参场景或模板自带场景，存在策略即强制裁决（deny/fail-closed → 403）
+    // QA A-01 : point d'exécution du scénario — scénario en entrée ou porté par le modèle, dès qu'une politique existe, arbitrage imposé (deny/fail-closed → 403)
     const template = input.templateCode ? flow.templates().findOne((item) => item.code === input.templateCode) : undefined
     if (!sceneGuard(exchange, input.sceneCode ?? template?.sceneCode, 'flow.create')) return
     const created = flow.createFlow({
@@ -484,7 +484,7 @@ export function apply(ctx: Context) {
   guarded('POST', '/api/flow/flows/:id/steps/:key/transition', 'flow.write', (exchange) => {
     const input = body<{ action?: FlowStepAction; note?: string }>(exchange)
     const action = input.action ?? 'complete'
-    // QA A-01：TF 挂场景时按场景策略裁决流转动作
+        // QA A-01 : un TF rattaché à un scénario voit ses actions de transition arbitrées selon la politique du scénario
     const target = flow.getFlow(exchange.params['id']!)
     if (target && !sceneGuard(exchange, target.sceneCode, 'flow.step.transition')) return
     const result = flow.stepTransition(exchange.params['id']!, exchange.params['key']!, action, actorOf(exchange), input.note)
@@ -494,7 +494,7 @@ export function apply(ctx: Context) {
 
   guarded('POST', '/api/flow/flows/:id/cancel', 'flow.write', (exchange) => {
     const input = body<{ note?: string }>(exchange)
-    // QA A-01：取消同样是场景内动作，按场景策略裁决
+    // QA A-01 : l'annulation est aussi une action dans le scénario, arbitrtée selon la politique du scénario
     const target = flow.getFlow(exchange.params['id']!)
     if (target && !sceneGuard(exchange, target.sceneCode, 'flow.cancel')) return
     const cancelled = flow.cancelFlow(exchange.params['id']!, actorOf(exchange), input.note)

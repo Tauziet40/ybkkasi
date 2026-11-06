@@ -1,13 +1,13 @@
 /**
- * 每 Session 反馈控制器（参照 ui-message-feedback/MessageFeedbackController 的
- * 对象层姿态，但刻意更薄）：
- *   - 数据回流走同源 REST（fetch FEEDBACK_ENDPOINT，credentials same-origin 复用
- *     rq_sid 登录态），不占 dsh Remote 通道（spike §4.3 建议先走 ②）。
- *   - 本地乐观态：点击即记；服务端确认不回填（薄端点无读接口）。
- *   - 失败静默（WP-06 契约「降级不打扰会话」）：网络/HTTP 失败只 console 留痕，
- *     不向会话区渲染任何错误——反馈是锦上添花，绝不能变成新的打扰源。
- *   - HostObservable 契约（getSnapshot/subscribe）与 dsh 的 useSyncExternalStore
- *     绑定-kit 兼容，视图经 slots 注入面的 hooks.rqfb 下发。
+ * Contrôleur de feedback par Session (sur la posture de couche objet de ui-message-feedback/MessageFeedbackController,
+ * mais délibérément plus léger) :
+ *   - le retour de données passe par REST same-origin (fetch FEEDBACK_ENDPOINT, credentials same-origin réutilisant
+ *     l'état de connexion rq_sid), sans occuper le canal Remote de dsh (le spike §4.3 conseille de partir sur ②).
+ *   - état optimiste local : le clic est enregistré immédiatement ; la confirmation serveur n'est pas renvoyée (endpoint léger sans interface de lecture).
+ *   - échec silencieux (contrat WP-06 « la dégradation ne dérange pas la session ») : échec réseau/HTTP = trace console seulement,
+ *     aucun rendu d'erreur dans la zone de session — le feedback est un plus, jamais une nouvelle source de dérangement.
+ *   - contrat HostObservable (getSnapshot/subscribe) compatible avec le kit de liaison useSyncExternalStore
+ *     de dsh, la vue est délivrée via hooks.rqfb de la face d'injection slots.
  * @module @dsh-ops/plugin-rq-card/client/controller
  */
 
@@ -15,12 +15,12 @@ import type { FeedbackResult, FeedbackScore } from '../wire.ts'
 import { FEEDBACK_ENDPOINT } from '../wire.ts'
 import type { RqFeedbackView } from './slots.ts'
 
-/** 初始视图（冷态：无任何本地标记）。 */
+/** Vue initiale (à froid : sans aucun marqueur local). */
 const INITIAL_VIEW: RqFeedbackView = Object.freeze({
   items: new Map(),
 })
 
-/** 同源 POST；任何失败折叠为 ok:false，绝不 reject 到调用方。 */
+/** POST same-origin ; tout échec replié en ok:false, jamais de rejet vers l'appelant. */
 async function postFeedback(body: {
   messageId: string
   score: FeedbackScore
@@ -39,7 +39,7 @@ async function postFeedback(body: {
         error: { code: 'http', message: `feedback endpoint HTTP ${response.status}` },
       }
     }
-    // 薄端点允许空体（204/空串）：读到什么算什么，ok 缺省按成功解释。
+    // l'endpoint léger admet un corps vide (204/chaîne vide) : on interprète ce qu'on lit, ok absent = succès.
     await response.json().catch(() => undefined)
     return { ok: true }
   } catch (error) {
@@ -54,43 +54,43 @@ async function postFeedback(body: {
 }
 
 /**
- * 每 Session 反馈对象层：一个实例背书该 Session 内全部消息的 👍/👎 控件。
+ * Couche objet de feedback par Session : une instance cautionne les contrôles 👍/👎 de tous les messages de la Session.
  */
 export class RqFeedbackController {
   private view: RqFeedbackView = INITIAL_VIEW
   private readonly listeners = new Set<() => void>()
 
-  /** 返回缓存的不可变视图（HostObservable 契约）。 */
+  /** Renvoie la vue non mutable en cache (contrat HostObservable). */
   getSnapshot = (): RqFeedbackView => this.view
 
-  /** 订阅视图替换（HostObservable 契约）。 */
+  /** Souscrit au remplacement de vue (contrat HostObservable). */
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }
   }
 
   /**
-   * 提交评分：先写本地乐观态（选中即亮），再 fire-and-forget 上报。
-   * 同分重复点击为 no-op（幂等，避免无意义重发）。
-   * @param messageId 定稿 assistant 消息 id。
+   * Soumet un score : écrit d'abord l'état optimiste local (sélection = allumé), puis signale en fire-and-forget.
+   * Un clic répété au même score = no-op (idempotent, évite les renvois inutiles).
+   * @param messageId id du message assistant définitif.
    * @param score 👍/👎。
-   * @param note 可选说明（UI 暂不收集，契约预留）。
+   * @param note explication optionnelle (l'UI ne la collecte pas encore, réserve de contrat).
    */
   rate(messageId: string, score: FeedbackScore, note?: string): Promise<void> {
     const current = this.view.items.get(messageId)
     if (current?.score === score) return Promise.resolve()
     this.commit(messageId, score)
-    // 上报与 UI 解耦：结果只影响 console 留痕，不回滚乐观态（失败静默语义）。
+    // Le signalement est découplé de l'UI : le résultat n'affecte que la trace console, pas de retour arrière de l'état optimiste (sémantique d'échec silencieux).
     return postFeedback({ messageId, score, ...(note === undefined ? {} : { note }) })
       .then((result) => {
         if (!result.ok) {
-          // 静默降级：端点未上线（404）/网络失败都落在这里，不向会话区报错。
+          // dégradation silencieuse : endpoint non mis en ligne (404)/échec réseau tombent ici, pas d'erreur vers la zone de session.
           console.debug('[rq-card] feedback not recorded:', result.error.message)
         }
       })
   }
 
-  /** 替换视图并通知订阅者（订阅者异常就地吞掉，不拖垮通知循环）。 */
+  /** Remplace la vue et notifie les abonnés (les exceptions des abonnés sont avalées sur place, sans casser la boucle de notification). */
   private commit(messageId: string, score: FeedbackScore): void {
     const items = new Map(this.view.items)
     items.set(messageId, { score })

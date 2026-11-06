@@ -1,17 +1,17 @@
 /**
- * W3-T5 统一策略与审计单测（MCP 治理契约 §11/§12/§13/§14）。
+ * Tests unitaires de la politique unifiée et de l'audit W3-T5 (contrat de gouvernance MCP §11/§12/§13/§14).
  *
- * 运行方式：node --test packages/plugin-mcp/src/policy.test.mjs
+ * Exécution : node --test packages/plugin-mcp/src/policy.test.mjs
  *
- * 覆盖面：
- *   - org-constraint 三态：org 内放行 / 跨组织跨租户拒 ORG_SCOPE_DENIED /
- *     tenant 同租户放行（跨组织同租户）/ cross-org 无审批拒 + 有效审批引用放行；
- *   - 资源限定 scope 三形态第一层放行（mcp.invoke / mcp.service:* / mcp.tool:*），
- *     mcp. 前缀 scope 未覆盖本目标 fail-closed（SCOPE_DENIED），legacy scopes 不设防；
- *   - 策略模拟 dry-run 影响报告四维（newServices/writeTools/confidential/crossOrg）；
- *   - scope 模板生成（'*' → 服务级；白名单 → 工具级；readOnly 组不产出写工具 scope）；
- *   - 审计哈希链：record() 单点计算、prevHash 链式、重启续链、篡改可检出、附 traceId 检索；
- *   - 探活审计聚合：secret.access 按 dedupKey 窗口去重 + 窗口关闭随事件附 suppressedCount。
+ * Couverture :
+ *   - org-constraint trois états : passage dans org / refus inter-organisation inter-tenant ORG_SCOPE_DENIED /
+ *     tenant même tenant = passage (inter-organisation dans le même tenant) / cross-org sans approbation = refus + passage avec référence d'approbation valide ;
+ *   - première couche aux trois formes de scope de limitation de ressource (mcp.invoke / mcp.service:* / mcp.tool:*),
+ *     un scope préfixe mcp. sans couvrir la cible = fail-closed (SCOPE_DENIED), scopes legacy sans protection ;
+ *   - rapport d'impact en quatre dimensions de la simulation dry-run (newServices/writeTools/confidential/crossOrg) ;
+ *   - génération du gabarit de scope ('*' → niveau service ; liste blanche → niveau outil ; groupe readOnly sans scope d'outil écrit) ;
+ *   - chaîne de hachage d'audit : calcul au point unique record(), chaînage prevHash, reprise après redémarrage, falsification détectable, recherche par traceId ;
+ *   - agrégation d'audit de sondage : secret.access dédupliqué par fenêtre dedupKey + suppressedCount joint à l'événement à la fermeture.
  */
 import assert from 'node:assert/strict'
 import { test, afterEach } from 'node:test'
@@ -30,8 +30,8 @@ afterEach(() => {
 })
 
 /**
- * 策略面宿主：真实 McpService + 桩 iam（租户/用户）/ resourceCore / audit（审批簿）。
- * platformBus 桩记录事件供断言；usage 桩承接 recordCall 计量（demo 服务不触达）。
+ * Hôte de la face politique : vrai McpService + stubs iam (tenant/utilisateur) / resourceCore / audit (registre d'approbations).
+ * platformBus stub enregistre les événements pour assertion ; usage stub capte le metering recordCall (services demo non atteints).
  */
 function makeHarness(options = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), 'mcp-policy-'))
@@ -43,7 +43,7 @@ function makeHarness(options = {}) {
     emit: (name, payload) => events.push({ name, payload }),
   }
   const storage = new StorageService(ctx, { dataDir })
-  // iam 桩：org→tenant 映射可注入（org-constraint 跨租户判定面）；用户簿供 subjectUserOrg
+  // Stub iam : carte org→tenant injectable (face de jugement inter-tenant d'org-constraint) ; registre d'utilisateurs pour subjectUserOrg
   const tenantMap = options.tenantMap ?? {}
   const users = new Map(Object.entries(options.users ?? {}))
   ctx.iam = {
@@ -52,14 +52,14 @@ function makeHarness(options = {}) {
     resolveGroupMembers: () => [],
   }
   ctx.resourceCore = { get: () => undefined }
-  // 审批簿桩：id → 审批单（cross-org 有效审批引用判定面）
+  // Stub du registre d'approbations : id → fiche (face de jugement de la référence d'approbation valide cross-org)
   const approvals = new Map(Object.entries(options.approvals ?? {}))
   ctx.audit = { approvals: () => ({ get: (id) => approvals.get(id) }) }
   const registry = new McpService(ctx)
   return { ctx, registry, events, approvals, users }
 }
 
-/** 在线 demo 服务（确定性执行层免外呼）+ 权限组放行（'*' 全量）。 */
+/** Service demo en ligne (couche d'exécution déterministe sans appel sortant) + groupe de permissions passe-tout ('*'). */
 async function onlineService(registry, overrides = {}) {
   const service = registry.createService({
     name: '策略服务', slug: 'policy-svc', orgId: 'org-a', owner: 'tester', exec: 'demo',
@@ -81,7 +81,7 @@ async function onlineService(registry, overrides = {}) {
 
 const agentCaller = (overrides = {}) => ({ type: 'agent', id: 'agt-1', name: '策略Agent', ...overrides })
 
-// -- B（契约 §13）：org-constraint 三态 -------------------------------------------------------
+// -- B (contrat §13) : org-constraint trois états -------------------------------------------------------
 
 test('org-constraint：org 内放行（caller.org == service.org）', async () => {
   const { registry } = makeHarness()
@@ -99,7 +99,7 @@ test('org-constraint：跨组织且跨租户 → 拒绝 ORG_SCOPE_DENIED（硬�
   assert.equal(result.code, 'ORG_SCOPE_DENIED')
   assert.ok(result.decisionId?.startsWith('pd_'), '拒绝响应带决策 id')
   assert.ok(Array.isArray(result.decisionReasons) && result.decisionReasons.length > 0)
-  // 落账：调用记录与 mcp.invoked 事件同带决策表达
+  // Écriture : l'enregistrement d'appel et l'événement mcp.invoked portent tous deux l'expression de décision
   const call = registry.callLog({ serviceId: service.id, status: 'denied' }).items[0]
   assert.equal(call.code, 'ORG_SCOPE_DENIED')
   assert.equal(call.decisionId, result.decisionId)
@@ -115,10 +115,10 @@ test('org-constraint：跨组织同租户 + 权限组显式授权 → 放行（�
 test('org-constraint：visibility=tenant 同租户放行、跨租户拒绝（不要求显式授权事实）', async () => {
   const { registry } = makeHarness({ tenantMap: { 'org-a': 't-1', 'org-b': 't-1', 'org-c': 't-2' } })
   const service = await onlineService(registry, { visibility: 'tenant' })
-  // 跨组织同租户：tenant 三态直接放行（连权限组都不需要命中的主体也放行——这里仍给了权限组，等价面一致）
+  // Inter-organisation dans le même tenant : les trois états tenant passent directement (même un sujet sans groupe de permissions passerait — un groupe est quand même donné ici, face équivalente cohérente)
   const okResult = await registry.invoke(agentCaller({ orgId: 'org-b' }), service.id, 'policy_search', {})
   assert.equal(okResult.ok, true)
-  // 跨租户：拒绝
+  // Inter-tenant : refus
   const denied = await registry.invoke(agentCaller({ orgId: 'org-c' }), service.id, 'policy_search', {})
   assert.equal(denied.code, 'ORG_SCOPE_DENIED')
 })
@@ -133,16 +133,16 @@ test('org-constraint：visibility=cross-org 无审批拒、approved/executed 有
     },
   })
   const service = await onlineService(registry, { visibility: 'cross-org' })
-  // 无审批引用：拒绝
+  // Sans référence d'approbation : refus
   const noApproval = await registry.invoke(agentCaller({ orgId: 'org-b' }), service.id, 'policy_search', {})
   assert.equal(noApproval.code, 'ORG_SCOPE_DENIED')
   assert.ok(noApproval.error.includes('审批'))
-  // 无效引用（pending / 过期 24h 窗外 / 不存在）：拒绝
+  // Référence invalide (pending / hors fenêtre 24 h / inexistante) : refus
   for (const approvalId of ['apr-pending', 'apr-stale', 'apr-none']) {
     const denied = await registry.invoke(agentCaller({ orgId: 'org-b', approvalId }), service.id, 'policy_search', {})
     assert.equal(denied.code, 'ORG_SCOPE_DENIED', `无效审批引用 ${approvalId} 必须拒绝`)
   }
-  // 有效审批引用（executed 且 24h 窗内）：放行
+  // Référence d'approbation valide (executed et dans la fenêtre 24 h) : passage
   const okResult = await registry.invoke(agentCaller({ orgId: 'org-b', approvalId: 'apr-ok' }), service.id, 'policy_search', {})
   assert.equal(okResult.ok, true)
 })
@@ -153,12 +153,12 @@ test('org-constraint：委托链 subjectUserId 的 org 与目标服务跨租户 
     users: { 'u-delegate': { orgId: 'org-b' } },
   })
   const service = await onlineService(registry)
-  // 调用者本身同 org 放行面，但委托链真实用户在另一租户 → 拒绝
+  // L'appelant lui-même a une face de passage même org, mais l'utilisateur réel de la chaîne de délégation est dans un autre tenant → refus
   const result = await registry.invoke(agentCaller({ orgId: 'org-a', subjectUserId: 'u-delegate' }), service.id, 'policy_search', {})
   assert.equal(result.code, 'ORG_SCOPE_DENIED')
 })
 
-// -- C（契约 §12）：资源限定 scope 第一层 -----------------------------------------------------
+// -- C (contrat §12) : première couche scope de limitation de ressource -----------------------------------------------------
 
 test('iam-permission 第一层：unified scopes 三形态任一即放行（第二层权限组照旧强制）', async () => {
   const { registry } = makeHarness()
@@ -177,17 +177,17 @@ test('iam-permission 第一层：unified scopes 三形态任一即放行（第�
 test('iam-permission 第一层：mcp. 前缀 scope 未覆盖本目标 → SCOPE_DENIED；legacy scopes 不设防', async () => {
   const { registry } = makeHarness()
   const service = await onlineService(registry)
-  // 声明了 MCP scope 面（限定到别的服务）却调本服务：fail-closed
+  // Face MCP de scopes déclarée (limitée à un autre service) appelant ce service : fail-closed
   const mismatch = await registry.invoke(agentCaller({ scopes: ['mcp.service:other-svc.invoke'] }), service.id, 'policy_search', {})
   assert.equal(mismatch.status, 'denied')
   assert.equal(mismatch.code, 'SCOPE_DENIED')
-  // 工具级 scope 只放行对应工具
+  // Scope niveau outil ne laisse passer que l'outil correspondant
   const otherTool = await registry.invoke(agentCaller({ scopes: [`mcp.tool:${service.slug}:policy_write.invoke`] }), service.id, 'policy_search', {})
   assert.equal(otherTool.code, 'SCOPE_DENIED')
-  // legacy scopes（无任何 mcp. 前缀）：第一层不设防，第二层权限组裁决 → 放行
+  // Scopes legacy (sans aucun préfixe mcp.) : première couche sans protection, arbitrage par la deuxième couche groupes de permissions → passage
   const legacy = await registry.invoke(agentCaller({ scopes: ['console.login'] }), service.id, 'policy_search', {})
   assert.equal(legacy.ok, true)
-  // scopes 缺席（工具面 legacy 调用方）：同样不设防
+  // Scopes absents (appelant legacy de la face outils) : de même sans protection
   const absent = await registry.invoke(agentCaller(), service.id, 'policy_search', {})
   assert.equal(absent.ok, true)
 })
@@ -204,12 +204,12 @@ test('iam-permission + 权限组双层：scope 放行不绕过权限组（无授
   assert.equal(result.code, undefined, '权限组层拒绝不带新增领域码（既有口径）')
 })
 
-// -- C（契约 §14）：策略模拟 dry-run 影响报告 -------------------------------------------------
+// -- C (contrat §14) : rapport d'impact de la simulation dry-run -------------------------------------------------
 
 test('dry-run 影响报告：newServices/writeTools/confidential/crossOrg 四维 + subjects 原样展开（不落库）', async () => {
   const harness = makeHarness({ tenantMap: { 'org-a': 't-1', 'org-b': 't-2' } })
   const { registry } = harness
-  // 主体可达 org：agent agt-1 归属 org-b（与覆盖服务 org-a 不同 → crossOrg）
+  // Org atteignable par les sujets : l'agent agt-1 est rattaché à org-b (différent de l'org-a des services couverts → crossOrg)
   harness.ctx.resourceCore = { get: (kind, id) => (id === 'agt-1' ? { orgId: 'org-b' } : undefined) }
   const plain = await onlineService(registry)
   const confidential = registry.createService({
@@ -230,24 +230,24 @@ test('dry-run 影响报告：newServices/writeTools/confidential/crossOrg 四维
     },
     subjects: [{ type: 'agent', id: 'agt-1', name: '策略Agent' }, { type: 'user_group', id: 'ug-1' }],
   })
-  // newServices：覆盖已存在服务（不存在引用跳过）
+  // newServices : couvre un service existant (référence inexistante sautée)
   assert.deepEqual(report.newServices.map((item) => item.serviceId).sort(), [plain.id, confidential.id].sort())
-  // writeTools：覆盖服务中 allowedTools 命中的 write/admin 工具（readOnly 约束不影响影响面口径——
-  // 报告呈现「草稿触及哪些写能力」，约束语义由调用裁决面执行）
+  // writeTools : outils write/admin atteints par allowedTools dans les services couverts (la contrainte readOnly n'affecte pas le référentiel d'impact —
+  // le rapport présente « quelles capacités d'écriture le brouillon touche », la sémantique de contrainte est exécutée par la face d'arbitrage des appels)
   assert.deepEqual(report.writeTools, [
     { serviceId: plain.id, slug: plain.slug, tool: 'policy_write' },
     { serviceId: confidential.id, slug: 'conf-svc', tool: 'conf_admin' },
   ])
-  // confidential 维度
+  // dimension confidential
   assert.deepEqual(report.confidential, [{ serviceId: confidential.id, slug: 'conf-svc', dataClass: 'confidential' }])
-  // crossOrg：主体可达 org（org-b）与覆盖服务 org（org-a）不一致 → true
+  // crossOrg : l'org atteignable par les sujets (org-b) diffère de l'org des services couverts (org-a) → true
   assert.equal(report.crossOrg, true)
-  // affectedSubjects 原样展开
+  // affectedSubjects étendus tels quels
   assert.deepEqual(report.affectedSubjects, [
     { type: 'agent', id: 'agt-1', name: '策略Agent' },
     { type: 'user_group', id: 'ug-1' },
   ])
-  // dry 语义：不落库
+  // Sémantique dry : pas d'écriture
   assert.equal(registry.permGroups().all().length, before)
 })
 
@@ -255,14 +255,14 @@ test('dry-run crossOrg：主体可达 org 与服务 org 一致 → false；org �
   const harness = makeHarness()
   const { registry } = harness
   const service = await onlineService(registry)
-  // 同 org 主体（resourceCore 返回 org-a）
+  // Sujet de même org (resourceCore renvoie org-a)
   harness.ctx.resourceCore = { get: (kind, id) => (id === 'agt-1' ? { orgId: 'org-a' } : undefined) }
   const sameOrg = registry.dryRunPermGroup({
     policies: { [service.id]: { allowedTools: '*', constraints: {} } },
     subjects: [{ type: 'agent', id: 'agt-1' }],
   })
   assert.equal(sameOrg.crossOrg, false)
-  // 主体解析不出 org：不计 crossOrg
+  // Principal sans org résoluble : crossOrg non compté
   harness.ctx.resourceCore = { get: () => undefined }
   const unknownOrg = registry.dryRunPermGroup({
     policies: { [service.id]: { allowedTools: '*', constraints: {} } },
@@ -271,7 +271,7 @@ test('dry-run crossOrg：主体可达 org 与服务 org 一致 → false；org �
   assert.equal(unknownOrg.crossOrg, false)
 })
 
-// -- C（契约 §12）：scope 模板 -----------------------------------------------------------------
+// -- C (contrat §12) : gabarit de scope -----------------------------------------------------------------
 
 test('scope 模板：全量组产出服务级 scope；白名单组产出工具级 scope；readOnly 组不产出写工具 scope', async () => {
   const { registry } = makeHarness()
@@ -291,20 +291,20 @@ test('scope 模板：全量组产出服务级 scope；白名单组产出工具�
     subjects: [],
   })
   const scoped = registry.scopeTemplate(readonly.id)
-  // readOnly 组：write 工具不产出 scope（模板=裁决面口径）；read/unknown 工具逐个产出
+  // Groupe readOnly : pas de scope pour les outils write (gabarit = référentiel de la face d'arbitrage) ; les outils read/unknown produisent chacun
   assert.deepEqual(scoped.scopes, [
     `mcp.tool:${service.slug}:policy_search.invoke`,
     `mcp.tool:${service.slug}:policy_sync.invoke`,
   ])
   assert.equal(scoped.byService.length, 1)
 
-  // 不存在的权限组：显式报错（dry 语义不打错对象）
+  // Groupe de permissions inexistant : erreur explicite (la sémantique dry ne frappe pas le mauvais objet)
   assert.throws(() => registry.scopeTemplate('mpg-none'), /权限组不存在/)
 })
 
-// -- D（契约 §14）：审计哈希链 -----------------------------------------------------------------
+// -- D (contrat §14) : chaîne de hachage d'audit -----------------------------------------------------------------
 
-/** 构造最小审计宿主（桩总线 + usage 消费管道 + 真实 StorageService）。 */
+/** Construit un hôte d'audit minimal (bus stub + pipeline de consommation usage + vrai StorageService). */
 function makeAuditHarness() {
   const dataDir = mkdtempSync(join(tmpdir(), 'mcp-policy-audit-'))
   cleanup.push(() => rmSync(dataDir, { recursive: true, force: true }))
@@ -331,7 +331,7 @@ test('审计哈希链：record() 单点计算、prevHash 链式相接、重算�
   assert.equal(second.prevHash, first.hash, '链式相接')
   assert.equal(second.hash, auditHashOf(second, second.prevHash))
   assert.equal(audit.chainTipHash(), second.hash)
-  // 篡改可检出：改任一业务字段后重算不再命中
+  // Falsification détectable : après modification d'un champ métier quelconque, le recalcul ne correspond plus
   const tampered = { ...second, detail: '被篡改' }
   assert.notEqual(auditHashOf(tampered, tampered.prevHash), tampered.hash)
 })
@@ -341,21 +341,21 @@ test('审计哈希链：启动续链（链首重取集合最后一条 hash）与
   const withTrace = { ...auditEntry(1), traceId: 'a'.repeat(32) }
   const first = audit.record(withTrace)
   audit.record(auditEntry(2))
-  // 模拟重启：链首状态复位后，record() 启动路径重取集合最后一条 hash 续链（重启不破链）
+  // Redémarrage simulé : après remise à zéro de l'état de tête de chaîne, le chemin de démarrage de record() reprend le dernier hash de la collection (le redémarrage ne casse pas la chaîne)
   audit.chainReady = false
   audit.chainTip = ''
   const third = audit.record(auditEntry(3))
   const lastHash = audit.logs().all().filter((item) => item.id !== third.id).at(-1).hash
   assert.equal(third.prevHash, lastHash, '启动续链取集合最后一条 hash')
   assert.equal(audit.chainTipHash(), third.hash)
-  // traceId 精确检索（query 增量 filter）
+  // Recherche exacte par traceId (filtre incrémental de query)
   const hits = audit.query({ traceId: 'a'.repeat(32) })
   assert.equal(hits.total, 1)
   assert.equal(hits.items[0].id, first.id)
   assert.equal(audit.query({ traceId: 'b'.repeat(32) }).total, 0)
 })
 
-// -- D（契约 §14）：探活审计聚合（secret.access 窗口去重） -------------------------------------
+// -- D (contrat §14) : agrégation d'audit de sondage (déduplication par fenêtre de secret.access) -------------------------------------
 
 function makeBrokerHarness() {
   const dataDir = mkdtempSync(join(tmpdir(), 'mcp-policy-broker-'))
@@ -365,7 +365,7 @@ function makeBrokerHarness() {
   ctx.platformBus = { on: () => () => {}, emit: (name, payload) => events.push({ name, payload }) }
   new StorageService(ctx, { dataDir })
   const broker = new SecretBroker(ctx)
-  broker.probeDedupWindowMs = 30 // 窗口收窄供测试（窗口关闭可观测）
+  broker.probeDedupWindowMs = 30 // fenêtre resserrée pour le test (fermeture de fenêtre observable)
   return { broker, events }
 }
 
@@ -373,21 +373,21 @@ test('探活审计聚合：同 dedupKey 窗口内只发一次；窗口关闭后�
   const { broker, events } = makeBrokerHarness()
   broker.put({ serviceId: 'mcp-probe', headerName: 'Authorization', secret: 'probe-secret' })
   const accessEvents = () => events.filter((item) => item.name === 'mcp.secret.access')
-  // 窗口内三次探活 resolve：只发一次
+  // trois resolves de sondage dans la fenêtre : un seul événement émis
   broker.resolve('mcp-probe', { dedupKey: 'probe' })
   broker.resolve('mcp-probe', { dedupKey: 'probe' })
   broker.resolve('mcp-probe', { dedupKey: 'probe' })
   assert.equal(accessEvents().length, 1)
-  // 窗口关闭（等窗口过）：下一次开窗事件附上一窗口聚合计数（2 次被抑制）
+  // Fenêtre fermée (fenêtre attendue) : l'événement d'ouverture suivante porte le compteur agrégé de la fenêtre précédente (2 suppressions)
   await new Promise((resolve) => setTimeout(resolve, 45))
   broker.resolve('mcp-probe', { dedupKey: 'probe' })
   const closed = accessEvents()
   assert.equal(closed.length, 2)
   assert.equal(closed[1].payload.suppressedCount, 2)
-  // 不带 dedupKey 的真实访问：逐次留痕（审计侧零改动）
+  // Vrai accès sans dedupKey : trace à chaque fois (zéro modification côté audit)
   broker.resolve('mcp-probe')
   broker.resolve('mcp-probe')
   assert.equal(accessEvents().length, 4)
-  // 事件 payload 恒无 secret 原文
+  // Le payload d'événement n'a jamais le secret en clair
   assert.ok(!JSON.stringify(accessEvents()).includes('probe-secret'))
 })

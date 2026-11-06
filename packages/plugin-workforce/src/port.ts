@@ -1,10 +1,10 @@
 /**
- * 工作策略端口实现（platform-core workforce-port.ts 的 ResourceExecutionPolicyPort）。
+ * Implémentation du port de politique de travail (ResourceExecutionPolicyPort de platform-core workforce-port.ts).
  *
- * 消费方：资源网关与 exec-hub 经 ctx.workforcePolicy.port() 拿到本实现（窄端口，
- * 无反向依赖）。判定只依据已验证 caller，与请求是否携带 work 上下文无关（D.5 防绕行）；
- * 本端口只做工作级授权，资源网关原有授权链一项不少（两层授权取交集，§9.5）。
- * 任何异常向上抛出——gateManagedWork 会 fail-closed（POLICY_INTERNAL_ERROR）。
+ * Consommateurs : la passerelle de ressources et exec-hub obtiennent cette implémentation via ctx.workforcePolicy.port() (port étroit,
+ * sans dépendance inverse). La décision ne repose que sur le caller vérifié, indépendamment du fait que la requête porte un contexte work (anti-contournement D.5) ;
+ * ce port ne fait que l'autorisation au niveau travail, la chaîne d'autorisation d'origine de la passerelle de ressources reste entière (intersection des deux couches d'autorisation, §9.5).
+ * Toute exception est remontée — gateManagedWork applique fail-closed (POLICY_INTERNAL_ERROR).
  */
 import type { Context } from '@deepseek-ai/cordis'
 import {
@@ -32,7 +32,7 @@ import type {
 import type { ResourceExecutionPolicyPort } from '../../platform-core/src/workforce-port.ts'
 
 export function createWorkforcePolicyPort(ctx: Context, grayConfig: WorkforceGrayConfig = {}): ResourceExecutionPolicyPort {
-  // -- 依赖（结构化探测；端口在 workforce 装配完成后注册，依赖均已就绪） ----------------
+  // -- Dépendances (sondage structuré ; le port est enregistré après l'assemblage de workforce, les dépendances sont prêtes) ----------------
 
   const store = (): WorkforceStore => {
     const target = (ctx as unknown as { workforceStore?: WorkforceStore }).workforceStore
@@ -66,7 +66,7 @@ export function createWorkforcePolicyPort(ctx: Context, grayConfig: WorkforceGra
     return target
   }
 
-  /** 可信 caller → 受管员工引用；非员工返回 null（旧路径继续走原有授权链）。 */
+  /** caller de confiance → référence de l'employé géré ; renvoie null pour un non-employé (l'ancien chemin poursuit sur la chaîne d'autorisation d'origine). */
   async function resolveManagedEmployee(caller: WorkCallerRef): Promise<ManagedEmployeeRef | null> {
     const resolution = await identity().resolveByCaller(caller)
     if (!resolution) return null
@@ -84,7 +84,7 @@ export function createWorkforcePolicyPort(ctx: Context, grayConfig: WorkforceGra
     return identity().describeAgent(agentId)
   }
 
-  /** 任用失效细分（等待 vs 停止语义，§13.3）。 */
+  /** Distingue les motifs de nullité de la nomination (sémantique attente vs arrêt, §13.3). */
   function assertAppointment(resolution: IdentityResolution): void {
     if (appointmentInEffect(resolution.appointment)) return
     const expired = resolution.appointment.effectiveUntil !== ''
@@ -96,9 +96,9 @@ export function createWorkforcePolicyPort(ctx: Context, grayConfig: WorkforceGra
   }
 
   /**
-   * 工具命中判定（facts 由资源服务自行解析，不接受客户端/模型自报风险，D.5）：
-   * mcp/connector/nas/skill 按 registryId+action 精确匹配；
-   * model 按 kind=model 且（registryId 相等或 constraints.allowedModels 含 facts.registryId）。
+   * Jugement de correspondance d'outil (facts résolus par le service de ressources lui-même, risque auto-déclaré client/modèle non accepté, D.5) :
+   * mcp/connector/nas/skill par correspondance exacte registryId+action ;
+   * model par kind=model et (registryId égal ou constraints.allowedModels contenant facts.registryId).
    */
   function matchTool(tools: ManifestToolHandle[], facts: ResourceActionFacts): ManifestToolHandle | undefined {
     if (facts.kind === 'model') {
@@ -114,13 +114,13 @@ export function createWorkforcePolicyPort(ctx: Context, grayConfig: WorkforceGra
   }
 
   async function authorizeWorkAction(caller: WorkCallerRef, query: WorkActionQuery): Promise<WorkPolicyDecision> {
-    // 1. 受管身份（非员工不应进入本分支——gateManagedWork 已按 resolveManagedEmployee 分流）
+    // 1. Identité gérée (un non-employé ne devrait pas entrer dans cette branche — gateManagedWork a déjà réparti selon resolveManagedEmployee)
     const resolution = await identity().resolveByCaller(caller)
     if (!resolution) {
       return { allow: false, code: 'EMPLOYEE_NOT_ACTIVE', message: t('非受管数字员工或绑定缺失') }
     }
-    // 1.5 灰度开关（W 批次 W7 契约，D-② 组织级）：关闭组织显式拒绝（WORKFORCE_DISABLED），
-    //     绝不静默回落 legacy——gateManagedWork 会把 denied 交回网关落账（V29 同口径：拒绝并可观测）
+    // 1.5 Commutateur de déploiement progressif (contrat W7 du lot W, D-② au niveau organisation) : organisation désactivée = refus explicite (WORKFORCE_DISABLED),
+    //     jamais de repli silencieux vers legacy — gateManagedWork rend le denied à la passerelle pour écriture (même référentiel V29 : refus observable)
     if ((grayConfig.grayMode ?? 'off') === 'allowlist'
       && !(grayConfig.enabledOrgs ?? []).includes(resolution.appointment.orgId)) {
       try {
@@ -131,7 +131,7 @@ export function createWorkforcePolicyPort(ctx: Context, grayConfig: WorkforceGra
           at: new Date().toISOString(),
         })
       } catch {
-        // platformBus 未注入当前 fiber 时跳过通知（拒绝本身不受影响）
+        // platformBus non injecté dans la fiber courante : notification sautée (le refus lui-même n'est pas affecté)
       }
       return {
         allow: false,
@@ -142,14 +142,14 @@ export function createWorkforcePolicyPort(ctx: Context, grayConfig: WorkforceGra
     if (resolution.employee.status !== 'active') {
       return { allow: false, code: 'EMPLOYEE_NOT_ACTIVE', message: t('数字员工不在岗（停职或已离岗）') }
     }
-    // 2. 任用生效（版本即策略版本）
+    // 2. Nomination en vigueur (la version est la version de politique)
     try {
       assertAppointment(resolution)
     } catch (error) {
       const e = error as WorkforceError
       return { allow: false, code: e.code, message: e.message }
     }
-    // 3. permit：受控入口凭据（V28：即使猜到工具名，无 permit 也拒绝）
+    // 3. permit : justificatif de l'entrée contrôlée (V28 : même avec un nom d'outil deviné, sans permit c'est refusé)
     const ref = query.ref ?? {}
     if (!ref.permitId) {
       return { allow: false, code: 'TOOL_NOT_GRANTED', message: t('数字员工必须携带工作授权 permit 经受控入口调用') }
@@ -163,19 +163,19 @@ export function createWorkforcePolicyPort(ctx: Context, grayConfig: WorkforceGra
       }
       throw error
     }
-    // permit 绑定的 run 与引用 run 一致（引用仅作索引，事实以服务端回查为准，§10.4）
+    // Le run lié au permit coïncide avec le run référencé (la référence n'est qu'un index, les faits font foi de la revérification serveur, §10.4)
     if (ref.runId && ref.runId !== permit.runId) {
       return { allow: false, code: 'RUN_NOT_OWNED', message: t('工作引用的 run 与 permit 绑定不一致') }
     }
-    // 4. 工具在能力清单（服务端清单唯一事实，§9.2）
+    // 4. Outil présent dans l'inventaire de capacités (l'inventaire serveur est l'unique fait, §9.2)
     const tool = matchTool(capabilities().toolsFor(permit.manifestId), query.facts)
     if (!tool) {
       return { allow: false, code: 'TOOL_NOT_GRANTED', message: t('工具未列入本任用能力清单') }
     }
-    // 5. 风险交集：facts 为写/admin 而清单只授 read → 拒绝（附录 D.5：不信任自报风险）
-    //    W 批次 V11 根治（契约冻结 2026-10-15）：facts.risk='unknown'（网关侧无生效风险登记）时——
-    //    清单句柄仅授 read → 按只读语境放行（网关只读约束兜底，残余风险由重审清单收敛）；
-    //    句柄授写/admin → RISK_UNREGISTERED 拒绝：写能力必须先经「登记→审核→生效」。
+    // 5. Intersection des risques : facts en écriture/admin alors que l'inventaire n'accorde que read → refus (annexe D.5 : le risque auto-déclaré n'est pas cru)
+    //    Correction de fond V11 du lot W (contrat figé 2026-10-15) : quand facts.risk='unknown' (aucun enregistrement de risque en vigueur côté passerelle) —
+    //    poignée d'inventaire accordant seulement read → passage dans le contexte lecture seule (la contrainte lecture seule de la passerelle en rattrapage, le risque résiduel est résorbé par le réexamen de l'inventaire) ;
+    //    poignée accordant écriture/admin → refus RISK_UNREGISTERED : une capacité d'écriture doit d'abord passer par « enregistrement→revue→mise en vigueur ».
     if (query.facts.risk === 'unknown') {
       if (tool.risk !== 'read') {
         return {
@@ -187,14 +187,14 @@ export function createWorkforcePolicyPort(ctx: Context, grayConfig: WorkforceGra
     } else if ((query.facts.risk === 'write' || query.facts.risk === 'admin') && tool.risk === 'read') {
       return { allow: false, code: 'ARGUMENT_SCOPE_DENIED', message: t('该动作为写/管理风险，超出本句柄的只读授权') }
     }
-    // 6. 步骤冲突防御（纵深防御：主校验在 invocation-service 的唯一约束）
+    // 6. Défense contre les conflits d'étapes (défense en profondeur : la vérification principale tient à la contrainte d'unicité d'invocation-service)
     if (query.argsHash && ref.stepKey) {
       const prior = store().invocations.findWhere({ runId: permit.runId, stepKey: ref.stepKey })[0]
       if (prior && prior.argsHash !== query.argsHash) {
         return { allow: false, code: 'STEP_ARGUMENT_CONFLICT', message: t('同一业务步骤键已绑定不同参数，冲突拒绝') }
       }
     }
-    // 7. 组装核验后可信执行上下文（§8.3：身份/组织/版本服务端解析）
+    // 7. Assemble le contexte d'exécution de confiance vérifié (§8.3 : identité/organisation/version résolues côté serveur)
     return {
       allow: true,
       work: {
@@ -211,7 +211,7 @@ export function createWorkforcePolicyPort(ctx: Context, grayConfig: WorkforceGra
         permitId: permit.id,
         capabilityManifestId: permit.manifestId,
         policyVersion: permit.appointmentVersion,
-        // 原始业务发起人：仅 human 链保留（与员工身份并存不互覆，§5.3）
+        // Initiateur métier d'origine : conservé uniquement pour la chaîne human (coexiste avec l'identité de l'employé sans se recouvrir, §5.3)
         ...(caller.kind === 'human' && caller.userId ? { requesterUserId: caller.userId } : {}),
         ...(ref.traceId ? { traceId: ref.traceId } : {}),
       },

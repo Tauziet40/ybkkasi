@@ -1,13 +1,13 @@
 /**
- * nas 插件对模型暴露的工具（dsh ToolRuntime / REST 工具桥 / MCP /mcp 端点同一契约）。
- * 读类操作需 nas.read；写类操作需 nas.write（工具级权限点在网关统一校验）。
+ * Outils exposés au modèle par l'extension nas (même contrat pour le ToolRuntime dsh / pont d'outils REST / endpoint MCP /mcp).
+ * Les opérations de lecture exigent nas.read ; les écritures exigent nas.write (point de permission au niveau outil vérifié uniformément à la passerelle).
  *
- * 数字员工工作面（D12/D15，蓝本 §4.5、验收 V14/V15）：
- *   - 受管判定只按可信 caller 反查（gateManagedWork）：读类（list/search）过 risk='read' gate，
- *     写类（mkdir/delete/upload）过 risk='write' gate；拒绝为中文原因 + 领域 code。
- *   - gate 放行不跳过原有文件网关授权：目录约束仍由 NasAuthzService/文件网关执行（两层交集）。
- *   - 受管放行者的 nas_fs_upload 仅允许 workforce staging 目录（D12 白名单），其余路径
- *     中文拒绝（ARTIFACT_SCOPE_DENIED）并引导走 POST /api/workforce/artifacts。
+ * Face de travail de l'employé numérique (D12/D15, blueprint §4.5, acceptation V14/V15) :
+ *   - la détermination « géré » ne fait que rechercher le caller de confiance (gateManagedWork) : les lectures (list/search) passent le gate risk='read',
+ *     les écritures (mkdir/delete/upload) passent le gate risk='write' ; le refus est un motif en chinois + code de domaine.
+ *   - le passage du gate ne saute pas l'autorisation d'origine de la passerelle de fichiers : la contrainte de répertoire reste exécutée par NasAuthzService/passerelle (intersection des deux couches).
+ *   - le nas_fs_upload d'un passage géré n'accepte que le répertoire staging workforce (liste blanche D12), tout autre chemin
+ *     est refusé en chinois (ARTIFACT_SCOPE_DENIED) avec invitation à passer par POST /api/workforce/artifacts.
  */
 import { resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -158,9 +158,9 @@ export function apply(ctx: Context) {
     output: { type: 'object', additionalProperties: true },
     async execute(args, exec) {
       const nasId = String(args.nasId)
-      // D12/V15：受管数字员工（可信 caller 反查命中）过写类 gate 后，localFile 仍禁止任意平台路径
-      // ——仅允许 workforce 受控 staging（WORKFORCE_ARTIFACTS_ROOT 前缀），引导走受控上传接口；
-      // 真人管理员/legacy 路径保持现状（gate 未命中即不收紧）。
+      // D12/V15 : un employé numérique géré (caller de confiance atteint) ayant passé le gate d'écriture reste interdit sur localFile pour tout chemin plateforme
+      // — seul le staging contrôlé workforce est permis (préfixe WORKFORCE_ARTIFACTS_ROOT), avec invitation à passer par l'interface d'upload contrôlée ;
+      // l'admin humain/le chemin legacy gardent le statu quo (gate non atteint = pas de resserrage).
       const gate = await gateNasWork(ctx, exec, nasId, 'write')
       const localFile = String(args.localFile)
       if (gate === 'managed') {
@@ -182,17 +182,17 @@ export function apply(ctx: Context) {
 }
 
 /**
- * 文件类工具的操作人（计量 subject 与审计 actor 共用）。
- * P0-2 教训（dev-plan-nas-authz §2.3）：身份一律来自入口从令牌解析的 exec.principal，
- * 禁止从 args 读取（schema 无身份参数）——缺失即 fail-closed，不降级到共享身份。
+ * Opérateur des outils de fichiers (subject de metering et actor d'audit partagés).
+ * Leçon P0-2 (dev-plan-nas-authz §2.3) : l'identité vient toujours de exec.principal analysé à l'entrée depuis le jeton,
+ * interdit de la lire dans args (le schéma n'a pas de paramètre d'identité) — absente = fail-closed, pas de repli sur une identité partagée.
  *
- * D15 精确会话绑定：
- *   - dsh 形态（identityBinding 存在）：只认当前会话的显式绑定（bySession 命中）；
- *     无会话上下文 / 会话未绑定 / 绑定服务无法核验 → 一律中文拒绝，
- *     禁止回落「最近一次绑定」（多员工并发不串身份、不冒充他人）。
- *   - 独立形态（无 identityBinding）：行为不变（exec.principal 身份）；
- *     机器 principal 标注 kind:'machine'——onBehalfHeaders 据此绝不注入 X-On-Behalf-User；
- *     仅当 actChain 真人终点可被现有验证逻辑（IAM 反查）核验时，才以该真人作操作者。
+ * Liaison de session précise D15 :
+ *   - forme dsh (identityBinding présent) : ne reconnaît que la liaison explicite de la session courante (bySession atteint) ;
+ *     sans contexte de session / session non liée / service de liaison invérifiable = toujours refus en chinois,
+ *     interdit de retomber sur « la dernière liaison » (concurrence multi-employés sans mélange d'identité, sans usurpation).
+ *   - forme autonome (sans identityBinding) : comportement inchangé (identité exec.principal) ;
+ *     le principal machine est marqué kind:'machine' — onBehalfHeaders n'injecte dès lors jamais X-On-Behalf-User ;
+ *     seulement quand le terminal humain réel de l'actChain peut être vérifié par la logique existante (recherche inverse IAM), ce humain devient l'opérateur.
  */
 type NasToolActor = { id: string; name: string; kind: 'human' | 'machine' }
 
@@ -210,7 +210,7 @@ interface NasExecContext {
 
 interface NasIdentityBindingLike {
   identityForSession(sessionId?: string): { userId: string; name: string } | undefined
-  /** dsh-bridge 内部会话绑定表（只读探测用）：sessionId → userId。 */
+  /** Table de liaison de session interne dsh-bridge (pour sondage en lecture seule) : sessionId → userId. */
   bySession?: Map<string, string>
 }
 
@@ -220,8 +220,8 @@ function actorOf(
   ctx?: Context,
 ): NasToolActor {
   void args
-  // dsh 宿主形态（plugin-dsh-bridge 装配）：平台身份绑定优先——但只认「当前会话的显式绑定」。
-  // 独立形态无 identityBinding 服务，行为不变（exec.principal 机器身份）。
+  // Forme hôte dsh (assemblage de plugin-dsh-bridge) : la liaison d'identité de la plateforme prime — mais seule « la liaison explicite de la session courante » compte.
+  // La forme autonome n'a pas le service identityBinding, comportement inchangé (identité machine d'exec.principal).
   const binding = (ctx as { identityBinding?: NasIdentityBindingLike } | undefined)?.identityBinding
   if (binding) {
     const sessionId = exec.agent?.session?.id
@@ -239,17 +239,17 @@ function actorOf(
   if (principal.kind === 'human') {
     return { id: principal.userId ?? principal.principalId, name: principal.name, kind: 'human' }
   }
-  // 机器 principal：绝不把机器 ID 当真人；仅当 OBO 代理链确有已验证真人终点、
-  // 且其身份可解析（后续仍要过 onBehalfHeaders 的 IAM 反查认可）时，才以该真人作操作者。
+  // Principal machine : jamais prendre un ID machine pour un humain ; seulement si la chaîne proxy OBO a vraiment un terminal humain vérifié,
+  // et que son identité est résoluble (devra encore passer la reconnaissance par recherche inverse IAM d'onBehalfHeaders), ce humain devient l'opérateur.
   const human = humanDelegatorOf(principal, ctx)
   if (human) return { id: human.id, name: human.name, kind: 'human' }
   return { id: principal.userId ?? principal.principalId, name: principal.name, kind: 'machine' }
 }
 
 /**
- * dsh 会话精确绑定核验（D15）：只认 bySession 中登记的当前会话，并要求
- * identityForSession 返回的就是该绑定用户——「最近一次绑定」（current）回落一律不可信。
- * 绑定服务内部结构变化导致无法核验时按未绑定处理（fail-closed，不静默降级）。
+ * Vérification de liaison précise de session dsh (D15) : ne reconnaît que la session courante enregistrée dans bySession, et exige
+ * que identityForSession renvoie exactement l'utilisateur lié — tout repli sur « la dernière liaison » (current) est inadmissible.
+ * Quand la structure interne du service de liaison change et rend la vérification impossible, traiter comme non lié (fail-closed, pas de dégradation silencieuse).
  */
 function sessionBoundIdentity(binding: NasIdentityBindingLike, sessionId: string): { userId: string; name: string } | undefined {
   const sessions = binding.bySession
@@ -261,9 +261,9 @@ function sessionBoundIdentity(binding: NasIdentityBindingLike, sessionId: string
 }
 
 /**
- * OBO 代理链真人终点解析（D15）：从链尾向链头找最近一条真人条目，解析其平台用户 ID
- * （authn principal 反查 refId；条目自带 userId 时直接采用）。解析不到即返回 undefined
- * ——机器调用保持 machine 归因，绝不冒充真人。
+ * Résolution du terminal humain de la chaîne proxy OBO (D15) : de la queue vers la tête de la chaîne, trouve la plus récente entrée humaine et résout son ID utilisateur plateforme
+ * (recherche inverse du principal authn par refId ; si l'entrée porte userId, prise directe). Irrésoluble = undefined
+ * — l'appel machine garde l'attribution machine, jamais d'usurpation d'humain.
  */
 function humanDelegatorOf(
   principal: NonNullable<NasExecContext['principal']>,
@@ -283,16 +283,16 @@ function humanDelegatorOf(
       const record = authn?.principals().get(principalId)
       const userId = record?.refId
       if (userId) return { id: userId, name: entry.name || record?.name || userId }
-    } catch { /* 独立宿主无 authn：不认可该真人条目 */ }
+    } catch { /* hôte autonome sans authn : entrée humaine non reconnue */ }
   }
   return undefined
 }
 
 /**
- * 受管数字员工工作级准入（D12/D15/附录 D.5）：受管判定只按可信 caller 反查（exec.principal），
- * 与请求参数无关。denied → 中文拒绝（带领域 code）；legacy → 返回 'legacy' 原链照走；
- * managed → 返回 'managed'（调用方可继续追加受管专属约束，如 D12 上传白名单）。
- * 注意：gate 放行不跳过文件网关原有授权——目录约束仍由 NasAuthzService/网关执行。
+ * Admission au niveau travail de l'employé numérique géré (D12/D15/annexe D.5) : la détermination « géré » ne fait que rechercher le caller de confiance (exec.principal),
+ * indépendamment des paramètres de requête. denied → refus en chinois (avec code de domaine) ; legacy → renvoie 'legacy', l'ancienne chaîne s'applique ;
+ * managed → renvoie 'managed' (l'appelant peut ajouter des contraintes propres au géré, ex. liste blanche d'upload D12).
+ * Note : le passage du gate ne saute pas l'autorisation d'origine de la passerelle de fichiers — la contrainte de répertoire reste exécutée par NasAuthzService/passerelle.
  */
 async function gateNasWork(
   ctx: Context,
@@ -311,7 +311,7 @@ async function gateNasWork(
   return gate.mode
 }
 
-/** exec.principal → 已验证工作调用者引用（只带服务端已核验字段；机器侧尽力补 refType/refId 供反查）。 */
+/** exec.principal → référence d'appelant de travail vérifiée (seuls champs vérifiés côté serveur ; côté machine, complétion au mieux de refType/refId pour la recherche inverse). */
 function workCallerOf(exec: NasExecContext, ctx?: Context): WorkCallerRef | undefined {
   const principal = exec.principal
   if (!principal) return undefined
@@ -332,7 +332,7 @@ function workCallerOf(exec: NasExecContext, ctx?: Context): WorkCallerRef | unde
       refType = record.refType
       refId = record.refId
     }
-  } catch { /* 独立宿主无 authn：交由 workforce 端口按 principalId 反查 */ }
+  } catch { /* hôte autonome sans authn : recherche inverse par principalId déléguée au port workforce */ }
   return {
     kind: 'machine',
     principalId: principal.principalId,

@@ -1,18 +1,18 @@
 /**
- * 服务级 MCP 数据面单测（W2-T3，契约 §7/§8）。
+ * Tests unitaires du plan de données MCP au niveau service (W2-T3, contrats §7/§8).
  *
- * 运行方式（Node 直接加载，进程内构造，参照 governance.test.mjs 桩件风格）：
+ * Mode d'exécution (chargement direct par Node, construction en processus, sur le style de stubs de governance.test.mjs) :
  *
  *     node packages/plugin-mcp/src/dataplane.test.mjs
  *
- * 覆盖面：
- *   - authorizedToolsFor 纯逻辑：权限组主体匹配 / allowedTools 白名单 / 多组并集 /
- *     readOnly 约束过滤 write/admin（unknown 按只读语境放行）/ 无权限组空集；
- *   - authorizedToolsFor 与 authorize() 逐工具等价（抽取非复制的回归断言）；
- *   - 服务级端点端到端（内存桩 http + 桩 authn/iam/resourceCore，不占端口）：
- *     initialize（mcp-session-id/serverInfo）→ tools/list 过滤 → tools/call 拒绝码映射
- *     （-32003 TOOL_NOT_VISIBLE_OR_DENIED）→ tools/call 放行 content 包装；
- *     401 未认证 / 403 AUDIENCE_MISMATCH / -32000 SERVICE_NOT_FOUND / :id 别名。
+ * Couverture :
+ *   - authorizedToolsFor, logique pure : appariement de sujets du groupe de permissions / liste blanche allowedTools / union de groupes multiples /
+ *     contrainte readOnly filtrant write/admin (unknown passe en contexte lecture) / sans groupe de permissions = ensemble vide ;
+ *   - équivalence outil par outil d'authorizedToolsFor avec authorize() (assertion de régression de l'extraction, non d'une copie) ;
+ *   - endpoint au niveau service de bout en bout (stub http en mémoire + stubs authn/iam/resourceCore, sans occuper de port) :
+ *     initialize (mcp-session-id/serverInfo) → filtrage tools/list → mapping des codes de refus tools/call
+ *     (-32003 TOOL_NOT_VISIBLE_OR_DENIED) → passage tools/call avec enveloppe content ;
+ *     401 non authentifié / 403 AUDIENCE_MISMATCH / -32000 SERVICE_NOT_FOUND / alias :id.
  */
 import assert from 'node:assert/strict'
 import { test, afterEach } from 'node:test'
@@ -24,14 +24,14 @@ import { StorageService } from '../../platform-core/src/storage.ts'
 import { McpService } from './index.ts'
 import { registerMcpDataplaneRoutes } from '../../plugin-console/src/routes/mcp-dataplane.ts'
 
-// -- 进程内构造宿主（桩总线 + 真实 StorageService + 桩 authn/iam/resourceCore + 桩 http） --------
+// -- Hôte construit en processus (bus stub + vrai StorageService + stubs authn/iam/resourceCore + stub http) --------
 
 const cleanup = []
 afterEach(() => {
   while (cleanup.length) cleanup.pop()()
 })
 
-/** 桩令牌簿：token → 主体/受众（authn.verify 行为的最小替身）。 */
+/** Registre de jetons stub : token → principal/audience (doublure minimale du comportement d'authn.verify). */
 function makeAuthnStub() {
   const tokens = new Map()
   let seq = 0
@@ -52,14 +52,14 @@ function makeAuthnStub() {
         actChain: [],
       }
     },
-    // resolveUnifiedPrincipal 反查端口：一律 miss（名字回落 principal.name，org/租户缺省）
+    // Port de recherche inverse resolveUnifiedPrincipal : toujours miss (le nom retombe sur principal.name, org/tenant par défaut)
     principals: () => ({ get: () => undefined }),
   }
 }
 
 /**
- * 构造数据面宿主：返回 registry（真实 McpService）与 captured 路由处理器表。
- * 桩 authn/iam/resourceCore 只满足 resolveUnifiedPrincipal 反查链（miss 即缺省，fail-safe）。
+ * Construit l'hôte du plan de données : renvoie registry (vrai McpService) et captured, la table des gestionnaires de routes.
+ * Les stubs authn/iam/resourceCore ne satisfont que la chaîne de recherche inverse resolveUnifiedPrincipal (miss = défaut, fail-safe).
  */
 function makeHarness() {
   const dataDir = mkdtempSync(join(tmpdir(), 'mcp-dataplane-'))
@@ -72,7 +72,7 @@ function makeHarness() {
   }
   new StorageService(ctx, { dataDir })
   const registry = new McpService(ctx)
-  // 桩身份面：verify 走内存令牌簿；principal/iam/resource 反查一律 miss（resolveUnifiedPrincipal 缺省路径）
+  // Face identité stub : verify passe par le registre de jetons en mémoire ; recherches inverses principal/iam/resource toujours miss (chemin par défaut de resolveUnifiedPrincipal)
   const authn = makeAuthnStub()
   ctx.authn = authn
   ctx.iam = {
@@ -81,7 +81,7 @@ function makeHarness() {
     resolveGroupMembers: () => [],
   }
   ctx.resourceCore = { get: () => undefined }
-  // 桩 http：仅捕获注册（method+pattern → handler），请求经 handler(假 exchange) 直驱
+  // http stub : capture seulement les enregistrements (method+pattern → handler), les requêtes pilotent directement handler(faux exchange)
   const routes = new Map()
   registerMcpDataplaneRoutes(ctx, {
     http: { register: (method, pattern, handler) => routes.set(`${method} ${pattern}`, handler) },
@@ -89,7 +89,7 @@ function makeHarness() {
   return { ctx, registry, authn, routes, events }
 }
 
-/** 假 HttpExchange：capture writeHead/end 输出，供 JSON-RPC 断言。 */
+/** Faux HttpExchange : capture les sorties writeHead/end, pour les assertions JSON-RPC. */
 function makeExchange({ pattern, token, audience, body }) {
   const res = {
     status: 0, headers: {}, text: '',
@@ -117,7 +117,7 @@ const agentPrincipal = (agentId, name = '测试Agent') => ({
   name,
 })
 
-/** 标准夹具：demo 服务（read + write + unknown 三工具，demo 执行层免外呼）+ agent 只读组。 */
+/** Fixture standard : service demo (trois outils read + write + unknown, couche d'exécution demo sans appel sortant) + groupe lecture seule agent. */
 async function makeServiceFixture(registry, overrides = {}) {
   const service = registry.createService({
     name: '演示服务', slug: 'demo-svc', orgId: 'org-1', owner: 'tester', exec: 'demo',
@@ -132,12 +132,12 @@ async function makeServiceFixture(registry, overrides = {}) {
   return registry.services().get(service.id)
 }
 
-// -- §8 authorizedToolsFor 纯逻辑 -------------------------------------------------------------
+// -- §8 authorizedToolsFor, logique pure -------------------------------------------------------------
 
 test('authorizedToolsFor：白名单交集 + 多组并集（首个 allowedTools 命中策略定裁决，与 authorize 同序）', async () => {
   const { registry } = makeHarness()
   const service = await makeServiceFixture(registry)
-  // 组A 白名单只给 search（无约束）；组B 全量（无 readOnly）——write 由组B 放行，多组并集生效
+  // Groupe A : liste blanche uniquement search (sans contrainte) ; groupe B : tout (sans readOnly) — write passe par B, l'union de groupes prend effet
   registry.createPermGroup({
     name: '组A-白名单', description: '',
     policies: { [service.id]: { allowedTools: ['demo_search'], constraints: {} } },
@@ -161,7 +161,7 @@ test('authorizedToolsFor：readOnly 约束过滤 write 工具（unknown 按只�
     subjects: [{ type: 'agent', id: 'agt-2' }],
   })
   const caller = { type: 'agent', id: 'agt-2', name: '只读Agent' }
-  // write 被过滤；read 放行；unknown 在只读语境放行（W1/V11 口径，与 authorize 一致）
+  // write filtré ; read passe ; unknown passe en contexte lecture (référentiel W1/V11, cohérent avec authorize)
   assert.deepEqual(registry.authorizedToolsFor(caller, service), ['demo_search', 'demo_sync'])
 })
 
@@ -203,13 +203,13 @@ test('authorizedToolsFor 与 authorize 逐工具等价（抽取回归：判定�
   assert.deepEqual([...visible], ['demo_search'])
 })
 
-// -- §7 服务级端点端到端（内存桩直驱处理器，不占端口） -----------------------------------------
+// -- §7 endpoint au niveau service de bout en bout (pilotage direct des gestionnaires par stubs en mémoire, sans port) -----------------------------------------
 
 async function e2eHarness() {
   const harness = makeHarness()
   const { registry, authn } = harness
   const service = await makeServiceFixture(registry)
-  // 只读权限组：tools/list 应只见 read/unknown 工具，write 调用应被拒
+  // Groupe de permissions lecture seule : tools/list ne doit montrer que les outils read/unknown, l'appel write doit être refusé
   registry.createPermGroup({
     name: '只读组', description: '',
     policies: { [service.id]: { allowedTools: '*', constraints: { readOnly: true } } },
@@ -224,18 +224,18 @@ async function e2eHarness() {
 
 test('端到端：initialize 回 mcp-session-id 与 serverInfo.name=mcp:<slug>；缺 Bearer → 401/-32001', async () => {
   const h = await e2eHarness()
-  // 缺 Bearer：401 + JSON-RPC -32001
+  // Sans Bearer : 401 + JSON-RPC -32001
   const anon = makeExchange({ pattern: '/mcp/services/demo-svc', body: { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} } })
   await h.routes.get('POST /mcp/services/:serviceSlug')(anon)
   assert.equal(anon.res.status, 401)
   assert.equal(anon.res.headers['www-authenticate'], 'Bearer realm="dsh-mcp-dataplane"')
   assert.equal(JSON.parse(anon.res.text).error.code, -32001)
-  // 无效令牌：401 + -32001
+  // Jeton invalide : 401 + -32001
   const bad = makeExchange({ pattern: '/mcp/services/demo-svc', token: 'dst1.bogus.0', body: { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} } })
   await h.routes.get('POST /mcp/services/:serviceSlug')(bad)
   assert.equal(bad.res.status, 401)
   assert.equal(JSON.parse(bad.res.text).error.code, -32001)
-  // initialize：200 + 会话头 + serverInfo
+  // initialize : 200 + en-tête de session + serverInfo
   const init = makeExchange({ pattern: '/mcp/services/demo-svc', token: h.agentToken, body: { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'tester', version: '1.0' } } } })
   await h.routes.get('POST /mcp/services/:serviceSlug')(init)
   assert.equal(init.res.status, 200)
@@ -254,7 +254,7 @@ test('端到端：tools/list 按权限过滤（只读组不见 write 工具）�
   assert.deepEqual(tools.map((tool) => tool.name), ['demo_search', 'demo_sync'], 'write 工具不得出现在只读主体列表')
   assert.equal(tools[0].inputSchema.type, 'object', '可见工具回完整 inputSchema')
   assert.equal(tools[0].description, '检索')
-  // 无权限组主体：tools/list 回空数组（而非报错）
+  // Sujet sans groupe de permissions : tools/list renvoie un tableau vide (et non une erreur)
   const empty = makeExchange({ pattern: '/mcp/services/demo-svc', token: h.outsiderToken, body: { jsonrpc: '2.0', id: 2, method: 'tools/list' } })
   await h.routes.get('POST /mcp/services/:serviceSlug')(empty)
   assert.deepEqual(JSON.parse(empty.res.text).result.tools, [])
@@ -262,22 +262,22 @@ test('端到端：tools/list 按权限过滤（只读组不见 write 工具）�
 
 test('端到端：tools/call 拒绝码映射（不可见 → -32003 TOOL_NOT_VISIBLE_OR_DENIED）、放行回 content 包装', async () => {
   const h = await e2eHarness()
-  // 只读主体调 write 工具：invoke 链拒绝（落账），映射 -32003 + TOOL_NOT_VISIBLE_OR_DENIED
+  // Sujet lecture seule appelant l'outil write : la chaîne invoke refuse (avec écriture), mappe -32003 + TOOL_NOT_VISIBLE_OR_DENIED
   const denied = makeExchange({ pattern: '/mcp/services/demo-svc', token: h.agentToken, body: { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'demo_write', arguments: {} } } })
   await h.routes.get('POST /mcp/services/:serviceSlug')(denied)
   assert.equal(denied.res.status, 200)
   const denial = JSON.parse(denied.res.text)
   assert.equal(denial.error.code, -32003)
   assert.equal(denial.error.data.code, 'TOOL_NOT_VISIBLE_OR_DENIED')
-  // 拒绝同样进了调用台账（invoke 链落账：拒绝是事实）
+  // Le refus est aussi entré dans le registre d'appels (écriture par la chaîne invoke : le refus est un fait)
   assert.ok(h.registry.callLog({ serviceId: h.service.id, status: 'denied' }).items.length >= 1)
-  // 未知工具：不泄露存在性，同一领域码
+  // Outil inconnu : l'existence n'est pas divulguée, même code de domaine
   const unknown = makeExchange({ pattern: '/mcp/services/demo-svc', token: h.agentToken, body: { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'no_such_tool', arguments: {} } } })
   await h.routes.get('POST /mcp/services/:serviceSlug')(unknown)
   const unknownPayload = JSON.parse(unknown.res.text)
   assert.equal(unknownPayload.error.code, -32003)
   assert.equal(unknownPayload.error.data.code, 'TOOL_NOT_VISIBLE_OR_DENIED')
-  // 只读主体调可见 read 工具：放行，content[0].text 为结果 JSON 串
+  // Sujet lecture seule appelant l'outil visible read : passage, content[0].text est la chaîne JSON du résultat
   const allowed = makeExchange({ pattern: '/mcp/services/demo-svc', token: h.agentToken, body: { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'demo_search', arguments: { query: '你好' } } } })
   await h.routes.get('POST /mcp/services/:serviceSlug')(allowed)
   const okPayload = JSON.parse(allowed.res.text)
@@ -289,29 +289,29 @@ test('端到端：tools/call 拒绝码映射（不可见 → -32003 TOOL_NOT_VIS
 
 test('端到端：aud 强校验（受众不符 403 AUDIENCE_MISMATCH；匹配 slug 放行）；SERVICE_NOT_FOUND；:id 别名', async () => {
   const h = await e2eHarness()
-  // 受众不符：403 + -32003 + AUDIENCE_MISMATCH
+  // Audience non concordante : 403 + -32003 + AUDIENCE_MISMATCH
   const mismatch = makeExchange({ pattern: '/mcp/services/demo-svc', token: h.wrongAudToken, body: { jsonrpc: '2.0', id: 6, method: 'ping' } })
   await h.routes.get('POST /mcp/services/:serviceSlug')(mismatch)
   assert.equal(mismatch.res.status, 403)
   const mismatchPayload = JSON.parse(mismatch.res.text)
   assert.equal(mismatchPayload.error.code, -32003)
   assert.equal(mismatchPayload.error.data.code, 'AUDIENCE_MISMATCH')
-  // 受众精确匹配 slug：放行
+  // Audience correspondant exactement au slug : passage
   const match = makeExchange({ pattern: '/mcp/services/demo-svc', token: h.rightAudToken, body: { jsonrpc: '2.0', id: 7, method: 'ping' } })
   await h.routes.get('POST /mcp/services/:serviceSlug')(match)
   assert.equal(match.res.status, 200)
   assert.deepEqual(JSON.parse(match.res.text).result, {})
-  // 服务不存在：-32000 + SERVICE_NOT_FOUND
+  // Service inexistant : -32000 + SERVICE_NOT_FOUND
   const missing = makeExchange({ pattern: '/mcp/services/no-such-svc', token: h.agentToken, body: { jsonrpc: '2.0', id: 8, method: 'ping' } })
   await h.routes.get('POST /mcp/services/:serviceSlug')(missing)
   const missingPayload = JSON.parse(missing.res.text)
   assert.equal(missingPayload.error.code, -32000)
   assert.equal(missingPayload.error.data.code, 'SERVICE_NOT_FOUND')
-  // :id 别名（/mcp/s/:serviceId）：同一处理器语义，tools/list 照常过滤
+  // Alias :id (/mcp/s/:serviceId) : même sémantique de gestionnaire, tools/list filtre comme d'habitude
   const alias = makeExchange({ pattern: `/mcp/s/${h.service.id}`, token: h.agentToken, body: { jsonrpc: '2.0', id: 9, method: 'tools/list' } })
   await h.routes.get('POST /mcp/s/:serviceId')(alias)
   assert.deepEqual(JSON.parse(alias.res.text).result.tools.map((tool) => tool.name), ['demo_search', 'demo_sync'])
-  // 注册面完整性：GET 405 / DELETE 200（Streamable HTTP 同语义）
+  // Intégrité de la face d'enregistrement : GET 405 / DELETE 200 (même sémantique Streamable HTTP)
   const get = makeExchange({ pattern: '/mcp/services/demo-svc', token: h.agentToken, body: undefined })
   get.method = 'GET'
   await h.routes.get('GET /mcp/services/:serviceSlug')(get)

@@ -1,10 +1,10 @@
 /**
- * @dsh-ops/plugin-mcp —— MCP 部署服务管理（方案 §三）。
+ * @dsh-ops/plugin-mcp — gestion des services déployés MCP (plan §3).
  *
- * 管理面（本插件）：服务注册登记、部署流程、版本/灰度/回滚、健康探活、
- *                   权限组（Tool 粒度 + 参数级约束）、调用运营监控。
- * 数据面（MCP 网关）：invoke() 统一鉴权、限流熔断、指标埋点、审计上报。
- * 演示环境内置 mock 执行传输层：确定性模拟延迟/成功率/Token 消耗。
+ * Plan de gestion (cette extension) : enregistrement des services, processus de déploiement, version/gradation/retour arrière, sondage de santé,
+ *                   groupes de permissions (granularité outil + contraintes au niveau paramètre), supervision des appels.
+ * Plan de données (passerelle MCP) : invoke() avec authentification unifiée, limitation/disjoncteur, instrumentation de métriques, remontée d'audit.
+ * Environnement de démonstration : couche de transport d'exécution mock intégrée — latence/taux de succès/consommation de jetons simulés de façon déterministe.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -25,14 +25,14 @@ import { McpToolRiskRegistry } from './risk-registry.ts'
 import { SecretBroker, sensitiveHeaderKeys } from './secret-broker.ts'
 
 // ---------------------------------------------------------------------------
-// 数据模型
+// Modèle de données
 // ---------------------------------------------------------------------------
 
-// -- 治理字段（W1-T2，契约 §5，additive） ---------------------------------------------------
+// -- Champs de gouvernance (W1-T2, contrat §5, additive) ---------------------------------------------------
 
 export type McpOwnerEntityType = 'platform' | 'app' | 'agent' | 'connector'
 
-/** 服务归属实体：缺省 {type:'platform'}（平台占位=治理待办 unowned，待 W2-T4 能力绑定回写）。 */
+/** Entité propriétaire du service : défaut {type:'platform'} (placeholder plateforme = dette de gouvernance unowned, en attente de réécriture par la liaison de capacités W2-T4). */
 export interface McpOwnerEntity {
   type: McpOwnerEntityType
   id?: string
@@ -49,7 +49,7 @@ const DATA_CLASSES: readonly McpDataClass[] = ['public', 'internal', 'confidenti
 const ENVIRONMENTS: readonly McpEnvironment[] = ['dev', 'staging', 'prod']
 const VISIBILITIES: readonly McpVisibility[] = ['org', 'tenant', 'cross-org']
 
-/** 治理字段可选入参（create/update 共用校验面）。 */
+/** Paramètres optionnels des champs de gouvernance (surface de validation commune create/update). */
 export interface McpGovernanceInput {
   ownerEntity?: McpOwnerEntity
   exposureMode?: McpExposureMode
@@ -59,8 +59,8 @@ export interface McpGovernanceInput {
 }
 
 /**
- * 治理字段校验与归一（契约 §5）：枚举非法值一律显式报错（不静默吞、不静默回默认），
- * ownerEntity.id 空白视为未指派（归一为仅 type）。
+ * Validation et normalisation des champs de gouvernance (contrat §5) : toute valeur d'énumération illégale donne une erreur explicite (ni engloutie, ni repli silencieux sur défaut),
+ * ownerEntity.id blanc = non assigné (normalisé en type seul).
  */
 export function normalizeGovernanceInput(input: McpGovernanceInput): McpGovernanceInput {
   const out: McpGovernanceInput = {}
@@ -100,9 +100,9 @@ export function normalizeGovernanceInput(input: McpGovernanceInput): McpGovernan
 }
 
 /**
- * 工具风险申报值。W 批次 W1（V11 根治）扩 'unknown'：远端 tools/list 同步的工具无法自证风险，
- * 一律落 'unknown'（不再隐式映射 read）——'unknown' 的裁决在闸门与工作策略端口（只读语境放行、
- * 写语境 RISK_UNREGISTERED 拒绝），写能力必须先经风险登记审批（risk-registry.ts）。
+ * Valeur déclarée du risque d'outil. Le lot W, W1 (correction de racine V11) étend 'unknown' : les outils synchronisés depuis tools/list distant ne peuvent pas prouver leur risque,
+ * ils tombent tous en 'unknown' (plus de mise en correspondance implicite avec read) — l'arbitrage de 'unknown' est dans la barrière et le port de politique de travail (contexte lecture = passage,
+ * contexte écrit = refus RISK_UNREGISTERED), une capacité d'écriture doit d'abord passer l'approbation d'enregistrement de risque (risk-registry.ts).
  */
 export interface McpToolSpec {
   name: string
@@ -123,34 +123,34 @@ export interface McpServiceRecord extends RecordBase {
   slug: string
   description: string
   icon: string
-  /** 业务分类（各资产板块统一口径 ASSET_CATEGORIES；缺省「其他」，存量记录读侧回落）。 */
+  /** Catégorie métier (référentiel unifié ASSET_CATEGORIES des panneaux d'actifs ; défaut « autre », repli à la lecture pour les enregistrements existants). */
   category?: string
   endpoint: string
   transport: 'stdio' | 'sse' | 'http'
   mode: 'hosted' | 'external'
-  /** 外部服务自定义请求头（如 Authorization），调用/探活/工具发现时透传。 */
+  /** En-têtes de requête personnalisés du service externe (ex. Authorization), transmis à l'appel/au sondage/à la découverte d'outils. */
   headers?: Record<string, string>
   orgId: string
   owner: string
-  // -- 治理字段（W1-T2，契约 §5，additive；存量记录由 ensureGovernanceMigration 启动补默认值） --
-  /** 归属实体：缺省 {type:'platform'}（平台占位，治理待办 unowned；指派走 REST owner-entity 端点）。 */
+  // -- Champs de gouvernance (W1-T2, contrat §5, additive ; les enregistrements existants reçoivent les valeurs par défaut au démarrage par ensureGovernanceMigration) --
+  /** Entité propriétaire : défaut {type:'platform'} (placeholder plateforme, dette de gouvernance unowned ; l'assignation passe par l'endpoint REST owner-entity). */
   ownerEntity: McpOwnerEntity
-  /** 能力声明 ID（W2-T4 app 能力绑定消费，additive 预留）。 */
+  /** ID de déclaration de capacité (consommé par la liaison de capacités app W2-T4, réserve additive). */
   capabilityId?: string
-  /** 暴露形态：缺省 'gateway'（网关面）；direct/internal 必须显式设置。 */
+  /** Forme d'exposition : défaut 'gateway' (face passerelle) ; direct/internal doivent être explicitement posés. */
   exposureMode: McpExposureMode
-  /** 数据分级（W3-T5 PDP ABAC 消费）：缺省 'internal'。 */
+  /** Classification des données (consommée par le PDP ABAC W3-T5) : défaut 'internal'. */
   dataClass: McpDataClass
-  /** 环境：缺省 'prod'。 */
+  /** Environnement : défaut 'prod'. */
   environment: McpEnvironment
-  /** 可见范围（W3-T5 组织硬约束消费）：缺省 'org'。 */
+  /** Périmètre de visibilité (consommé par la contrainte dure d'organisation W3-T5) : défaut 'org'. */
   visibility: McpVisibility
-  /** 下游凭证引用（local:/env: 形态，值本体在 SecretBroker 密钥文件/环境变量，绝不入业务集合）。 */
+  /** Référence d'identifiants aval (forme local:/env:, la valeur elle-même vit dans le fichier de clés/variables d'environnement du SecretBroker, jamais dans les collections métier). */
   credentialRef?: string
-  /** 桥接来源标记（如 open-connector）：M0 数据面桥接的治理降级标识——仅服务级粒度，
-   *  无 action 级授权/连接级绑定/令牌镜像（dev-plan-connector §2.11）。控制台打徽章。 */
+  /** Marque de source de pontage (ex. open-connector) : marque de dégradation de gouvernance du pontage du plan de données M0 — granularité service uniquement,
+   *  pas d'autorisation au niveau action/liaison au niveau connexion/miroir de jeton (dev-plan-connector §2.11). La console affiche un badge. */
   bridgeFrom?: string
-  /** 公司级终审标记（WP-10/L1）：终审通过的服务，其调用记录附带水印（审计可追溯）。 */
+  /** Marqueur de revue finale société (WP-10/L1) : les appels d'un service passé en revue finale portent un filigrane (traçable dans l'audit). */
   finalReview?: { approverId: string; approverName: string; at: string; approvalId?: string }
   status: 'draft' | 'verifying' | 'online' | 'gray' | 'unhealthy' | 'offline'
   grayPercent: number
@@ -164,10 +164,10 @@ export interface McpServiceRecord extends RecordBase {
     consecutiveFails: number
     breakerOpen: boolean
   }
-  /** 模拟稳定性 0-1（演示数据用）。 */
+  /** Stabilité simulée 0-1 (pour les données de démonstration). */
   stability: number
   rateLimitPerMin: number
-  /** 执行层：real=真实 HTTP 传输；demo=确定性模拟（显式降级，SLO/计费不统计）。 */
+  /** Couche d'exécution : real = transport HTTP réel ; demo = simulation déterministe (repli explicite, hors SLO/facturation). */
   exec: 'real' | 'demo'
 }
 
@@ -179,7 +179,7 @@ export interface ToolPolicy {
 export interface McpPermGroupRecord extends RecordBase {
   name: string
   description: string
-  /** serviceId → 工具策略。 */
+  /** serviceId → politique d'outils. */
   policies: Record<string, ToolPolicy>
   subjects: Array<{ type: 'user_group' | 'agent' | 'app'; id: string; name?: string }>
 }
@@ -201,36 +201,36 @@ export interface McpCallRecord {
   latencyMs: number
   tokens: number
   error?: string
-  /** 该调用走真实传输还是演示模拟（SLO/计费报表只统计 real）。 */
+  /** Si l'appel passe par le transport réel ou la simulation de démonstration (rapports SLO/facturation ne comptent que real). */
   exec: 'real' | 'demo'
-  /** 调用水印（WP-10/L1）：服务经公司级终审后，其全部调用附带水印，审计可追溯。 */
+  /** Filigrane d'appel (WP-10/L1) : après revue finale société du service, tous ses appels portent un filigrane, traçable dans l'audit. */
   watermark?: { finalReview: true; at: string }
-  /** 领域拒绝码（数字员工工作级授权拒绝时登记，审计可区分拒绝层级）。 */
+  /** Code de refus de domaine (consigné en cas de refus d'autorisation au niveau travail de l'employé numérique, l'audit distingue le niveau de refus). */
   code?: WorkDenyCode
-  /** 工作关联（D11 additive）：受管数字员工调用时与 workforce 账本的可穿透引用。 */
+  /** Liaison de travail (additive D11) : référence traversante vers le registre workforce lors d'appels d'employé numérique géré. */
   work?: McpCallWorkRef
-  // -- 全链 trace 与决策表达（W3-T5，契约 §14/§11，additive） --
-  /** 本次调用 trace id（32hex；入口无 trace 即生成，可跨下游转发/审计/计量关联还原调用链）。 */
+  // -- trace de bout en bout et expression de décision (W3-T5, contrats §14/§11, additive) --
+  /** trace id de l'appel (32 hex ; généré à l'entrée si absent, relie transferts aval/audit/metering pour reconstituer la chaîne d'appel). */
   traceId?: string
-  /** 参数摘要哈希（sha256(args JSON)）；与 workforce 闸门的 argsHash 同源同值。 */
+  /** Empreinte de hachage des paramètres (sha256(args JSON)) ; même source et même valeur que l'argsHash de la barrière workforce. */
   argsHash?: string
-  /** 上游 HTTP 状态码（real 传输返回时回填；demo/拒绝路径无上游缺省）。 */
+  /** Code de statut HTTP amont (renseigné quand le transport real répond ; pas de valeur par défaut pour demo/refus). */
   upstreamStatus?: number
-  /** PDP 决策 id（pd_ 前缀；主裁决经 PolicyDecisionPoint 时登记，审计/拒绝响应可回查）。 */
+  /** id de décision PDP (préfixe pd_ ; consigné quand l'arbitrage principal passe par PolicyDecisionPoint, consultable par audit/réponse de refus). */
   decisionId?: string
-  /** PDP 决策理由聚合（deny 优先下首个 deny 模块的理由即主因，与 error 文案同源）。 */
+  /** Agrégat des raisons de décision PDP (sous priorité deny, la raison du premier module deny est la cause principale, même source que le libellé d'erreur). */
   decisionReasons?: string[]
 }
 
-/** 调用记录的工作关联字段（additive，JSON 集合无严格 schema；§11.3 增量关联）。 */
+/** Champs de liaison de travail de l'enregistrement d'appel (additive, collection JSON sans schéma strict ; association incrémentale §11.3). */
 export interface McpCallWorkRef {
-  /** workforce 受控调用账本的调用 ID（生产侧提供时回填）。 */
+  /** ID d'appel du registre des appels contrôlés workforce (renseigné quand le côté production le fournit). */
   invocationId?: string
-  /** 本次放行依据的工作授权（permit）ID（服务端 gate 核验结果）。 */
+  /** ID de l'autorisation de travail (permit) fondant le passage (résultat de la vérification du gate côté serveur). */
   permitId?: string
-  /** 业务 run ID。 */
+  /** ID de run métier. */
   runId?: string
-  /** 执行员工 ID（服务端反查结果）。 */
+  /** ID de l'employé exécutant (résultat de la recherche inverse serveur). */
   employeeId?: string
 }
 
@@ -240,33 +240,33 @@ export interface InvokeCaller {
   name: string
   onBehalfOf?: string
   actChain?: Array<{ name: string; type: string }>
-  // -- 统一 Principal 事实附加（W3-T5，契约 §11/§12/§14，additive；缺省=PDP 对应模块 fail-open，
-  //    既有调用方（工具面 mcp_invoke 等）零感知；REST/数据面入口从 exchange.principal.unified 投影） --
-  /** 调用者组织归属（unified.orgId）：org-constraint 模块消费；缺失按同组织口径放行。 */
+  // -- Faits additionnels du Principal unifié (W3-T5, contrats §11/§12/§14, additive ; défaut = fail-open du module PDP correspondant,
+  //    les appelants existants (face outils mcp_invoke, etc.) y sont insensibles ; entrées REST/plan de données projetées depuis exchange.principal.unified) --
+  /** Rattachement organisationnel de l'appelant (unified.orgId) : consommé par le module org-constraint ; absent = passage au référentiel même organisation. */
   orgId?: string
-  /** 调用者租户（unified.tenantId）：visibility='tenant' 三态判定消费。 */
+  /** Tenant de l'appelant (unified.tenantId) : consommé par le jugement trois états de visibility='tenant'. */
   tenantId?: string
-  /** 委托链真实用户（unified.subjectUserId）：委托链 org 与目标服务 org 一致性校验消费。 */
+  /** Utilisateur réel de la chaîne de délégation (unified.subjectUserId) : consommé par la vérification de cohérence org de la chaîne avec le service cible. */
   subjectUserId?: string
-  /** 令牌 scopes（unified.scopes）：iam-permission 第一层（mcp.invoke / 资源限定 scope）消费。 */
+  /** Scopes du jeton (unified.scopes) : consommés par la première couche iam-permission (mcp.invoke / scope de limitation de ressource). */
   scopes?: string[]
-  /** 调用链 trace id（入口从 X-Trace-Id / mcp-session-id 头或受管 invocation 取；缺省入口生成）。 */
+  /** trace id de la chaîne d'appel (pris à l'entrée depuis les en-têtes X-Trace-Id / mcp-session-id ou l'invocation gérée ; sinon généré à l'entrée). */
   traceId?: string
-  /** 跨组织审批引用（context.approvalId）：visibility='cross-org' 服务的有效审批单 id。 */
+  /** Référence d'approbation inter-organisation (context.approvalId) : id d'une fiche d'approbation valide pour un service visibility='cross-org'. */
   approvalId?: string
   /**
-   * 权限组可匹配的主体集合（additive，W4 安全审计 P0-3）：主体自身（type/id）+ 委托链上的
-   * app/agent 演员（按资源 id）。缺省=仅主体自身（既有调用方零感知）。
-   * 委托语义：User → App/Agent → MCP 时真正执行动作的是链上 actor，授予它的权限组须对其生效。
+   * Ensemble de principaux appariables par les groupes de permissions (additive, audit de sécurité W4 P0-3) : le principal lui-même (type/id) + les acteurs
+   * app/agent de la chaîne de délégation (par id de ressource). Défaut = le principal seul (appelants existants insensibles).
+   * Sémantique de délégation : lors de User → App/Agent → MCP, c'est l'acteur de la chaîne qui exécute réellement l'action ; le groupe de permissions qui lui est accordé doit s'appliquer à lui.
    */
   subjects?: Array<{ type: 'user' | 'agent' | 'app'; id: string }>
 }
 
 /**
- * 网关拒绝码（W3-T5 additive）：在 workforce 领域拒绝码之外，PDP 新增模块的领域码——
- * ORG_SCOPE_DENIED（组织/租户硬约束）、SCOPE_DENIED（iam-permission 第一层）、
- * SCENE_DENIED（场景 ABAC）。与既有 WorkDenyCode 同样经 InvokeResult.code / 拒绝响应
- * data.code 透出，审计可区分拒绝层级。
+ * Codes de refus de la passerelle (additive W3-T5) : au-delà des codes de refus de domaine workforce, codes de domaine des nouveaux modules PDP —
+ * ORG_SCOPE_DENIED (contrainte dure organisation/tenant), SCOPE_DENIED (première couche iam-permission),
+ * SCENE_DENIED (ABAC de scénario). Comme le WorkDenyCode existant, ils passent par InvokeResult.code / data de réponse de refus
+ * .code, l'audit distingue le niveau de refus.
  */
 export type McpDenyCode = WorkDenyCode | 'ORG_SCOPE_DENIED' | 'SCOPE_DENIED' | 'SCENE_DENIED'
 
@@ -277,29 +277,29 @@ export interface InvokeResult {
   version: string
   result?: unknown
   error?: string
-  /** 领域拒绝码（additive）：status='denied' 且为工作级授权拒绝时携带，指导停止/申请/等待/重试。 */
+  /** Code de refus de domaine (additive) : porté quand status='denied' pour un refus d'autorisation au niveau travail, guide l'arrêt/la demande/l'attente/la retry. */
   code?: McpDenyCode
-  // -- 决策表达与全链 trace（W3-T5，契约 §11/§14，additive） --
-  /** PDP 决策 id：主裁决经 PolicyDecisionPoint 时随结果透出（拒绝响应 data.code 旁附加）。 */
+  // -- Expression de décision et trace de bout en bout (W3-T5, contrats §11/§14, additive) --
+  /** id de décision PDP : exposé avec le résultat quand l'arbitrage principal passe par PolicyDecisionPoint (ajouté à côté de data.code de la réponse de refus). */
   decisionId?: string
-  /** PDP 决策理由聚合（与 error 同源，error 取首个 deny 理由）。 */
+  /** Agrégat des raisons de décision PDP (même source que error, error prend la première raison deny). */
   decisionReasons?: string[]
-  /** 本次调用 trace id（与调用记录/审计事件关联）。 */
+  /** trace id de l'appel (associé à l'enregistrement d'appel/à l'événement d'audit). */
   traceId?: string
 }
 
-/** mcpServers 配置的单个服务条目（解析结果）。 */
+/** Entrée de service unique d'une configuration mcpServers (résultat d'analyse). */
 export interface McpConfigEntry {
   name: string
   url: string
   transport: 'http' | 'sse'
   headers?: Record<string, string>
   description?: string
-  /** 条目不可导入的原因（如 stdio 形态、url 缺失）。 */
+  /** Raison de non-importabilité de l'entrée (ex. forme stdio, url absente). */
   error?: string
 }
 
-/** 单条导入结果。 */
+/** Résultat d'import d'une entrée. */
 export interface McpImportResult {
   name: string
   ok: boolean
@@ -308,15 +308,15 @@ export interface McpImportResult {
   tools?: number
   reachable?: boolean
   status?: string
-  /** 导入携带的明文敏感头已自动迁入 SecretBroker（服务记录零明文，W1 治理语义）。 */
+  /** Les en-têtes sensibles en clair portés par l'import ont été migrés automatiquement dans SecretBroker (enregistrement de service sans clair, sémantique de gouvernance W1). */
   brokered?: boolean
   error?: string
 }
 
 /**
- * 解析 mcpServers JSON（Claude Desktop / Cursor / Cherry Studio 等工具通行的形态）。
- * 支持三种输入：标准 {"mcpServers": {...}} 包装、裸 {名称: {url, ...}} 映射、单个 {url, type} 对象。
- * http / streamableHttp / streamable-http 归一为 http；stdio/command 形态标记为不可导入。
+ * Analyse un JSON mcpServers (la forme en vigueur chez Claude Desktop / Cursor / Cherry Studio, etc.).
+ * Trois entrées prises en charge : l'enveloppe standard {"mcpServers": {...}}, la carte nue {nom: {url, ...}}, l'objet isolé {url, type}.
+ * http / streamableHttp / streamable-http normalisés en http ; les formes stdio/command marquées non importables.
  */
 export function parseMcpServersConfig(raw: string | object): McpConfigEntry[] {
   let config: unknown
@@ -392,7 +392,7 @@ function normalizeConfigHeaders(value: unknown): Record<string, string> | undefi
 }
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 export class McpService extends Service {
@@ -400,11 +400,11 @@ export class McpService extends Service {
 
   private probeTimer: ReturnType<typeof setInterval> | undefined
   private rateBuckets = new Map<string, number[]>()
-  /** 远端 streamable HTTP 会话缓存：endpoint → { sessionId（'' 表示无状态服务）, 过期时间 }。 */
+  /** Cache de sessions HTTP streamable distantes : endpoint → { sessionId ('' pour un service sans état), expiration }. */
   private mcpSessions = new Map<string, { sessionId: string; expiresAt: number }>()
-  /** 风险登记服务引用（同插件 apply() 直连装配；独立单测宿主缺席=无生效登记口径）。 */
+  /** Référence du service d'enregistrement des risques (assemblage direct dans le apply du même plugin ; hôte de tests unitaires autonomes absent = référentiel d'enregistrement sans effet). */
   private riskRegistryRef: McpToolRiskRegistry | undefined
-  /** Secret Broker 引用（W1-T2 §6；同插件 apply() 直连装配，独立单测宿主缺席=不注入凭证）。 */
+  /** Référence du Secret Broker (W1-T2 §6 ; assemblage direct dans le apply du même plugin, hôte de tests autonomes absent = pas d'injection d'identifiants). */
   private secretBrokerRef: SecretBroker | undefined
 
   constructor(ctx: Context) {
@@ -412,7 +412,7 @@ export class McpService extends Service {
     ctx.effect(() => () => {
       if (this.probeTimer) clearInterval(this.probeTimer)
     })
-    // 健康探活：30s 一轮，连续失败 3 次熔断
+    // Sondage de santé : un tour de 30 s, 3 échecs consécutifs = disjoncteur ouvert
     this.probeTimer = setInterval(() => {
       void this.probeAll()
     }, 30_000)
@@ -432,41 +432,41 @@ export class McpService extends Service {
   }
 
   /**
-   * 风险登记服务取用（W1/V11）。console 的 inject 清单未含 mcpToolRisks——cordis 严格注入下
-   * 跨 fiber 访问未声明键会被拦（cannot get property without inject），故 REST 面统一经本方法
-   * 结构化取用（同插件 apply() 直连，不新增 console 依赖声明）；网关 invoke() 亦走同一引用。
+   * Accès au service d'enregistrement des risques (W1/V11). La liste inject de console ne contient pas mcpToolRisks — sous l'injection stricte cordis,
+   * l'accès inter-fiber à une clé non déclarée est bloqué (cannot get property without inject) ; la face REST passe donc uniformément par cette méthode
+   * (accès structuré, assemblage direct dans le apply du même plugin, sans nouvelle déclaration de dépendance console) ; l'invoke() de la passerelle passe par la même référence.
    */
   riskRegistry(): McpToolRiskRegistry | undefined {
     return this.riskRegistryRef
   }
 
-  /** apply() 装配时直连风险登记服务（同插件内无循环依赖：登记服务反向只读 services() 集合）。 */
+  /** Connexion directe au service d'enregistrement des risques lors de l'assemblage apply() (pas de dépendance circulaire dans le plugin : le service d'enregistrement ne lit en retour que la collection services()). */
   attachRiskRegistry(registry: McpToolRiskRegistry): void {
     this.riskRegistryRef = registry
   }
 
   /**
-   * Secret Broker 取用（W1-T2 §6）：与 riskRegistry() 同款结构化取用——console 的 inject 清单
-   * 未含 secretBroker，cordis 严格注入下跨 fiber 直访 ctx.secretBroker 会被拦（without inject），
-   * REST 面统一经本方法取用。
+   * Accès au Secret Broker (W1-T2 §6) : même accès structuré que riskRegistry() — la liste inject de console
+   * ne contient pas secretBroker ; sous l'injection stricte cordis, l'accès direct inter-fiber à ctx.secretBroker est bloqué (without inject),
+   * la face REST passe uniformément par cette méthode.
    */
   secretBroker(): SecretBroker | undefined {
     return this.secretBrokerRef
   }
 
-  /** apply() 装配时直连 Secret Broker（网关 resolveCallHeaders 与 REST 凭证面共用同一实例）。 */
+  /** Connexion directe au Secret Broker lors de l'assemblage apply() (resolveCallHeaders de la passerelle et la face identifiants REST partagent la même instance). */
   attachSecretBroker(broker: SecretBroker): void {
     this.secretBrokerRef = broker
   }
 
-  // -- 注册与部署 ---------------------------------------------------------
+  // -- Enregistrement et déploiement ---------------------------------------------------------
 
   createService(input: {
     name: string
     slug?: string
     description?: string
     icon?: string
-    /** 业务分类（各资产板块统一口径）；非法/缺省值归一化为「其他」。 */
+    /** Catégorie métier (référentiel unifié des panneaux d'actifs) ; valeur illégale/défaut normalisée en « autre ». */
     category?: string
     endpoint?: string
     transport?: McpServiceRecord['transport']
@@ -476,24 +476,24 @@ export class McpService extends Service {
     tools?: McpToolSpec[]
     headers?: Record<string, string>
     stability?: number
-    /** 显式声明 demo 才使用模拟执行层；缺省一律 real（生态设计 v1.2 第 0 步）。 */
+    /** La couche d'exécution simulée n'est utilisée que si demo est explicitement déclaré ; sinon toujours real (conception écosystème v1.2 étape 0). */
     exec?: 'real' | 'demo'
-    /** M0 数据面桥接来源标记（open-connector 等），控制台打「桥接过渡」徽章。 */
+    /** Marque de source de pontage du plan de données M0 (open-connector, etc.), la console affiche le badge « transition par pont ». */
     bridgeFrom?: string
-    /** 治理字段（契约 §5，可选入参；缺省值见下方 insert——存量记录由启动迁移兜底）。 */
+    /** Champs de gouvernance (contrat §5, paramètres optionnels ; valeurs par défaut voir l'insert ci-dessous — les enregistrements existants sont rattrapés par la migration au démarrage). */
     ownerEntity?: McpOwnerEntity
     capabilityId?: string
     exposureMode?: McpExposureMode
     dataClass?: McpDataClass
     environment?: McpEnvironment
     visibility?: McpVisibility
-    /** 下游凭证引用（local:/env: 形态；值本体在 SecretBroker，绝不入本记录）。 */
+    /** Référence d'identifiants aval (forme local:/env: ; la valeur vit dans SecretBroker, jamais dans le présent enregistrement). */
     credentialRef?: string
   }): McpServiceRecord {
     if (!input.name?.trim()) throw new Error(t('服务名称不能为空'))
     const slug = input.slug ?? input.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
     if (this.services().findOne((item) => item.slug === slug)) throw new Error(t('服务标识已存在：{slug}', { slug }))
-    // 治理字段枚举校验（契约 §5）：非法值显式报错
+    // Validation des énumérations des champs de gouvernance (contrat §5) : valeur illégale = erreur explicite
     const governance = normalizeGovernanceInput(input)
     if (input.mode !== 'external' && !input.endpoint) input.endpoint = `mcp+${input.transport ?? 'http'}://platform-hosted/${slug}`
     const toolSpecs = input.tools?.length ? input.tools : defaultToolsFor(slug)
@@ -510,7 +510,7 @@ export class McpService extends Service {
       ...(input.headers ? { headers: input.headers } : {}),
       orgId: input.orgId,
       owner: input.owner,
-      // 契约 §5 缺省值在写入侧一次补齐（治理摘要/迁移均按字段存在性判定，不依赖读侧兜底）
+      // Les valeurs par défaut du contrat §5 sont complétées une fois côté écriture (résumé de gouvernance/migration jugent sur la présence des champs, sans dépendre d'un repli à la lecture)
       ownerEntity: governance.ownerEntity ?? { type: 'platform' },
       exposureMode: governance.exposureMode ?? 'gateway',
       dataClass: governance.dataClass ?? 'internal',
@@ -531,7 +531,7 @@ export class McpService extends Service {
     })
   }
 
-  /** 通用 PATCH 允许直改的字段（治理归属 ownerEntity 不在列——走专用归属指派端点做资源校验）。 */
+  /** Champs modifiables directement par un PATCH générique (la propriété de gouvernance ownerEntity en est exclue — passe par l'endpoint dédié d'assignation avec validation de ressource). */
   private static readonly UPDATABLE_KEYS = [
     'name', 'description', 'icon', 'endpoint', 'tools', 'headers', 'rateLimitPerMin', 'category',
   ] as const
@@ -544,8 +544,8 @@ export class McpService extends Service {
     if (service.status === 'online' && patch.tools) {
       throw new Error(t('在线服务修改 Tool Schema 需先灰度新版本（版本不可变原则）'))
     }
-    // 治理字段枚举校验（契约 §5）；白名单收敛写入键——REST PATCH 透传 body 的历史行为下
-    // 未知键会被盲写进记录，治理字段必须经校验路径（ownerEntity 走专用端点，防绕过资源校验）
+    // Validation des énumérations des champs de gouvernance (contrat §5) ; convergence en liste blanche des clés écrites — sous le comportement historique du PATCH REST
+    // transmettant le body brut, des clés inconnues seraient écrites aveuglément ; les champs de gouvernance doivent passer par le chemin validé (ownerEntity par endpoint dédié, contre le contournement de la validation de ressource)
     const governance = normalizeGovernanceInput(patch)
     const next: Record<string, unknown> = {}
     for (const key of McpService.UPDATABLE_KEYS) {
@@ -558,18 +558,18 @@ export class McpService extends Service {
     return this.services().update(id, next as Partial<McpServiceRecord>)
   }
 
-  // -- 治理：归属指派 / 治理待办 / 存量迁移（W1-T2，契约 §5） --------------------------------
+  // -- Gouvernance : assignation de propriété / dette de gouvernance / migration des préexistants (W1-T2, contrat §5) --------------------------------
 
   /**
-   * 归属指派：仅做形态校验与落库；type=app/agent 的资源存在性校验在 REST 层经
-   * resourceCore 完成（plugin-mcp 不依赖 resource-core，保持装配面最小）。
+   * Assignation de propriété : simple validation de forme et écriture ; la validation d'existence des ressources type=app/agent est faite dans la couche REST
+   * via resourceCore (plugin-mcp ne dépend pas de resource-core, surface d'assemblage minimale).
    */
   setOwnerEntity(id: string, ownerEntity: McpOwnerEntity): McpServiceRecord {
     const normalized = normalizeGovernanceInput({ ownerEntity })
     return this.services().update(id, { ownerEntity: normalized.ownerEntity! })
   }
 
-  /** 治理待办摘要（只读，契约 §5）：unowned / 明文敏感头 / 非 gateway 暴露 三类 + 总量。 */
+  /** Résumé de dette de gouvernance (lecture seule, contrat §5) : trois classes unowned / en-têtes sensibles en clair / exposition non gateway + volume total. */
   governanceSummary(): {
     unowned: Array<{ serviceId: string; serviceName: string; reason: string }>
     plainHeaderServices: Array<{ serviceId: string; serviceName: string; keys: string[] }>
@@ -607,9 +607,9 @@ export class McpService extends Service {
   }
 
   /**
-   * 启动幂等迁移（仿 iam ensureConnectorPermissionsMigration 模式）：给存量服务记录补
-   * 治理字段默认值（缺则补、永不删改）；迁移标记入 mcp:migrations 集合供观测。
-   * 每次启动可重跑：已补齐的记录零写入；marker 仅作观测、不拦截重跑。
+   * Migration idempotente au démarrage (sur le modèle d'iam ensureConnectorPermissionsMigration) : complète les enregistrements de services existants
+   * avec les valeurs par défaut de gouvernance (compléter les manques, jamais supprimer/modifier) ; la marque de migration entre dans la collection mcp:migrations pour observation.
+   * Re-exécutable à chaque démarrage : zéro écriture pour les enregistrements déjà complets ; le marqueur n'est qu'observation, ne bloque pas la re-exécution.
    */
   ensureGovernanceMigration(): { applied: boolean; touched: string[] } {
     const collection = this.ctx.opsStorage.collection<RecordBase & { key: string; note?: string }>('mcp:migrations')
@@ -637,10 +637,10 @@ export class McpService extends Service {
   }
 
   /**
-   * 明文敏感头迁移（契约 §6）：扫描全部服务 headers 中敏感键（口径同 maskServiceHeaders）→
-   * dryRun 迁移预检报告；否则逐服务把敏感键值迁入 SecretBroker（headerName 取键名）、
-   * 从 service.headers 删除敏感键、回写 credentialRef。存量明文只在此显式动作下离场，
-   * 启动迁移（ensureGovernanceMigration）绝不删存量 headers。
+   * Migration des en-têtes sensibles en clair (contrat §6) : scanne les clés sensibles des headers de tous les services (même référentiel que maskServiceHeaders) →
+   * rapport de pré-vérification dryRun ; sinon, service par service, migre les clés sensibles dans SecretBroker (headerName prend le nom de la clé),
+   * supprime les clés sensibles de service.headers, réécrit credentialRef. Le clair préexistant ne sort que sous cette action explicite,
+   * la migration au démarrage (ensureGovernanceMigration) ne supprime jamais les headers existants.
    */
   migratePlainHeaders(options: { dryRun?: boolean } = {}): {
     dryRun: boolean
@@ -671,7 +671,7 @@ export class McpService extends Service {
     return { dryRun: false, candidates, migrated: candidates.length }
   }
 
-  /** 连接远端 MCP 服务拉取工具清单（initialize → tools/list）；导入与同步共用。 */
+  /** Connecte le service MCP distant pour tirer la liste d'outils (initialize → tools/list) ; partagé par import et synchronisation. */
   async listRemoteTools(endpoint: string, headers?: Record<string, string>): Promise<McpToolSpec[]> {
     const sessionId = await this.ensureSession(endpoint, headers)
     const { payload } = await this.mcpRequest(endpoint, headers, {
@@ -689,23 +689,23 @@ export class McpService extends Service {
         inputSchema: tool.inputSchema && typeof tool.inputSchema === 'object' && !Array.isArray(tool.inputSchema)
           ? tool.inputSchema as Record<string, unknown>
           : { type: 'object', properties: {} },
-        // V11 根治核心：远端 tools/list 不再隐式映射 read——远端清单无法自证风险，
-        // 一律 'unknown' 入账，写能力须经风险登记（mcpToolRisks）审批生效后放行。
+        // Cœur de la correction V11 : tools/list distant ne se mappe plus implicitement à read — la liste distante ne peut pas prouver le risque,
+        // tout tombe en 'unknown' en comptabilité ; une capacité d'écriture ne passe qu'après approbation de l'enregistrement de risque (mcpToolRisks).
         riskLevel: 'unknown' as const,
       }))
       .filter((tool: McpToolSpec) => tool.name)
   }
 
   /**
-   * 外部服务工具同步：以远端 tools/list 为准刷新本地清单。
-   * 绕过 updateService 的版本不可变校验——外部服务的工具清单是远端事实的镜像同步，
-   * 不是平台侧的版本变更（版本流程仍约束托管服务）。
+   * Synchronisation des outils d'un service externe : rafraîchit la liste locale en prenant tools/list distant pour référence.
+   * Contourne la validation d'immuabilité de version d'updateService — la liste d'outils d'un service externe est l'image synchronisée d'un fait distant,
+   * pas un changement de version côté plateforme (le processus de version continue de concerner les services gérés).
    */
   async syncTools(serviceId: string): Promise<McpServiceRecord> {
     const service = this.requireService(serviceId)
     if (service.mode !== 'external') throw new Error(t('仅外部注册服务支持工具同步'))
     if (service.exec !== 'real') throw new Error(t('演示传输层服务不支持工具同步'))
-    // W1-T2 §6 注入点：透传前经 SecretBroker 组装凭证头（存量非敏感 headers 照旧）
+    // Point d'injection W1-T2 §6 : avant transmission, les en-têtes d'identifiants sont assemblés via SecretBroker (les headers préexistants non sensibles inchangés)
     const tools = await this.listRemoteTools(service.endpoint, await this.resolveCallHeaders(service))
     if (!tools.length) throw new Error(t('远端服务未返回任何工具'))
     const updated = this.services().update(serviceId, { tools })
@@ -714,9 +714,9 @@ export class McpService extends Service {
   }
 
   /**
-   * mcpServers JSON 一键导入（Claude Desktop / Cursor / Cherry Studio 等工具通行的配置形态）：
-   * 解析 → 注册外部服务（exec=real）→ initialize+tools/list 自动发现工具 →（可选）验证并上线。
-   * 单条目失败不阻断其余条目；远端不可达时保留草稿并回传原因。
+   * Import en un clic d'un JSON mcpServers (forme de configuration en vigueur chez Claude Desktop / Cursor / Cherry Studio, etc.) :
+   * analyse → enregistrement des services externes (exec=real) → initialize+tools/list découverte automatique → (optionnel) validation et mise en ligne.
+   * L'échec d'une entrée n'arrête pas les autres ; injoignable = conserve le brouillon et renvoie la raison.
    */
   async importServices(input: { config: string | object; orgId: string; owner: string; autoDeploy?: boolean }): Promise<{
     imported: number
@@ -733,10 +733,10 @@ export class McpService extends Service {
         const entryHeaders = entry.headers ?? {}
         const bridgedFrom = Object.entries(entryHeaders)
           .find(([key]) => key.toLowerCase() === 'x-bridged-from')?.[1]
-        // W1 治理（契约 §6，CTO 裁决 2026-10-22）：导入入口自动入保险箱——敏感键值不落
-        // 业务集合，改经 SecretBroker 登记（服务记录只留非敏感头 + credentialRef）。
-        // 与 create/PATCH 的 400 门禁不同：导入多为连接器桥接的机器流程，拒绝会断链，
-        // 故采取「导入即迁移」语义；SecretBroker 未装配时回落存量明文行为（降级兼容）。
+        // Gouvernance W1 (contrat §6, arbitrage CTO 2026-10-22) : l'entrée d'import entre automatiquement au coffre — les clés/valeurs sensibles ne tombent pas
+        // dans les collections métier, elles passent par l'enregistrement SecretBroker (l'enregistrement du service ne garde que les en-têtes non sensibles + credentialRef).
+        // Différent de la barrière 400 de create/PATCH : l'import est le plus souvent un flux machine de pontage de connecteur, un refus casserait la chaîne,
+        // d'où la sémantique « importer = migrer » ; SecretBroker non assemblé = repli sur le comportement clair historique (compatibilité dégradée).
         const plainKeys = sensitiveHeaderKeys(entryHeaders)
         const keptHeaders = plainKeys.length > 0
           ? Object.fromEntries(Object.entries(entryHeaders).filter(([key]) => !plainKeys.includes(key)))
@@ -751,7 +751,7 @@ export class McpService extends Service {
           orgId: input.orgId,
           owner: input.owner,
           ...(Object.keys(keptHeaders).length > 0 ? { headers: keptHeaders } : {}),
-          // M0 数据面桥接打标：连接器网关导入的 MCP 服务带治理降级徽章（§2.11）
+          // Marque de pontage du plan de données M0 : les services MCP importés par la passerelle du connecteur portent le badge de dégradation de gouvernance (§2.11)
           ...(bridgedFrom ? { bridgeFrom: String(bridgedFrom) } : {}),
           ...(entry.description ? { description: entry.description } : {}),
           tools: [],
@@ -767,14 +767,14 @@ export class McpService extends Service {
         let reachable = false
         let message = ''
         try {
-          // W1-T2 §6 注入点：自动发现同样经 SecretBroker 组装凭证头（新服务此刻通常无登记，miss 回落）
+          // Point d'injection W1-T2 §6 : la découverte automatique assemble aussi les en-têtes d'identifiants via SecretBroker (un nouveau service n'a généralement pas d'enregistrement à cet instant, miss = repli)
           tools = await this.listRemoteTools(service.endpoint, await this.resolveCallHeaders(service))
           reachable = true
         } catch (error) {
           message = t('工具自动发现失败：{reason}', { reason: error instanceof Error ? error.message : String(error) })
         }
         this.services().update(service.id, {
-          // 不可达时清空默认三件套，避免伪工具清单进入权限组
+          // Injoignable : vide le trio par défaut, pour éviter qu'une fausse liste d'outils entre dans les groupes de permissions
           ...(reachable ? { tools } : { tools: [] as McpToolSpec[] }),
           health: { lastProbeAt: now(), status: reachable ? 'healthy' : 'unknown', latencyMs: 0, consecutiveFails: 0, breakerOpen: false },
         })
@@ -801,7 +801,7 @@ export class McpService extends Service {
     return { imported: results.filter((item) => item.ok).length, results }
   }
 
-  /** 测试环境验证：real 服务做真实 initialize 探测；demo 服务模拟探测。 */
+  /** Validation d'environnement de test : un service real fait une vraie sonde initialize ; un service demo simule la sonde. */
   async verifyService(id: string): Promise<McpServiceRecord> {
     const service = this.requireService(id)
     if (service.status !== 'draft') throw new Error(t('仅草稿状态可执行测试验证'))
@@ -814,7 +814,7 @@ export class McpService extends Service {
     return this.services().update(id, { health: { lastProbeAt: now(), status: 'healthy', latencyMs: latency, consecutiveFails: 0, breakerOpen: false } })
   }
 
-  /** 发布上线（可选灰度比例），记录版本。 */
+  /** Publication en ligne (pourcentage de gradation optionnel), enregistre la version. */
   async deployService(id: string, options: { grayPercent?: number; version?: string; changelog?: string; actor: string }): Promise<McpServiceRecord> {
     const service = this.requireService(id)
     if (!['draft', 'verifying', 'gray', 'online', 'unhealthy'].includes(service.status)) {
@@ -866,11 +866,11 @@ export class McpService extends Service {
     return updated
   }
 
-  /** L4 下线走审批：创建审批单，通过后自动执行。 */
+  /** La mise hors ligne L4 passe par l'approbation : crée la fiche, exécution automatique après approbation. */
   requestOfflineApproval(id: string, requester: { id: string; name: string }, reason: string, impactPreview: string[]) {
     return this.ctx.audit.createApproval({
       kind: 'mcp.offline',
-      // WP-10/L1（QA A-06）：L4 高危统一高风险——通过需二次确认 + 公司级终审标记
+      // WP-10/L1 (QA A-06) : L4 haut risque unifié — l'approbation exige double confirmation + marqueur de revue finale société
       riskLevel: 'high',
       title: t('下线 MCP 服务：{name}', { name: this.requireService(id).name }),
       payload: { serviceId: id, reason, impactPreview },
@@ -879,28 +879,28 @@ export class McpService extends Service {
     })
   }
 
-  /** 删除后的关联清理：远端会话与限流缓存、Broker 密钥文件一并清除；调用明细与审计数据保留。 */
+  /** Nettoyage des liaisons après suppression : sessions distantes et caches de limitation, fichiers de clés du Broker supprimés ensemble ; détails d'appels et données d'audit conservés. */
   purgeService(id: string): void {
     const service = this.requireService(id)
     this.mcpSessions.delete(service.endpoint)
     for (const key of [...this.rateBuckets.keys()]) {
       if (key.startsWith(`${id}:`)) this.rateBuckets.delete(key)
     }
-    // W1-T2 §6：服务删除连带清除下游凭证文件（不落孤儿密钥）
+    // W1-T2 §6 : la suppression du service efface en cascade le fichier d'identifiants aval (pas de clé orpheline)
     try {
       this.secretBrokerRef?.delete(id)
-    } catch { /* 单测宿主无数据目录等场景不阻断删除主流程 */ }
+    } catch { /* scénarios comme l'hôte de test unitaire sans répertoire de données : n'interrompt pas le flux principal de suppression */ }
     this.services().remove(id)
   }
 
-  // -- 健康探活 -----------------------------------------------------------
+  // -- Sondage de santé -----------------------------------------------------------
 
   async probeService(id: string): Promise<{ status: string; latencyMs: number }> {
     const service = this.requireService(id)
     if (service.status === 'offline' || service.status === 'draft') {
       return { status: 'unknown', latencyMs: 0 }
     }
-    // real：真实 HTTP 探测（POST initialize，测往返与延迟）；demo（含存量无标记）：确定性模拟
+    // real : vraie sonde HTTP (POST initialize, mesure aller-retour et latence) ; demo (y compris préexistants sans marque) : simulation déterministe
     let latency: number
     if (service.exec === 'real') {
       latency = await this.realProbe(service)
@@ -935,7 +935,7 @@ export class McpService extends Service {
     }
   }
 
-  /** 业务失败计入熔断：真实调用失败与探活失败共用连续失败计数（连续 3 次开熔断）。 */
+  /** L'échec métier compte dans le disjoncteur : l'échec d'appel réel et l'échec de sondage partagent le compteur d'échecs consécutifs (3 consécutifs = disjoncteur ouvert). */
   private noteBusinessFailure(service: McpServiceRecord, reason: string): void {
     const fails = service.health.consecutiveFails + 1
     const breakerOpen = fails >= 3
@@ -951,7 +951,7 @@ export class McpService extends Service {
     }
   }
 
-  /** 业务成功即半闭合：清零失败计数、解除熔断（下次探活仍会复核）。 */
+  /** Un succès métier referme à moitié : remet le compteur d'échecs à zéro, lève le disjoncteur (le sondage suivant revérifie quand même). */
   private noteBusinessSuccess(service: McpServiceRecord): void {
     if (service.health.consecutiveFails === 0 && !service.health.breakerOpen) return
     this.services().update(service.id, {
@@ -964,12 +964,12 @@ export class McpService extends Service {
     return this.probeService(id)
   }
 
-  /** 真实探活：MCP initialize 握手，返回延迟（ms）；失败返回 -1。 */
+  /** Vraie sonde de santé : poignée de main MCP initialize, renvoie la latence (ms) ; échec = -1. */
   private async realProbe(service: McpServiceRecord): Promise<number> {
     const started = Date.now()
     try {
-      // W1-T2 §6 注入点：探活与调用同源凭证（SecretBroker 组装，存量 headers 照旧）；
-      // W3-T5 §14：探活是周期性噪声源（长驻服务约 3千条/天/服务），访问留痕按窗口去重
+      // Point d'injection W1-T2 §6 : le sondage et l'appel partagent la même source d'identifiants (assemblés par SecretBroker, headers préexistants inchangés) ;
+      // W3-T5 §14 : le sondage est une source périodique de bruit (service longue durée ~3k/jour/service), les traces d'accès sont dédupliquées par fenêtre
       const { payload } = await this.mcpRequest(service.endpoint, await this.resolveCallHeaders(service, { dedupKey: 'probe' }), {
         jsonrpc: '2.0',
         id: `probe-${Date.now()}`,
@@ -984,9 +984,9 @@ export class McpService extends Service {
   }
 
   /**
-   * MCP streamable HTTP 请求基座：单 POST JSON-RPC，兼容两种响应形态——纯 JSON 与
-   * SSE 流（text/event-stream，取首个 data 帧）；透传服务自定义头（如 Authorization），
-   * 回传服务端下发的 Mcp-Session-Id 供有状态服务复用。
+   * Socle de requête MCP streamable HTTP : un POST JSON-RPC unique, compatible avec deux formes de réponse — JSON pur et
+   * flux SSE (text/event-stream, prend la première trame data) ; transmet les en-têtes personnalisés du service (ex. Authorization),
+   * renvoie le Mcp-Session-Id délivré par le serveur pour que les services avec état le réutilisent.
    */
   private async mcpRequest(endpoint: string, headers: Record<string, string> | undefined, message: Record<string, unknown>, timeoutMs: number, sessionId?: string): Promise<{ payload: any; sessionId?: string; status?: number }> {
     const controller = new AbortController()
@@ -1006,7 +1006,7 @@ export class McpService extends Service {
       if (!response.ok) {
         throw new Error(t('MCP 服务 HTTP {status}：{body}', { status: response.status, body: (await response.text().catch(() => '')).slice(0, 200) }))
       }
-      // 上游 HTTP 状态（W3-T5 §14 upstreamStatus 回填源；additive，既有调用方零感知）
+      // Statut HTTP amont (source du renseignement upstreamStatus W3-T5 §14 ; additive, appelants existants insensibles)
       const status = response.status
       const sessionIdHeader = response.headers.get('mcp-session-id') ?? undefined
       const contentType = String(response.headers.get('content-type') ?? '')
@@ -1016,11 +1016,11 @@ export class McpService extends Service {
           if (!line.startsWith('data:')) continue
           const frame = line.slice(5).trim()
           if (!frame || frame === '[DONE]') continue
-          try { return { payload: JSON.parse(frame), sessionId: sessionIdHeader, status } } catch { /* 跳过非 JSON 帧 */ }
+          try { return { payload: JSON.parse(frame), sessionId: sessionIdHeader, status } } catch { /* ignore les trames non JSON */ }
         }
         throw new Error(t('MCP 服务 SSE 响应中未找到 JSON-RPC 帧'))
       }
-      if (!text) return { payload: null, sessionId: sessionIdHeader, status } // 202 Accepted 等空体响应（通知类消息）
+      if (!text) return { payload: null, sessionId: sessionIdHeader, status } // réponse à corps vide type 202 Accepted (messages de notification)
       try {
         return { payload: JSON.parse(text), sessionId: sessionIdHeader, status }
       } catch {
@@ -1031,7 +1031,7 @@ export class McpService extends Service {
     }
   }
 
-  /** 确立远端会话：initialize 握手并缓存 sessionId（无状态服务缓存 ''，避免每次重复握手）。 */
+  /** Établit la session distante : poignée de main initialize et mise en cache du sessionId (service sans état cache '', évite de refaire la poignée à chaque fois). */
   private async ensureSession(endpoint: string, headers?: Record<string, string>): Promise<string | undefined> {
     const cached = this.mcpSessions.get(endpoint)
     if (cached && cached.expiresAt > Date.now()) return cached.sessionId || undefined
@@ -1045,13 +1045,13 @@ export class McpService extends Service {
     const effective = sessionId ?? ''
     this.mcpSessions.set(endpoint, { sessionId: effective, expiresAt: Date.now() + MCP_SESSION_TTL_MS })
     if (effective) {
-      // 有状态服务要求补发 initialized 通知；无状态服务忽略即可，失败不阻断。
+      // Un service avec état exige l'envoi de la notification initialized ; un service sans état l'ignore, un échec n'interrompt pas.
       await this.mcpRequest(endpoint, headers, { jsonrpc: '2.0', method: 'notifications/initialized' }, REAL_PROBE_TIMEOUT_MS, effective).catch(() => undefined)
     }
     return effective || undefined
   }
 
-  // -- 权限组 -------------------------------------------------------------
+  // -- Groupes de permissions -------------------------------------------------------------
 
   createPermGroup(input: {
     name: string
@@ -1081,7 +1081,7 @@ export class McpService extends Service {
     return this.permGroups().remove(id)
   }
 
-  /** 授予主体访问：加入权限组。 */
+  /** Accorde l'accès à un principal : l'ajoute au groupe de permissions. */
   grantSubject(groupId: string, subject: McpPermGroupRecord['subjects'][number]): McpPermGroupRecord {
     const group = this.permGroups().get(groupId)
     if (!group) throw new Error(t('权限组不存在：{id}', { id: groupId }))
@@ -1089,14 +1089,14 @@ export class McpService extends Service {
     return this.permGroups().update(groupId, { subjects: [...group.subjects, subject] })
   }
 
-  // -- 资源限定 scope 模板 / 策略模拟（W3-T5，契约 §12/§14） ---------------------------------
+  // -- Gabarit de scope de limitation de ressource / simulation de politique (W3-T5, contrats §12/§14) ---------------------------------
 
   /**
-   * scope 模板（契约 §12）：按权限组 policies 生成建议的资源限定 scope 集——
-   *   - allowedTools='*'（服务全量）→ 建议服务级 `mcp.service:<slug>.invoke`；
-   *   - allowedTools 白名单 → 逐工具 `mcp.tool:<slug>:<tool>.invoke`（readOnly 组不产出
-   *     write/admin 工具的 scope，模板与裁决面同判）；服务不存在/工具不在清单的引用跳过。
-   * dry 语义：只读推导，不落库不副作用；控制台（W3-T6）与「新增授权默认产出 scope 模板」消费。
+   * Gabarit de scope (contrat §12) : génère depuis les policies du groupe de permissions un jeu de scopes de limitation de ressource suggérés —
+   *   - allowedTools='*' (tout le service) → suggère le scope service `mcp.service:<slug>.invoke` ;
+   *   - allowedTools en liste blanche → par outil `mcp.tool:<slug>:<tool>.invoke` (un groupe readOnly ne produit pas
+   *     de scope pour les outils write/admin, le gabarit et la face d'arbitrage jugent pareil) ; références de service inexistant/d'outil hors liste sautées.
+   * Sémantique dry : dérivation en lecture seule, pas d'écriture ni d'effet de bord ; consommé par la console (W3-T6) et « toute nouvelle autorisation produit par défaut un gabarit de scope ».
    */
   scopeTemplate(groupId: string): {
     scopes: string[]
@@ -1116,7 +1116,7 @@ export class McpService extends Service {
         for (const toolName of policy.allowedTools) {
           const tool = service.tools.find((item) => item.name === toolName)
           if (!tool) continue
-          // 只读约束组：写/admin 工具不产出 scope（模板=裁决面口径，避免模板越权误导）
+          // Groupe à contrainte lecture seule : pas de scope pour les outils write/admin (gabarit = référentiel de la face d'arbitrage, pour éviter qu'un gabarit induise en erreur par excès)
           if (policy.constraints.readOnly && (tool.riskLevel === 'write' || tool.riskLevel === 'admin')) continue
           scopes.push(`mcp.tool:${service.slug}:${tool.name}.invoke`)
         }
@@ -1129,13 +1129,13 @@ export class McpService extends Service {
   }
 
   /**
-   * 策略模拟 / 影响分析（契约 §14）：body=完整权限组草稿，不落库——影响报告四维：
-   *   - newServices：policies 覆盖的服务（服务不存在引用跳过）；
-   *   - writeTools：覆盖服务中 allowedTools 命中的 riskLevel write/admin 工具；
-   *   - confidential：覆盖服务中 dataClass=confidential 的服务；
-   *   - crossOrg：服务 org 与 subjects 可达 org 已知且不一致（user_group 经成员展开、
-   *     agent/app 经 resourceCore 归属；org 缺失不可判 → 不计）；
-   *   - affectedSubjects：subjects 原样展开。
+   * Simulation de politique / analyse d'impact (contrat §14) : body = brouillon intégral de groupe de permissions, sans écriture — rapport d'impact en quatre dimensions :
+   *   - newServices : services couverts par policies (référence de service inexistant sautée) ;
+   *   - writeTools : outils riskLevel write/admin atteints par allowedTools dans les services couverts ;
+   *   - confidential : services dataClass=confidential parmi les couverts ;
+   *   - crossOrg : org du service et org atteignable par subjects tous deux connus et divergents (user_group étendu via les membres,
+   *     agent/app via le rattachement resourceCore ; org manquant = indécidable → non compté) ;
+   *   - affectedSubjects : subjects étendus tels quels.
    */
   dryRunPermGroup(draft: {
     name?: string
@@ -1168,7 +1168,7 @@ export class McpService extends Service {
         if (granted) writeTools.push({ serviceId, slug: service.slug, tool: tool.name })
       }
     }
-    // subjects 可达组织：任一（服务org × 主体org）已知且不同 → crossOrg
+    // Organisations atteignables par les sujets : une quelconque (org service × org sujet) connue et différente → crossOrg
     let crossOrg = false
     for (const subject of subjects) {
       const orgs = this.subjectReachableOrgs(subject)
@@ -1180,7 +1180,7 @@ export class McpService extends Service {
     return { newServices, writeTools, confidential, crossOrg, affectedSubjects: subjects }
   }
 
-  /** 主体可达组织集合（dry-run crossOrg 判定）：user_group 经 iam 成员展开；agent/app 经 resourceCore 归属；不可解析=空集（不计）。 */
+  /** Ensemble d'organisations atteignables par les sujets (jugement crossOrg du dry-run) : user_group étendu via les membres iam ; agent/app via le rattachement resourceCore ; irrésoluble = ensemble vide (non compté). */
   private subjectReachableOrgs(subject: McpPermGroupRecord['subjects'][number]): Set<string> {
     const orgs = new Set<string>()
     try {
@@ -1195,18 +1195,18 @@ export class McpService extends Service {
       const core = (this.ctx as unknown as { resourceCore?: { get: (kind: string, id: string) => { orgId?: string } | undefined } }).resourceCore
       const orgId = core?.get(subject.type, subject.id)?.orgId
       if (orgId) orgs.add(orgId)
-    } catch { /* 解析失败按空集（不可判不计） */ }
+    } catch { /* échec d'analyse : ensemble vide (ce qui est indécidable n'est pas compté) */ }
     return orgs
   }
 
   /**
-   * 权限组主体匹配（W2-T3 契约 §8 抽取）：返回命中该 caller 的全部服务策略。
-   * 主体三类：user_group（human 经 iam 用户组解析）/ agent / app；多组命中时由
-   * decideTool 依 grants 顺序逐一裁决（与既有 authorize 行为一致，抽取非复制）。
+   * Appariement des sujets d'un groupe de permissions (extraction W2-T3 contrat §8) : renvoie toutes les politiques de services atteignant ce caller.
+   * Trois classes de sujets : user_group (human résolu via les groupes iam) / agent / app ; en cas de groupes multiples atteints, decideTool
+   * arbitre un à un dans l'ordre des grants (cohérent avec le comportement authorize existant, extraction et non copie).
    */
   private matchedPolicies(caller: InvokeCaller, serviceId: string): ToolPolicy[] {
     const grants: ToolPolicy[] = []
-    // 可匹配主体集合：caller.subjects（主体 + 委托链 actor，additive）缺省时回落主体自身
+    // Ensemble de principaux appariables : caller.subjects (sujet + acteurs de la chaîne de délégation, additive) ; à défaut repli sur le sujet lui-même
     const subjectPool: Array<{ type: 'user' | 'agent' | 'app'; id: string }> = caller.subjects?.length
       ? caller.subjects
       : [{ type: caller.type, id: caller.id }]
@@ -1215,7 +1215,7 @@ export class McpService extends Service {
       if (!policy) continue
       const hit = group.subjects.some((subject) => {
         if (subject.type === 'user_group') {
-          // 用户组主体：任一 pool 内的真人命中组成员即算命中
+          // Sujet groupe d'utilisateurs : n'importe quelle personne réelle du pool atteinte comme membre du groupe = correspondance
           return subjectPool.some((candidate) => candidate.type === 'user'
             && this.ctx.iam.resolveGroupMembers(subject.id).some((user) => user.id === candidate.id))
         }
@@ -1227,11 +1227,11 @@ export class McpService extends Service {
   }
 
   /**
-   * 单工具裁决（W2-T3 契约 §8 抽取）：authorize() 与 authorizedToolsFor() 共用同一判定——
-   * 按 grants 顺序取首个 allowedTools 命中的策略定裁决；只读语境拦截 write/admin。
-   * W1/V11 只读约束口径（与工作策略端口同判）：unknown 按只读语境放行（未登记工具在
-   * 只读语境下视为 read——写能力已被写语境拒绝面兜住，残余风险由重审清单 reviewList 收敛，
-   * 不再「未知即拒」误伤只读消费）。
+   * Arbitrage d'outil isolé (extraction W2-T3 contrat §8) : authorize() et authorizedToolsFor() partagent le même jugement —
+   * prend dans l'ordre des grants la première politique dont allowedTools atteint l'outil ; un contexte lecture seule intercepte write/admin.
+   * Référentiel de contrainte lecture seule W1/V11 (même jugement que le port de politique de travail) : unknown passe en contexte lecture (un outil non enregistré y
+   * est traité comme read — la capacité d'écriture est déjà couverte par la face de refus du contexte écrit, le risque résiduel est convergé par la liste de ré-examen reviewList,
+   * plus de « inconnu = refus » blessant la consommation en lecture).
    */
   private decideTool(grants: ToolPolicy[], tool: McpToolSpec): { ok: true; readOnly: boolean } | { ok: false; reason: string } {
     for (const policy of grants) {
@@ -1245,7 +1245,7 @@ export class McpService extends Service {
     return { ok: false, reason: t('工具 {tool} 不在授权列表中', { tool: tool.name }) }
   }
 
-  /** 授权检查：返回可用的策略上下文或拒绝原因。 */
+  /** Contrôle d'autorisation : renvoie le contexte de politique utilisable ou la raison du refus. */
   authorize(caller: InvokeCaller, serviceId: string, toolName: string): { ok: true; readOnly: boolean } | { ok: false; reason: string } {
     const service = this.requireService(serviceId)
     const tool = service.tools.find((item) => item.name === toolName)
@@ -1258,12 +1258,12 @@ export class McpService extends Service {
   }
 
   /**
-   * 可调用工具集合（W2-T3 契约 §8 新导出）：当前身份在该服务可调用的工具名列表——
-   * 权限组主体匹配 + allowedTools 交集 + readOnly 约束过滤 write/admin 工具，与 authorize()
-   * 单工具判定完全同源（matchedPolicies/decideTool 共用，行为等价）。
-   * 无权限组/无命中 → 空数组（服务级 tools/list 据此回空集，未授权工具一概不出现；
-   * 高敏数据类的 ABAC 收敛在 W3-T5 PDP 落地，本集合按权限组 fail-closed 已满足
-   * 「无授权不出现」验收口径）。服务级端点 tools/list 与 tools/call 一致性都以此为边界。
+   * Ensemble d'outils appelables (nouvel export W2-T3 contrat §8) : liste des noms d'outils appelables sur ce service par l'identité courante —
+   * appariement des sujets du groupe de permissions + intersection allowedTools + filtre readOnly retirant les outils write/admin, même source exacte que le jugement
+   * d'outil isolé de authorize() (matchedPolicies/decideTool partagés, comportement équivalent).
+   * Sans groupe de permissions/sans correspondance → tableau vide (l'endpoint service tools/list renvoie ainsi un ensemble vide, les outils non autorisés n'apparaissent jamais ;
+   * la convergence ABAC des classes de données sensibles atterrit dans le PDP W3-T5 ; le présent ensemble, déjà fail-closed par groupe de permissions, satisfait
+   * le référentiel d'acceptation « sans autorisation, pas d'apparition »). L'endpoint service tools/list et tools/call ont tous deux ceci pour frontière.
    */
   authorizedToolsFor(caller: InvokeCaller, service: McpServiceRecord): string[] {
     const grants = this.matchedPolicies(caller, service.id)
@@ -1271,17 +1271,17 @@ export class McpService extends Service {
     return service.tools.filter((tool) => this.decideTool(grants, tool).ok).map((tool) => tool.name)
   }
 
-  // -- 主裁决 PDP（W3-T5，契约 §11/§12/§13） ---------------------------------
+  // -- PDP d'arbitrage principal (W3-T5, contrats §11/§12/§13) ---------------------------------
   //
-  // MCP invoke 主裁决收敛进 PolicyDecisionPoint：authorize() 的权限组判定迁入
-  // mcp-permgroup 模块（matchedPolicies/decideTool 判定面原样共用，行为等价——
-  // authorize()/authorizedToolsFor() 与模块读同一对私有方法，不存在第二份裁决逻辑），
-  // 新增 iam-permission（资源限定 scope 第一层）/ scene（场景 ABAC）/ org-constraint
-  // （组织租户硬约束）/ risk-gate（unknown 风险写语境拒绝）四个模块。模块序与既有
-  // 闸门序一致：scope → 权限组 → 场景 → 组织 → 风险；首个 deny 模块的理由即主因
-  // （既有领域拒绝文案不漂移），deny 码经 denyCodeOf 映射领域码。
+  // L'arbitrage principal du MCP invoke converge dans PolicyDecisionPoint : le jugement par groupes de permissions d'authorize() migre dans
+  // le module mcp-permgroup (faces de jugement matchedPolicies/decideTool partagées telles quelles, comportement équivalent —
+  // authorize()/authorizedToolsFor() et le module lisent la même paire de méthodes privées, il n'existe pas de deuxième logique d'arbitrage),
+  // s'ajoutent les modules iam-permission (première couche scope de limitation de ressource) / scene (ABAC de scénario) / org-constraint
+  // (contrainte dure organisation/tenant) / risk-gate (refus unknown en contexte écrit). L'ordre des modules est l'ordre des barrières
+  // existantes : scope → groupes de permissions → scénario → organisation → risque ; la raison du premier module deny est la cause principale
+  // (les libellés de refus de domaine existants ne dérivent pas), le code deny passe par denyCodeOf pour mapper le code de domaine.
 
-  /** 网关 PDP 实例（懒构建；模块注册序即裁决序，见各模块注释）。 */
+  /** Instance PDP de la passerelle (construction paresseuse ; l'ordre d'enregistrement des modules est l'ordre d'arbitrage, voir les commentaires de chaque module). */
   private gatewayPdp: PolicyDecisionPoint | undefined
 
   private pdp(): PolicyDecisionPoint {
@@ -1296,7 +1296,7 @@ export class McpService extends Service {
     return pdp
   }
 
-  /** 判定面主体投影：InvokeCaller → UnifiedPrincipal 最小形态（PDP 契约类型要求；scopes/组织等事实随 req.context 携带）。 */
+  /** Projection du principal sur la face de jugement : InvokeCaller → forme minimale UnifiedPrincipal (exigence du type de contrat PDP ; les faits scopes/organisation etc. voyagent via req.context). */
   private subjectOf(caller: InvokeCaller): UnifiedPrincipal {
     const kind = caller.type === 'user' ? 'human' as const : caller.type === 'agent' ? 'agent' as const : 'app' as const
     return {
@@ -1316,12 +1316,12 @@ export class McpService extends Service {
   }
 
   /**
-   * 第一层 iam-permission（契约 §12）：unified.scopes 含 mcp.invoke（全局）或
-   * mcp.service:<本服务>.invoke / mcp.tool:<本服务>:<本工具>.invoke 任一即过第一层；
-   * '*' 平台主体直通。 scopes 未随调用携带（legacy 工具面调用方）fail-open——第一层
-   * 不设防，第二层权限组照旧强制；scopes 已携带且声明了 MCP scope 面（任一 mcp. 前缀）
-   * 却未覆盖本目标时 fail-closed（SCOPE_DENIED）——资源限定令牌被限定到别的服务/工具时
-   * 显式拒绝，而非靠第二层文案含混放行。scope 放行不绕过权限组（第二层仍强制）。
+   * Première couche iam-permission (contrat §12) : unified.scopes contenant mcp.invoke (global) ou
+   * mcp.service:<ce service>.invoke / mcp.tool:<ce service>:<cet outil>.invoke quelconque = passe la première couche ;
+   * principal plateforme '*' passe direct. Scopes non portés par l'appel (appelant legacy de la face outils) = fail-open — la première couche
+   * ne protège pas, la deuxième couche groupes de permissions reste obligatoire ; scopes portés ayant déclaré une face MCP (un préfixe mcp. quelconque)
+   * sans couvrir la cible = fail-closed (SCOPE_DENIED) — un jeton de limitation de ressource restreint à un autre service/outil
+   * est refusé explicitement, plutôt qu'un passage au libellé confus de la deuxième couche. Le passage du scope ne contourne pas le groupe de permissions (deuxième couche toujours obligatoire).
    */
   private iamPermissionModule(): PolicyModule {
     return {
@@ -1341,7 +1341,7 @@ export class McpService extends Service {
         if (scopes.includes(serviceScope) || scopes.includes(toolScope)) {
           return { allow: true, reasons: [`令牌含资源限定 scope（${scopes.includes(serviceScope) ? serviceScope : toolScope}）`], decisionId: newId('pd'), obligations: [] }
         }
-        // 声明了 MCP scope 面但未覆盖本目标：fail-closed（资源限定语义的正确拒绝面）
+        // Face MCP de scopes déclarée sans couvrir la cible : fail-closed (la face de refus correcte de la sémantique de limitation de ressource)
         const declaredMcp = scopes.filter((scope) => scope.startsWith('mcp.'))
         if (declaredMcp.length === 0) {
           return { allow: true, reasons: ['令牌未声明 MCP scope 面（legacy scopes），第一层不设防'], decisionId: newId('pd'), obligations: [] }
@@ -1352,10 +1352,10 @@ export class McpService extends Service {
   }
 
   /**
-   * 第二层 mcp-permgroup（契约 §11：既有 authorize() 逻辑迁入，行为等价）：判定面
-   * 与 authorize()/authorizedToolsFor() 完全同源（matchedPolicies 主体匹配 +
-   * decideTool 单工具裁决），拒绝文案逐字保持既有领域文案；放行时产出 read-only
-   * 义务（供审计展示，本波不新增执行语义）。
+   * Deuxième couche mcp-permgroup (contrat §11 : la logique authorize() existante migre, comportement équivalent) : la face de jugement
+   * est exactement de même source qu'authorize()/authorizedToolsFor() (appariement de sujets matchedPolicies +
+   * arbitrage d'outil isolé decideTool), les libellés de refus conservent mot pour mot les libellés de domaine existants ; le passage produit l'obligation
+   * lecture seule (pour affichage d'audit, cette vague n'ajoute pas de sémantique d'exécution).
    */
   private mcpPermGroupModule(): PolicyModule {
     return {
@@ -1364,7 +1364,7 @@ export class McpService extends Service {
         const caller = req.context.caller as InvokeCaller
         const service = req.context.service as McpServiceRecord
         const toolName = String(req.tool?.name ?? '')
-        // 工具存在性：与 authorize() 首查同文案（服务清单是裁决边界，未知工具不泄露）
+        // Existence de l'outil : même libellé que la première vérification d'authorize() (la liste du service est la frontière de l'arbitrage, un outil inconnu n'est pas divulgué)
         const tool = service.tools.find((item) => item.name === toolName)
         if (!tool) {
           return { allow: false, reasons: [t('服务 {service} 不存在工具 {tool}', { service: service.name, tool: toolName })], decisionId: newId('pd'), obligations: [] }
@@ -1381,7 +1381,7 @@ export class McpService extends Service {
           allow: true,
           reasons: ['MCP 权限组授权命中'],
           decisionId: newId('pd'),
-          // 只读约束转化为结构化义务（契约 §11 obligations；供审计展示）
+          // La contrainte lecture seule devient obligation structurée (contrat §11 obligations ; pour affichage d'audit)
           obligations: verdict.readOnly ? [{ type: 'read-only' }] : [],
         }
       },
@@ -1389,9 +1389,9 @@ export class McpService extends Service {
   }
 
   /**
-   * 场景 ABAC 模块（契约 §11 scene-ABAC）：仅当调用上下文显式携带 sceneCode 且
-   * ctx.iam.checkScene 可达时接入（deny 优先 fail-closed，与 iam 判定同源）；
-   * 两者任一缺席即跳过（注释口径：独立单测宿主/legacy 调用方无场景语义，行为零漂移）。
+   * Module ABAC de scénario (contrat §11 scene-ABAC) : ne s'insère que si le contexte d'appel porte explicitement un sceneCode et
+   * que ctx.iam.checkScene est atteignable (deny prioritaire fail-closed, même source que le jugement iam) ;
+   * l'un des deux absent = saut (référentiel en commentaire : hôte de tests autonomes/appelants legacy sans sémantique de scénario, zéro dérive de comportement).
    */
   private sceneModule(): PolicyModule {
     return {
@@ -1413,7 +1413,7 @@ export class McpService extends Service {
     }
   }
 
-  /** iam 租户解析窄端口（独立单测宿主无 iam 时缺省 undefined=视同同租户）。 */
+  /** Port étroit de résolution du tenant iam (hôte de tests autonomes sans iam : défaut undefined = considéré même tenant). */
   private tenantOfOrg(orgId: string): string | undefined {
     try {
       const iam = this.ctx.iam as { tenantOfOrg?: (orgId: string) => string } | undefined
@@ -1423,14 +1423,14 @@ export class McpService extends Service {
     }
   }
 
-  /** 两侧租户是否已知且不同（任一未知视同同租户——缺省口径，行为等价关键）。 */
+  /** Si les tenants des deux côtés sont connus et différents (un inconnu quelconque = considéré même tenant — référentiel par défaut, clé de l'équivalence de comportement). */
   private crossTenant(orgA: string, orgB: string): boolean {
     const tenantA = this.tenantOfOrg(orgA)
     const tenantB = this.tenantOfOrg(orgB)
     return tenantA !== undefined && tenantB !== undefined && tenantA !== tenantB
   }
 
-  /** 资源归属实体（ownerEntity=app/agent 且有 id）的组织归属；resourceCore 缺席或解析失败返回 undefined（不判）。 */
+  /** Organisation de rattachement de l'entité propriétaire de la ressource (ownerEntity=app/agent avec id) ; resourceCore absent ou échec de résolution = undefined (non jugé). */
   private ownerEntityOrg(service: McpServiceRecord): string | undefined {
     const entity = service.ownerEntity
     if (!entity || (entity.type !== 'app' && entity.type !== 'agent') || !entity.id) return undefined
@@ -1442,7 +1442,7 @@ export class McpService extends Service {
     }
   }
 
-  /** 委托链真实用户的组织归属（human user 的 org 来自 iam；解析失败返回 undefined 不判）。 */
+  /** Organisation de rattachement de l'utilisateur réel de la chaîne de délégation (l'org du human vient d'iam ; échec de résolution = undefined, non jugé). */
   private subjectUserOrg(userId: string): string | undefined {
     try {
       const iam = this.ctx.iam as { users?: () => { get: (id: string) => { orgId?: string } | undefined } } | undefined
@@ -1453,11 +1453,11 @@ export class McpService extends Service {
   }
 
   /**
-   * 有效审批引用核验（契约 §13）：context.approvalId 指向 plugin-audit 审批单，
-   * status ∈ {approved, executed} 且未过期。ApprovalRecord 无过期字段——按
-   * decidedAt + 24h 窗口计（注释口径，W4 验收按此对齐）；decidedAt 缺失（理论不可达：
-   * approved/executed 必经 decide）视同已过期。审批查询经注入的 ctx.audit（plugin-mcp
-   * 既有依赖，mcp.offline 审批执行器同源），缺席（独立单测宿主）= 无有效引用。
+   * Vérification de référence d'approbation valide (contrat §13) : context.approvalId pointe une fiche d'approbation plugin-audit,
+   * status ∈ {approved, executed} et non expirée. ApprovalRecord n'a pas de champ d'expiration — fenêtre
+   * decidedAt + 24 h (référentiel en commentaire, l'acceptation W4 s'aligne dessus) ; decidedAt absent (théoriquement inaccessible :
+   * approved/executed passe nécessairement par decide) = considéré expirée. La requête d'approbation passe par le ctx.audit injecté (dépendance
+   * existante de plugin-mcp, même source que l'exécuteur d'approbation mcp.offline), absent (hôte de tests autonomes) = pas de référence valide.
    */
   private validApprovalRef(approvalId: unknown): boolean {
     if (typeof approvalId !== 'string' || approvalId.trim() === '') return false
@@ -1466,34 +1466,34 @@ export class McpService extends Service {
       if (!approval) return false
       if (approval.status !== 'approved' && approval.status !== 'executed') return false
       if (!approval.decidedAt) return false
-      // 无过期字段：decidedAt + 24h 有效窗（跨组织授权的时效口径）
+      // Pas de champ d'expiration : fenêtre de validité decidedAt + 24 h (référentiel de validité temporelle de l'autorisation inter-organisation)
       return Date.now() - Date.parse(approval.decidedAt) < 24 * 60 * 60_000
     } catch {
       return false
     }
   }
 
-  /** 跨组织/租户拒绝的统一出口：领域码经 deny-code 义务随决策携带（供拒绝响应 data.code 映射）。 */
+  /** Sortie unifiée des refus inter-organisation/tenant : le code de domaine voyage avec la décision via l'obligation deny-code (pour le mapping data.code de la réponse de refus). */
   private orgScopeDenied(reason: string): PolicyDecision {
     return { allow: false, reasons: [reason], decisionId: newId('pd'), obligations: [{ type: 'deny-code', code: 'ORG_SCOPE_DENIED' }] }
   }
 
-  /** 通用 deny 决策构造：领域码（可选）经 deny-code 义务携带，reasons 即既有领域文案。 */
+  /** Constructeur générique de décision deny : code de domaine (optionnel) via l'obligation deny-code, reasons = libellés de domaine existants. */
   private denyDecision(code: McpDenyCode | undefined, reason: string): PolicyDecision {
     return { allow: false, reasons: [reason], decisionId: newId('pd'), obligations: code ? [{ type: 'deny-code', code }] : [] }
   }
 
   /**
-   * org-constraint 模块（契约 §13 组织与租户硬约束）：caller.org / service.org /
-   * ownerEntity 资源 org 一致性。缺省口径（行为等价关键，契约 §13 落地裁决）：
-   * orgId 缺失或两侧同 org 一律放行（存量演示/seed 数据全部在默认组织内，'org'
-   * 严格模式不得打破既有断言）——硬拦面收敛在「跨租户」（tenantOfOrg 口径，真隔离
-   * 边界）与 visibility 显式声明面：
-   *   - 'org'（缺省）：跨租户 → ORG_SCOPE_DENIED；同租户跨组织须显式授权事实
-   *     （'*' 平台主体，或权限组命中该服务——即「跨组织必须显式授权」的同租户表达）；
-   *   - 'tenant'：同租户放行（跨组织同租户亦放行），跨租户 ORG_SCOPE_DENIED；
-   *   - 'cross-org'：必须携带有效审批引用（validApprovalRef），否则 ORG_SCOPE_DENIED。
-   * 委托链 subjectUserId 的 org 与目标服务 org 校验同理（同款三态复核）。
+   * Module org-constraint (contrat §13, contraintes dures organisation et tenant) : cohérence caller.org / service.org /
+   * org de la ressource ownerEntity. Référentiel par défaut (clé de l'équivalence de comportement, arbitrage d'atterrissage du contrat §13) :
+   * orgId absent ou même org des deux côtés = passage (toutes les données de démonstration/seed existantes sont dans l'organisation par défaut, le mode strict
+   * 'org' ne doit pas casser les assertions existantes) — la face de blocage dur converge sur « inter-tenant » (référentiel tenantOfOrg, vraie
+   * frontière d'isolement) et la face des déclarations explicites de visibility :
+   *   - 'org' (défaut) : inter-tenant → ORG_SCOPE_DENIED ; inter-organisation dans un même tenant exige un fait d'autorisation explicite
+   *     ('*' principal plateforme, ou groupe de permissions atteignant ce service — l'expression dans le même tenant de « l'inter-organisation exige une autorisation explicite ») ;
+   *   - 'tenant' : même tenant = passage (inter-organisation dans le même tenant passe aussi), inter-tenant = ORG_SCOPE_DENIED ;
+   *   - 'cross-org' : doit porter une référence d'approbation valide (validApprovalRef), sinon ORG_SCOPE_DENIED.
+   * La vérification de l'org du subjectUserId de la chaîne de délégation avec l'org du service cible suit le même principe (même revue trois états).
    */
   private orgConstraintModule(): PolicyModule {
     return {
@@ -1506,12 +1506,12 @@ export class McpService extends Service {
         const scopes = (req.context.scopes as string[] | undefined) ?? []
 
         const checkPair = (callerOrg: string | undefined, label: string): PolicyDecision | undefined => {
-          // orgId 缺失（任一侧）→ 放行：缺省同组织口径，存量数据零漂移
+          // orgId absent (d'un côté quelconque) → passage : référentiel par défaut même organisation, zéro dérive des données existantes
           if (!callerOrg || !resourceOrg) return undefined
           if (callerOrg === resourceOrg) return undefined
           if (visibility === 'org') {
-            // 同租户 + 显式授权事实（'*' 平台主体 / 权限组命中该服务）→ 显式授权放行；
-            // 否则硬拦（无权限组命中时 mcp-permgroup 亦拒，主因仍为权限组文案——模块序在前）
+            // Même tenant + fait d'autorisation explicite ('*' principal plateforme / groupe de permissions atteignant ce service) → passage explicite ;
+            // sinon blocage dur (sans groupe atteint, mcp-permgroup refuse aussi, la cause principale reste le libellé du groupe de permissions — le module est devant)
             if (!this.crossTenant(callerOrg, resourceOrg)) {
               const explicit = scopes.includes('*') || this.matchedPolicies(caller, service.id).length > 0
               if (explicit) return undefined
@@ -1525,7 +1525,7 @@ export class McpService extends Service {
             }
             return undefined
           }
-          // cross-org：必须带有效审批引用
+          // cross-org : doit porter une référence d'approbation valide
           if (!this.validApprovalRef(req.context.approvalId)) {
             return this.orgScopeDenied(t('跨组织服务（visibility=cross-org）调用必须携带有效审批引用（approved/executed 且 24h 窗内）'))
           }
@@ -1534,7 +1534,7 @@ export class McpService extends Service {
 
         const callerVerdict = checkPair(caller.orgId, '调用者组织')
         if (callerVerdict) return callerVerdict
-        // 委托链真实用户 org 同理（subjectUserId 已知才复核）
+        // L'org de l'utilisateur réel de la chaîne de délégation suit le même principe (revu seulement si subjectUserId connu)
         if (caller.subjectUserId) {
           const subjectVerdict = checkPair(this.subjectUserOrg(caller.subjectUserId), '委托链用户组织')
           if (subjectVerdict) return subjectVerdict
@@ -1545,10 +1545,10 @@ export class McpService extends Service {
   }
 
   /**
-   * risk-gate 模块（契约 §11：unknown 风险写语境拒绝，现语义迁入）：与既有拒绝路径
-   * 逐字等价——legacy 链上 unknown 工具必须处于只读语境（权限组 readOnly 约束）才可
-   * 放行，非只读语境 RISK_UNREGISTERED 拒绝；受管链在工作策略端口已裁决，跳过。
-   * 只读语境复用 matchedPolicies/decideTool 判定面（与 authorize 的 auth.readOnly 同源）。
+   * Module risk-gate (contrat §11 : refus unknown en contexte écrit, la sémantique existante migre) : équivalent mot pour mot
+   * du chemin de refus existant — sur la chaîne legacy, un outil unknown doit être en contexte lecture (contrainte readOnly du groupe de permissions)
+   * pour passer ; un contexte non lecture = refus RISK_UNREGISTERED ; la chaîne gérée est déjà arbitrée au port de politique de travail, sautée.
+   * Le contexte lecture réutilise la face de jugement matchedPolicies/decideTool (même source que auth.readOnly d'authorize).
    */
   private riskGateModule(): PolicyModule {
     return {
@@ -1569,8 +1569,8 @@ export class McpService extends Service {
         const grants = this.matchedPolicies(caller, service.id)
         const verdict = tool && grants.length > 0 ? this.decideTool(grants, tool) : undefined
         if (!verdict || !verdict.ok) {
-          // 权限组层未放行：风险闸不叠加评估（与既有闸门序逐字一致——authorize 拒绝时
-          // 不再评估 unknown 风险，主因/领域码保持权限组层的既有口径，零漂移）
+          // Couche groupes de permissions sans passage : la barrière de risque n'évalue pas en plus (mot pour mot l'ordre des barrières existantes — quand authorize refuse,
+          // le risque unknown n'est plus évalué, la cause principale/le code de domaine restent le référentiel existant de la couche groupes, zéro dérive)
           return { allow: true, reasons: ['权限组层未放行，风险闸跳过'], decisionId: newId('pd'), obligations: [] }
         }
         if (!verdict.readOnly) {
@@ -1581,15 +1581,15 @@ export class McpService extends Service {
     }
   }
 
-  /** 首个 deny 模块 → 领域拒绝码（deny 模块经 deny-code 义务携带；义务按模块序聚合，首个即主因模块）。 */
+  /** Premier module deny → code de refus de domaine (le module deny porte via l'obligation deny-code ; les obligations s'agrègent dans l'ordre des modules, la première est le module causal). */
   private static denyCodeOf(decision: PolicyDecision): McpDenyCode | undefined {
     const obligation = decision.obligations.find((item) => item.type === 'deny-code') as { code?: McpDenyCode } | undefined
     return obligation?.code
   }
 
   /**
-   * 主裁决（W3-T5）：构建 PolicyRequest 并经 PDP 聚合裁决。
-   * 事实一律服务端取证（caller/scopes/服务记录/闸门模式），context 仅作事实携带。
+   * Arbitrage principal (W3-T5) : construit la PolicyRequest et arbitrage agrégé via le PDP.
+   * Les faits sont toujours pris côté serveur (caller/scopes/enregistrement de service/mode de barrière), le context ne fait que transporter des faits.
    */
   private async decideViaPdp(input: {
     caller: InvokeCaller
@@ -1619,14 +1619,14 @@ export class McpService extends Service {
     return await this.pdp().decide(request)
   }
 
-  // -- 调用网关 -----------------------------------------------------------
+  // -- Passerelle d'appel -----------------------------------------------------------
 
   async invoke(caller: InvokeCaller, serviceId: string, toolName: string, args: Record<string, unknown> = {}, workRef?: WorkRefIndex): Promise<InvokeResult> {
     const service = this.services().get(serviceId)
     if (!service) throw new Error(t('MCP 服务不存在：{id}', { id: serviceId }))
     const started = Date.now()
-    // 全链 trace（W3-T5 契约 §14）：入口无 trace 即生成（调用方可经 InvokeCaller.traceId 透传，
-    // REST/数据面从 X-Trace-Id / mcp-session-id 头取）；参数摘要哈希与 workforce 闸门共用同源
+    // trace de bout en bout (W3-T5 contrat §14) : généré à l'entrée si absent (l'appelant peut le transmettre via InvokeCaller.traceId,
+    // REST/plan de données le prennent des en-têtes X-Trace-Id / mcp-session-id) ; l'empreinte de hachage des paramètres partage la même source que la barrière workforce
     const traceId = caller.traceId ?? newTraceId()
     const argsHash = sha256Hex(JSON.stringify(args ?? {}))
 
@@ -1643,20 +1643,20 @@ export class McpService extends Service {
         ...(decision ? { decisionId: decision.decisionId, decisionReasons: decision.reasons } : {}),
       }
     }
-    // 闸门风险随调用记录/事件透出（先于 gateRisk 声明，调用时点恒已赋值）
+    // Le risque de barrière transparaît avec l'enregistrement/l'événement d'appel (déclaré avant gateRisk, toujours affecté à l'instant de l'appel)
     let gateRiskLevel: 'read' | 'write' | 'admin' | 'unknown' | undefined
 
-    // -- 工作级授权闸门（施工蓝本 §9.5 / 附录 D.5：受管判定只按可信 caller 反查） ----------------
-    // 插入点在真实传输（realTransport）之前、原有授权链之前；端口未就绪或非受管 caller →
-    // legacy，原有授权链一步不少（两层授权取交集）。workRef 仅作索引透传（§10.4），
-    // 授权事实（permit/租约/能力清单/参数范围）一律由 workforce 侧服务端回查。
+    // -- Barrière d'autorisation au niveau travail (blueprint §9.5 / annexe D.5 : la détermination « géré » ne fait que rechercher le caller de confiance) ----------------
+    // Point d'insertion avant le transport réel (realTransport) et avant la chaîne d'autorisation d'origine ; port non prêt ou caller non géré →
+    // legacy, la chaîne d'autorisation d'origine sans y perdre une marche (intersection des deux autorisations). workRef n'est qu'un transmissif d'index (§10.4),
+    // les faits d'autorisation (permit/bail/liste de capacités/périmètre de paramètres) sont toujours revérifiés côté workforce.
     const callerRef = workCallerRefFromInvokeCaller(caller)
     const toolSpec = service.tools.find((item) => item.name === toolName)
-    // W1/V11 根治：闸门风险一律取「可信风险登记生效值」（effectiveRisk）；
-    // 无生效登记时——工具清单显式申报了具体风险（read/write/admin）→ 按申报值（存量显式声明面不回退）；
-    // 未申报/申报 unknown → 'unknown'（不再隐式映射 read）。'unknown' 的裁决：
-    //   受管链在工作策略端口（清单句柄仅授 read → 只读语境放行；句柄授写/admin → RISK_UNREGISTERED 拒绝）；
-    //   legacy 链在本网关只读语境（见下方 PDP risk-gate 模块）。
+    // Correction de racine W1/V11 : le risque de barrière prend toujours « la valeur d'enregistrement de risque de confiance en vigueur » (effectiveRisk) ;
+    // sans enregistrement en vigueur — la liste d'outils a explicitement déclaré un risque précis (read/write/admin) → la valeur déclarée (la face de déclaration explicite préexistante ne recule pas) ;
+    // non déclaré/déclaré unknown → 'unknown' (plus de mapping implicite read). L'arbitrage de 'unknown' :
+    //   chaîne gérée au port de politique de travail (le descripteur de liste n'accorde que read → passage en contexte lecture ; descripteur accordant write/admin → refus RISK_UNREGISTERED) ;
+    //   chaîne legacy dans la présente passerelle, contexte lecture (voir le module risk-gate du PDP ci-dessous).
     const registeredRisk = this.riskRegistryRef?.effectiveRisk(serviceId, toolName)
     const gateRisk: 'read' | 'write' | 'admin' | 'unknown' = registeredRisk
       ?? (toolSpec?.riskLevel && toolSpec.riskLevel !== 'unknown' ? toolSpec.riskLevel : 'unknown')
@@ -1664,21 +1664,21 @@ export class McpService extends Service {
     const gate = await gateManagedWork(workforcePolicyOf(this.ctx), callerRef, {
       facts: { kind: 'mcp', registryId: serviceId, action: toolName, risk: gateRisk },
       ...(workRef ? { ref: workRef } : {}),
-      // 参数摘要哈希（便宜可算）：用于 workforce 步骤冲突判定与审计（与调用记录 argsHash 同源）
+      // Empreinte de hachage des paramètres (peu coûteuse à calculer) : pour le jugement de conflit d'étapes workforce et l'audit (même source que l'argsHash de l'enregistrement d'appel)
       argsHash,
     })
     if (gate.mode === 'denied') {
       const message = t('数字员工调用被拒绝：{detail}', { detail: `${WORK_DENY_CODE_LABELS[gate.code]}${gate.message ? `（${gate.message}）` : ''}` })
       const latencyMs = Date.now() - started
-      // 拒绝同样落调用记录（V07：拒绝是事实，按原 status='denied' 口径留存并附领域拒绝码；
-      // 工作上下文仅在放行时由服务端核验产生，拒绝路径无可关联的 work 事实）
+      // Le refus tombe aussi dans l'enregistrement d'appel (V07 : le refus est un fait, conservé au référentiel status='denied' avec code de refus de domaine ;
+      // le contexte de travail n'est produit par vérification serveur qu'au passage, le chemin de refus n'a pas de fait work associable)
       this.recordCall(service, toolName, caller, {
         ok: false, status: 'denied', latencyMs, version: service.currentVersion, error: message, code: gate.code,
         traceId, argsHash, riskLevel: gateRisk,
       })
       return { ok: false, status: 'denied', latencyMs, version: service.currentVersion, error: message, code: gate.code }
     }
-    // managed：把服务端核验后的工作上下文带入本次调用的记录关联（D11）
+    // managed : porte dans l'association d'enregistrement de cet appel le contexte de travail vérifié côté serveur (D11)
     const work: WorkExecutionContext | undefined = gate.mode === 'managed' ? gate.work : undefined
     const workRefForRecord: McpCallWorkRef | undefined = work
       ? {
@@ -1692,7 +1692,7 @@ export class McpService extends Service {
     if (service.status === 'draft' || service.status === 'verifying') return fail('denied', t('服务尚未发布'), workRefForRecord)
     if (service.health.breakerOpen) return fail('breaker_open', t('熔断器开启：服务连续失败，暂拒绝调用'), workRefForRecord)
 
-    // 限流：每服务每分钟令牌桶
+    // Limitation : seau de jetons par service et par minute
     const key = `${serviceId}:${caller.type}:${caller.id}`
     const nowMs = Date.now()
     const bucket = (this.rateBuckets.get(key) ?? []).filter((t) => nowMs - t < 60_000)
@@ -1703,11 +1703,11 @@ export class McpService extends Service {
     bucket.push(nowMs)
     this.rateBuckets.set(key, bucket)
 
-    // 资源级授权 + 组织硬约束 + 风险闸（W3-T5 契约 §11：主裁决迁 PDP）——
-    // 模块序：iam-permission（资源限定 scope 第一层）→ mcp-permgroup（既有 authorize 判定面，
-    // 文案/领域码逐字等价）→ scene（可选场景 ABAC）→ org-constraint（§13 三态）→
-    // risk-gate（unknown 写语境拒绝）。deny 优先、reasons 聚合：首个 deny 模块的理由即
-    // 主因（error 文案与既有完全一致），领域码取首个 deny 模块的 deny-code 义务。
+    // Autorisation au niveau ressource + contrainte dure d'organisation + barrière de risque (W3-T5 contrat §11 : l'arbitrage principal migre dans le PDP) —
+    // ordre des modules : iam-permission (première couche scope de limitation de ressource) → mcp-permgroup (face de jugement authorize existante,
+    // libellés/codes de domaine équivalents mot pour mot) → scene (ABAC de scénario optionnel) → org-constraint (§13 trois états) →
+    // risk-gate (refus unknown en contexte écrit). deny prioritaire, raisons agrégées : la raison du premier module deny est
+    // la cause principale (libellé d'erreur strictement identique à l'existant), le code de domaine prend l'obligation deny-code du premier module deny.
     const decision = await this.decideViaPdp({
       caller, service, toolName, gateRisk,
       gateMode: gate.mode,
@@ -1717,7 +1717,7 @@ export class McpService extends Service {
       const reason = decision.reasons[0] ?? t('调用被策略拒绝（PDP）')
       const denyCode = McpService.denyCodeOf(decision)
       const latencyMs = Date.now() - started
-      // 拒绝同样落调用记录（V07 口径：拒绝是事实，按 status='denied' 留存并附领域拒绝码与决策表达）
+      // Le refus tombe aussi dans l'enregistrement d'appel (référentiel V07 : le refus est un fait, conservé status='denied' avec code de refus de domaine et expression de décision)
       this.recordCall(service, toolName, caller, {
         ok: false, status: 'denied', latencyMs, version: service.currentVersion, error: reason,
         ...(denyCode !== undefined ? { code: denyCode } : {}),
@@ -1730,16 +1730,16 @@ export class McpService extends Service {
         traceId, decisionId: decision.decisionId, decisionReasons: decision.reasons,
       }
     }
-    // 放行：只读语境事实保留在 decision.obligations（{type:'read-only'}，供审计展示与后续语义消费）
+    // Passage : le fait de contexte lecture seule est conservé dans decision.obligations ({type:'read-only'}, pour affichage d'audit et consommation sémantique ultérieure)
 
-    // 灰度路由：未命中灰度比例的调用走稳定版本
+    // Routage de gradation : les appels hors pourcentage de gradation passent par la version stable
     const hash = Number.parseInt(sha256Hex(`${caller.id}:${serviceId}`).slice(0, 8), 16) % 100
     const version = service.grayPercent < 100 && hash >= service.grayPercent
       ? (service.versions.find((item) => item.status === 'previous')?.version ?? service.currentVersion)
       : service.currentVersion
 
-    // 执行传输层：real = 真实 HTTP JSON-RPC；demo = 确定性模拟（显式降级，恒成功、结果可复现）。
-    // 存量演示数据（无 exec 字段）按 demo 兜底——新建服务缺省一律 real。
+    // Couche d'exécution du transport : real = JSON-RPC HTTP réel ; demo = simulation déterministe (repli explicite, succès constant, résultat reproductible).
+    // Les données de démonstration préexistantes (sans champ exec) sont rattrapées par demo — un nouveau service est toujours real par défaut.
     let tokens = 0
     let result: unknown
     let upstreamStatus: number | undefined
@@ -1748,10 +1748,10 @@ export class McpService extends Service {
       tokens = 200 + (Number.parseInt(sha256Hex(JSON.stringify(args)).slice(0, 6), 16) % 1800)
       result = mockToolResult(service, toolName, args)
     } else {
-      // W3-T5 §14：下游转发带 traceparent 头（W3C Trace Context，version 00）
+      // W3-T5 §14 : le transfert aval porte l'en-tête traceparent (W3C Trace Context, version 00)
       const transportResult = await this.realTransport(service, toolName, args, traceId)
       if (!transportResult.ok) {
-        // 业务失败计入熔断（评审修复：熔断不能只依赖 30s 探活，真实调用失败同样累计）
+        // L'échec métier compte dans le disjoncteur (correctif de revue : le disjoncteur ne doit pas dépendre du seul sondage 30 s, l'échec d'appel réel cumule aussi)
         this.noteBusinessFailure(service, transportResult.error ?? t('MCP 服务调用失败'))
         return fail('error', transportResult.error ?? t('MCP 服务调用失败'), workRefForRecord)
       }
@@ -1771,18 +1771,18 @@ export class McpService extends Service {
   }
 
   /**
-   * 组装外呼请求头（W1-T2 §6 注入点，realTransport/探活/工具发现三处统一走它）：
-   * 存量 service.headers 照旧透传；SecretBroker 登记了凭证的按 headerName 注入/覆盖
-   * （同名时凭证胜出——明文迁移完成后 service.headers 已无敏感键，覆盖语义仅兼容过渡态）。
-   * Broker 对 vault:/external: 等不支持形态抛 CREDENTIAL_BROKER_UNSUPPORTED，
-   * 由调用链既有 try/catch 呈现为调用/探活失败（fail-closed，不静默裸奔）。
+   * Assemble les en-têtes de requête sortante (point d'injection W1-T2 §6, trois endroits y passent uniformément : realTransport/sondage/découverte d'outils) :
+   * les service.headers préexistants sont transmis tels quels ; ceux dont SecretBroker a enregistré les identifiants sont injectés/surchargés selon headerName
+   * (à nom égal, l'identifiant gagne — après migration complète du clair, service.headers n'a plus de clé sensible, la sémantique de surcharge n'est que de transition).
+   * Le Broker jette CREDENTIAL_BROKER_UNSUPPORTED sur les formes non supportées vault:/external: etc.,
+   * présenté comme échec d'appel/sondage par le try/catch existant de la chaîne (fail-closed, pas de sortie à découvert silencieuse).
    */
   private async resolveCallHeaders(service: McpServiceRecord, options: { dedupKey?: string } = {}): Promise<Record<string, string>> {
     const headers: Record<string, string> = { ...(service.headers ?? {}) }
     const broker = this.secretBrokerRef
     if (broker) {
-      // dedupKey（W3-T5 §14 探活审计聚合）：长驻服务探活周期性 resolve 的访问留痕按窗口去重
-      // （同 key 10 分钟一次，窗口内计数随下一事件附带）；调用/工具发现等真实访问不留 key、照旧逐次留痕
+      // dedupKey (agrégation d'audit de sondage W3-T5 §14) : les traces d'accès des resolutions périodiques du sondage des services longue durée sont dédupliquées par fenêtre
+      // (une fois par 10 min pour une même clé, le compteur de la fenêtre est joint à l'événement suivant) ; les vrais accès appel/découverte d'outils ne portent pas de clé, tracés à chaque fois
       const entries = options.dedupKey ? broker.resolve(service.id, { dedupKey: options.dedupKey }) : broker.resolve(service.id)
       if (entries) {
         for (const entry of entries) headers[entry.headerName] = entry.secret
@@ -1792,14 +1792,14 @@ export class McpService extends Service {
   }
 
   /**
-   * 真实执行传输层：MCP streamable HTTP 的 JSON-RPC tools/call。
-   * 有状态服务先经 ensureSession 取会话头；会话失效（服务端报未初始化类错误）自动重握手一次。
-   * 真实延迟/错误全量计量；token 消耗从响应 usage 字段读取（缺省 0，不伪造）。
+   * Couche de transport réelle : tools/call JSON-RPC du MCP streamable HTTP.
+   * Un service avec état prend d'abord l'en-tête de session via ensureSession ; session invalide (erreur serveur de type non initialisé) = une re-poignée de main automatique.
+   * Latence/erreurs réelles intégralement mesurées ; consommation de jetons lue dans le champ usage de la réponse (défaut 0, sans invention).
    */
   private async realTransport(service: McpServiceRecord, toolName: string, args: Record<string, unknown>, traceId?: string): Promise<{ ok: true; result: unknown; tokens: number; upstreamStatus?: number } | { ok: false; error: string }> {
-    // W1-T2 §6 注入点：外呼头统一经 SecretBroker 组装（存量非敏感 headers 照旧、凭证覆盖同名键）
+    // Point d'injection W1-T2 §6 : les en-têtes sortants passent uniformément par l'assemblage SecretBroker (headers préexistants non sensibles inchangés, identifiants surchargeant les clés homonymes)
     const headers = await this.resolveCallHeaders(service)
-    // W3-T5 §14：下游 HTTP 转发带 traceparent 头（traceId 缺省不产头——探活/工具发现等旁路面无需）
+    // W3-T5 §14 : le transfert HTTP aval porte l'en-tête traceparent (traceId absent = pas d'en-tête — les faces latérales sondage/découverte d'outils n'en ont pas besoin)
     if (traceId) headers['traceparent'] = formatTraceparent(traceId)
     const call = (sessionId?: string) => this.mcpRequest(service.endpoint, headers, {
       jsonrpc: '2.0',
@@ -1811,7 +1811,7 @@ export class McpService extends Service {
       let sessionId: string | undefined
       try {
         sessionId = await this.ensureSession(service.endpoint, headers)
-      } catch { /* 握手失败不阻断：部分服务允许无会话直接调用 */ }
+      } catch { /* échec de poignée de main non bloquant : certains services autorisent l'appel direct sans session */ }
       let { payload, status } = await call(sessionId)
       if (payload?.error && sessionId && /session|initialized/i.test(String(payload.error.message ?? ''))) {
         this.mcpSessions.delete(service.endpoint)
@@ -1839,15 +1839,15 @@ export class McpService extends Service {
     version: string
     error?: string
     tokens?: number
-    /** 工作级授权拒绝的领域拒绝码（additive，审计区分拒绝层级）。 */
+    /** Code de refus de domaine d'un refus d'autorisation au niveau travail (additive, l'audit distingue le niveau de refus). */
     code?: WorkDenyCode
-    // -- 全链 trace 与决策表达（W3-T5，契约 §11/§14，additive） --
+    // -- trace de bout en bout et expression de décision (W3-T5, contrats §11/§14, additive) --
     traceId?: string
     argsHash?: string
     upstreamStatus?: number
     decisionId?: string
     decisionReasons?: string[]
-    /** 闸门风险值（read/write/admin/unknown；mcp.invoked payload v2 riskLevel 源）。 */
+    /** Valeur du risque de barrière (read/write/admin/unknown ; source du riskLevel du payload v2 mcp.invoked). */
     riskLevel?: 'read' | 'write' | 'admin' | 'unknown'
   }, work?: McpCallWorkRef): void {
     const record: McpCallRecord = {
@@ -1878,19 +1878,19 @@ export class McpService extends Service {
       ...(outcome.decisionReasons !== undefined ? { decisionReasons: outcome.decisionReasons } : {}),
     }
     this.calls().insert(record)
-    // 调用环上限 5000 条，防膨胀
+    // Anneau d'appels plafonné à 5000 entrées, contre l'enflure
     const all = this.calls().all()
     if (all.length > 5000) {
       for (const item of all.slice(0, all.length - 5000)) this.calls().remove(item.id)
     }
-    // mcp.invoked payload v2（契约 §14，additive）：traceId/argsHash/decisionId/decisionReasons/
-    // delegationChain（unified actChain 投影）/riskLevel/dataClass/upstreamStatus——审计订阅
-    // 与既有消费者（Agent 指标归集等）对未知字段零感知
+    // payload v2 de mcp.invoked (contrat §14, additive) : traceId/argsHash/decisionId/decisionReasons/
+    // delegationChain (projection de l'actChain unified)/riskLevel/dataClass/upstreamStatus — la souscription d'audit
+    // et les consommateurs existants (agrégation de métriques Agent, etc.) sont insensibles aux champs inconnus
     this.ctx.platformBus.emit(PlatformEvents.McpInvoked, {
       serviceId: service.id, name: service.name, tool,
       callerType: caller.type, callerId: caller.id, callerName: caller.name,
       ok: outcome.ok, latencyMs: outcome.latencyMs, tokens: record.tokens,
-      // 状态分档（W4 安全审计 P0-4，additive）：审计侧据此区分「策略拒绝」与「上游故障」
+      // Gradation de statut (audit de sécurité W4 P0-4, additive) : l'audit distingue ainsi « refus de politique » et « panne amont »
       status: record.status,
       actChain: caller.actChain,
       ...(record.traceId !== undefined ? { traceId: record.traceId } : {}),
@@ -1902,7 +1902,7 @@ export class McpService extends Service {
       dataClass: service.dataClass,
       ...(record.upstreamStatus !== undefined ? { upstreamStatus: record.upstreamStatus } : {}),
     })
-    // 计量管道（v1.2 第 2 步）：real 传输调用进入 usage 事件（demo 演示流量不计费不计 SLO）
+    // Pipeline de metering (v1.2 étape 2) : les appels du transport real entrent dans les événements usage (le trafic demo n'est ni facturé ni compté SLO)
     if (service.exec === 'real') {
       try {
         this.ctx.usage.record({
@@ -1915,8 +1915,8 @@ export class McpService extends Service {
             ...(record.tokens > 0 ? [{ key: 'tokens', value: record.tokens, unit: 'token' }] : []),
           ],
           idempotency_key: `mcp:${record.id}`,
-          // 全链 trace（W3-T5 §14）：trace_id 从「仅受管调用回填 invocationId」扩展为全部 real
-          // 调用回填——受管调用仍优先 invocationId（workforce 账本可穿透），其余用本次 traceId
+          // trace de bout en bout (W3-T5 §14) : le renseignement de trace_id passe de « seulement les appels gérés via invocationId » à tous les appels
+          // real — l'appel géré garde la priorité invocationId (registre workforce traversant), les autres prennent le traceId du jour
           trace_id: work?.invocationId ?? record.traceId ?? '',
         })
       } catch (error) {
@@ -1925,7 +1925,7 @@ export class McpService extends Service {
     }
   }
 
-  // -- 监控指标 -----------------------------------------------------------
+  // -- Métriques de supervision -----------------------------------------------------------
 
   metricsOverview(): {
     totalCalls: number
@@ -1977,7 +1977,7 @@ export class McpService extends Service {
       bucket.totalLatency += call.latencyMs
       byTool.set(call.tool, bucket)
     }
-    // 近 60 分钟分钟级序列
+    // Série minute par minute sur les 60 dernières minutes
     const series = new Map<string, { calls: number; errors: number; totalLatency: number }>()
     const nowMs = Date.now()
     for (let i = 59; i >= 0; i--) {
@@ -2028,18 +2028,18 @@ export class McpService extends Service {
 }
 
 // ---------------------------------------------------------------------------
-// 传输层辅助（real = 真实 HTTP；demo = 确定性伪随机，仅演示）
+// Aides de couche de transport (real = HTTP réel ; demo = pseudo-aléatoire déterministe, démonstration seulement)
 // ---------------------------------------------------------------------------
 
-/** real 调用超时（ms）。 */
+/** Délai d'expiration des appels real (ms). */
 const REAL_TRANSPORT_TIMEOUT_MS = 10_000
-/** real 探活超时（ms）。 */
+/** Délai d'expiration des sondages real (ms). */
 const REAL_PROBE_TIMEOUT_MS = 5_000
-/** 远端 MCP 会话缓存时长（ms）：到期或服务端报会话失效时重新握手。 */
+/** Durée de cache des sessions MCP distantes (ms) : nouvelle poignée de main à expiration ou sur erreur de session du serveur. */
 const MCP_SESSION_TTL_MS = 5 * 60_000
 
 function probeLatency(service: McpServiceRecord): number {
-  // demo 探活确定性健康：失败/降级路径由 real 探活（真实 HTTP）呈现，不伪造波动。
+  // Sonde demo : santé déterministe ; les chemins d'échec/dégradation sont présentés par la sonde real (HTTP réel), pas de fluctuation fabriquée.
   return 40 + (Number.parseInt(sha256Hex(service.id).slice(0, 4), 16) % 360)
 }
 
@@ -2092,13 +2092,13 @@ function round3(value: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// 工作级授权辅助（施工蓝本 §10.2 / D.5：网关只消费窄端口，不反向依赖 workforce）
+// Aide d'autorisation au niveau travail (blueprint §10.2 / D.5 : la passerelle ne consomme que le port étroit, pas de dépendance inverse vers workforce)
 // ---------------------------------------------------------------------------
 
 /**
- * 窄端口运行时读取：platform-core 装配时注册 WorkforcePolicyRegistry（provide='workforcePolicy'）。
- * Context 类型增补由 workforce 侧统一持有；这里防御式读取——服务未装配（独立单测宿主）时
- * 返回 undefined，gateManagedWork 按端口未就绪走 legacy，保持现状。
+ * Lecture du port étroit au runtime : platform-core enregistre WorkforcePolicyRegistry à l'assemblage (provide='workforcePolicy').
+ * L'augmentation de types de Context est détenue uniformément côté workforce ; lecture défensive ici — si le service n'est pas assemblé (hôte de test unitaire autonome),
+ * Renvoie undefined : gateManagedWork suit le chemin legacy tant que le port n'est pas prêt, statu quo maintenu.
  */
 function workforcePolicyOf(ctx: Context): WorkforcePolicyRegistry | undefined {
   try {
@@ -2109,9 +2109,9 @@ function workforcePolicyOf(ctx: Context): WorkforcePolicyRegistry | undefined {
 }
 
 /**
- * 已验证调用者 → WorkCallerRef（身份一律来自入口令牌解析结果，禁止来自请求参数）。
- * user → human（principalId=userId）；agent/app → machine（refType/refId 供 workforce
- * 反查数字员工技术绑定，对齐 authn principals 的 refType 语义）。
+ * Appelant vérifié → WorkCallerRef (l'identité vient toujours de l'analyse du jeton d'entrée, jamais des paramètres de requête).
+ * user → human (principalId=userId) ; agent/app → machine (refType/refId fournis à workforce pour
+ * Recherche inverse de la liaison technique de l'employé numérique, alignée sur la sémantique refType des principals authn).
  */
 function workCallerRefFromInvokeCaller(caller: InvokeCaller): WorkCallerRef {
   if (caller.type === 'user') {
@@ -2127,20 +2127,20 @@ function workCallerRefFromInvokeCaller(caller: InvokeCaller): WorkCallerRef {
 }
 
 // ---------------------------------------------------------------------------
-// 插件
+// Extension
 // ---------------------------------------------------------------------------
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
     mcpRegistry: McpService
-    /** W 批次 W1（V11 根治）：MCP 工具可信风险登记（登记→两级审批→生效→重审→退场）。 */
+    /** Lot W1 (W, correction de fond V11) : registre des risques de confiance des outils MCP (enregistrement → approbation à deux niveaux → mise en vigueur → réexamen → retrait). */
     mcpToolRisks: McpToolRiskRegistry
-    /** W1-T2（MCP 治理 §6）：下游凭证 Secret Broker（密钥文件 0600，业务集合零密钥）。 */
+    /** W1-T2 (gouvernance MCP §6) : Secret Broker des identifiants aval (fichier de clés 0600, zéro clé dans les collections métier). */
     secretBroker: SecretBroker
   }
 }
 
-// W1-T2（契约 §6）：SecretBroker 与敏感头口径助手对外导出（CLI/宿主/单测共用）
+// W1-T2 (contrat §6) : SecretBroker et les assistants de normalisation des en-têtes sensibles exportés (partagés CLI/hôte/tests unitaires)
 export {
   SecretBroker,
   SENSITIVE_HEADER_RE,
@@ -2158,20 +2158,20 @@ export const inject = ['opsStorage', 'platformBus', 'iam', 'audit', 'usage', 'wo
 
 export function apply(ctx: Context) {
   const registry = new McpService(ctx)
-  // W 批次 W1（V11 根治）：工具风险登记服务与网关同批装配并直连（invoke 闸门与 console REST 面
-  // 经 mcpRegistry.riskRegistry() 取用；ctx.mcpToolRisks 键仍由 declare module 供宿主/根上下文使用）
+  // Lot W1 (W, correction de fond V11) : le service de registre de risques d'outils est assemblé et relié directement dans le même lot que la passerelle (barrière d'invoke et face REST console
+  // Accès via mcpRegistry.riskRegistry() ; la clé ctx.mcpToolRisks reste déclarée par declare module pour l'hôte/le contexte racine)
   registry.attachRiskRegistry(new McpToolRiskRegistry(ctx))
-  // W1-T2（契约 §6）：Secret Broker 与网关同批装配并直连（外呼注入点与 REST 凭证面共用同一实例；
-  // ctx.secretBroker 键由 declare module 供宿主/根上下文使用）
+  // W1-T2 (contrat §6) : le Secret Broker est assemblé et relié directement dans le même lot que la passerelle (point d'injection des appels sortants et face identifiants REST partagent la même instance ;
+  // la clé ctx.secretBroker est fournie par declare module pour l'hôte/le contexte racine)
   registry.attachSecretBroker(new SecretBroker(ctx))
   ctx.plugin(mcpTools)
-  // L4 审批执行器：mcp.offline 审批通过后自动执行下线
+  // Exécuteur d'approbation L4 : après approbation de mcp.offline, exécute automatiquement la mise hors ligne
   ctx.effect(() => ctx.audit.registerExecutor('mcp.offline', async (payload) => {
     const serviceId = String(payload.serviceId)
     const reason = String(payload.reason ?? t('审批通过下线'))
     return registry.offlineService(serviceId, 'approval-center', reason)
   }))
-  // 契约 §5：存量服务治理字段幂等迁移（缺则补默认值；失败不阻断启动，下次启动重试）
+  // Contrat §5 : migration idempotente des champs de gouvernance des services préexistants (compléter les manques ; un échec n'interrompt pas le démarrage, nouvelle tentative au prochain)
   try {
     registry.ensureGovernanceMigration()
   } catch (error) {

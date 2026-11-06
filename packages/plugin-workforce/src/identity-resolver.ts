@@ -1,15 +1,15 @@
 /**
- * 数字员工身份解析（identity-resolver）—— 可信 caller → 员工/绑定/生效任用。
+ * Résolution d'identité de l'employé numérique (identity-resolver) — caller de confiance → employé/liaison/nomination en vigueur.
  *
- * 职责（契约 WorkforceIdentityResolver，蓝本 §5/D.5）：
- *   - 员工机器主体只从 agent 绑定反查：machine 且 refType=agent 且 refId 非空才反查；
- *     human 一律返回 null——员工域没有「人是员工」的通道；
- *   - 受管判定三要素缺一不可：员工在岗（active）＋ 一对一绑定有效 ＋ 存在生效任用
- *     （effective 且在有效期窗口内）；否则返回 null（非受管，旧路径继续原有授权链）；
- *   - 判定只依据已验证 caller 与服务端回查事实：请求参数携带的 employeeId/appointmentId
- *     等身份字段一律不参与判定（防绕行，附录 D.5）。
+ * Responsabilités (contrat WorkforceIdentityResolver, canevas §5/D.5) :
+ *   - le sujet machine de l'employé n'est recherché que par la liaison agent : recherche inverse seulement si machine et refType=agent et refId non vide ;
+ *     human renvoie toujours null — le domaine de l'employé n'a pas de canal « l'humain est l'employé » ;
+ *   - les trois éléments du jugement géré sont indispensables : employé en poste (active) ＋ liaison un-à-un valide ＋ nomination en vigueur existante
+ *     (effective et dans la fenêtre de validité) ; sinon renvoie null (non géré, l'ancien chemin poursuit sur la chaîne d'autorisation d'origine) ;
+ *   - le jugement ne repose que sur le caller vérifié et les faits revérifiés côté serveur : les champs d'identité employeeId/appointmentId
+ *     portés par la requête ne participent jamais au jugement (anti-contournement, annexe D.5).
  *
- * 读路径无写副作用、无事务需求（纯反查），直接走 workforceStore 各表。
+ * Le chemin de lecture n'a pas d'effet de bord d'écriture ni de besoin transactionnel (pure recherche inverse), il va directement aux tables de workforceStore.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -26,20 +26,20 @@ export class IdentityResolverService extends Service implements WorkforceIdentit
     super(ctx, 'workforceIdentity')
   }
 
-  // -- 内部取用 -----------------------------------------------------------
+  // -- Accès internes -----------------------------------------------------------
 
   private get store(): WorkforceStoreService {
     return this.ctx.workforceStore
   }
 
-  /** 同 Agent 的 active 绑定（一对一纪律兜底：多条时取最早 createdAt 一条，不以最新为准）。 */
+  /** Liaison active du même Agent (rattrapage de la discipline un-à-un : en cas de multiples, prend la plus ancienne createdAt, pas la plus récente). */
   private activeBindingByAgent(agentId: string): BindingRecord | undefined {
     return this.store.bindings
       .findWhere({ agentId, status: 'active' })
       .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))[0]
   }
 
-  /** 当前生效任用：status=effective 且在有效期窗口内（appointmentInEffect fail-closed），按 version 降序取最新。 */
+  /** Nomination actuellement en vigueur : status=effective et dans la fenêtre de validité (appointmentInEffect fail-closed), prend la plus récente par version décroissante. */
   private latestEffectiveAppointment(employeeId: string): AppointmentRecord | undefined {
     return this.store.appointments
       .findWhere({ employeeId })
@@ -47,7 +47,7 @@ export class IdentityResolverService extends Service implements WorkforceIdentit
       .sort((a, b) => b.version - a.version)[0]
   }
 
-  /** 绑定 → 完整受管身份：员工在岗 + 存在生效任用才返回非 null，否则 null（诚实缺位）。 */
+  /** Liaison → identité gérée complète : ne renvoie non null que si employé en poste + nomination en vigueur existante, sinon null (absence honnête). */
   private resolutionFor(binding: BindingRecord): IdentityResolution | null {
     const employee = this.store.employees.get(binding.employeeId)
     if (!employee || employee.status !== 'active') return null
@@ -56,10 +56,10 @@ export class IdentityResolverService extends Service implements WorkforceIdentit
     return { employee, binding, appointment }
   }
 
-  // -- 契约实现 -----------------------------------------------------------
+  // -- Implémentation du contrat -----------------------------------------------------------
 
   async resolveByCaller(caller: WorkCallerRef): Promise<IdentityResolution | null> {
-    // human 一律 null：员工域没有「人是员工」的通道（§5，注释即契约语义）
+    // human toujours null : le domaine de l'employé n'a pas de canal « l'humain est l'employé » (§5, le commentaire vaut sémantique de contrat)
     if (caller.kind !== 'machine') return null
     if (caller.refType !== 'agent') return null
     const refId = typeof caller.refId === 'string' ? caller.refId.trim() : ''
@@ -76,7 +76,7 @@ export class IdentityResolverService extends Service implements WorkforceIdentit
     if (!binding) return null
     const resolution = this.resolutionFor(binding)
     if (!resolution) return null
-    // 受管引用全部来自服务端回查事实（员工/绑定/任用），不回显任何请求自带字段
+    // La référence gérée vient intégralement des faits revérifiés côté serveur (employé/liaison/nomination), aucun champ porté par la requête n'est répercuté
     return {
       employeeId: resolution.employee.id,
       agentId: binding.agentId,
@@ -88,9 +88,9 @@ export class IdentityResolverService extends Service implements WorkforceIdentit
   }
 
   /**
-   * 绑定态三段探测（协作面治理第 2 项，P2-01）：未纳管 / 已纳管但 permit 失效 / permit 生效。
-   * describeAgent 的二分（null 或受管）无法区分前两种——协作面必须区分：
-   * 「从未纳管」按 legacy 放行，「已纳管但离岗/无任用」必须 fail-closed 拒绝。
+   * Sonde à trois états de la liaison (2e item de la gouvernance de la face collaboration, P2-01) : non repris / repris mais permit invalide / permit en vigueur.
+   * La dichotomie de describeAgent (null ou géré) ne distingue pas les deux premiers — la face collaboration doit les différencier :
+   * « jamais repris » passe en legacy, « repris mais hors poste/sans nomination » doit être refusé en fail-closed.
    */
   async inspectAgent(agentId: string): Promise<AgentBindingState> {
     const id = String(agentId ?? '').trim()

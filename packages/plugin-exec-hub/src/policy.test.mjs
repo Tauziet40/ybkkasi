@@ -1,19 +1,19 @@
 /**
- * 执行中枢纯决策层测试（对齐 Paperclip policy.test.ts 的表驱动穷举思路）。
+ * Tests de la couche de décision pure du centre d'exécution (alignés sur l'énumération par tables de policy.test.ts de Paperclip).
  *
- * 运行方式（Node 直接加载）：
+ * Mode d'exécution (chargement direct par Node) :
  *
  *     node --test packages/plugin-exec-hub/src/policy.test.mjs
  *
- * 覆盖面：
- *   - decideWakeAdmission 三态全组合穷举（2^6 事实组合）；
- *   - decideReleaseRecovery 僵尸锁裁决；
- *   - normalizeAgentKey / 血缘物化 / 上下文装配；
- *   - computeAgentHealth 五档边界；
- *   - 任务状态机与依赖解除语义；
- *   - 5 段 cron 词法与命中（含日/周 POSIX 或语义）；
- *   - 执行租约纯决策（附录 A 决策 3）：认领幂等（同主体幂等/他主体拒绝/过期可重取）、
- *     租约续期迁移（旧租约 stale）、complete 主体校验（D07）、run 采用裁决（V05）。
+ * Couverture :
+ *   - decideWakeAdmission : énumération exhaustive des trois états (2^6 combinaisons de faits) ;
+ *   - decideReleaseRecovery : arbitrage des verrous zombies ;
+ *   - normalizeAgentKey / matérialisation de lignée / assemblage de contexte ;
+ *   - computeAgentHealth : frontières des cinq paliers ;
+ *   - machine à états des tâches et sémantique de levée des dépendances ;
+ *   - cron 5 champs : lexicographie et correspondance (dont la sémantique OU POSIX jour/semaine) ;
+ *   - décision pure des baux d'exécution (décision 3 de l'annexe A) : idempotence de réclamation (même principal idempotent/autre principal refusé/expiré re-prenable),
+ *     migration de renouvellement de bail (bail périmé stale), validation de principal du complete (D07), arbitrage d'adoption de run (V05).
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -27,7 +27,7 @@ import {
 } from './domain.ts'
 
 // ---------------------------------------------------------------------------
-// decideWakeAdmission：2^6 全组合穷举
+// decideWakeAdmission : énumération exhaustive 2^6
 // ---------------------------------------------------------------------------
 
 test('decideWakeAdmission：六事实全组合穷举与三态裁决', () => {
@@ -43,7 +43,7 @@ test('decideWakeAdmission：六事实全组合穷举与三态裁决', () => {
     const decision = decideWakeAdmission(facts)
     combinations += 1
     if (!facts.availableActiveExecutionRunPresent) {
-      // 无活跃 run：一律 proceed（其余事实无关）
+      // pas de run actif : toujours proceed (les autres faits sont indifférents)
       assert.equal(decision.kind, 'proceed', `mask=${mask} 无活跃 run 应 proceed`)
     } else if (
       facts.isSameExecutionAgent && !facts.shouldDeferFollowupWake
@@ -83,12 +83,12 @@ test('decideReleaseRecovery：run 消失/终态强制释放，超时先终态，
   assert.equal(decideReleaseRecovery({ runMissing: false, runSettled: true, lockTimedOut: false }).kind, 'force-release')
   assert.equal(decideReleaseRecovery({ runMissing: false, runSettled: false, lockTimedOut: true }).kind, 'timeout-run')
   assert.equal(decideReleaseRecovery({ runMissing: false, runSettled: false, lockTimedOut: false }).kind, 'keep')
-  // run 消失优先于超时判定（都为真也是 force-release，不做 timeout-run 画蛇添足）
+  // run disparu prime sur le jugement d'expiration (vrais tous deux = aussi force-release, pas de timeout-run superflu)
   assert.equal(decideReleaseRecovery({ runMissing: true, runSettled: false, lockTimedOut: true }).kind, 'force-release')
 })
 
 // ---------------------------------------------------------------------------
-// 名称归一化 / 血缘
+// Normalisation des noms / lignée
 // ---------------------------------------------------------------------------
 
 test('normalizeAgentKey：大小写/首尾空白/连续空白归一', () => {
@@ -121,7 +121,7 @@ test('buildIssueContextPack：目标/前置/治理范围注记齐全', () => {
   assert.ok(pack.includes('前置：等待「采集通道打通」完成'))
   assert.ok(pack.includes('internal'))
   assert.ok(pack.includes('¥42.50'))
-  // 无阻塞依赖时前置行明确「无」
+  // sans dépendance bloquante, la ligne prérequis dit explicitement « aucune »
   const pack2 = buildIssueContextPack({ projectNames: [], issueTitle: 't' })
   assert.ok(pack2.includes('前置：无阻塞依赖'))
   assert.ok(pack2.includes('（未挂目标）'))
@@ -136,32 +136,32 @@ test('computeAgentHealth：五档裁决与阈值边界', () => {
   assert.equal(computeAgentHealth({ agentStatus: 'offline', frozen: false, lastHeartbeatAt: now, lastMetricsReportAt: now, nowMs: now }), 'offline')
   assert.equal(computeAgentHealth({ agentStatus: 'archived', frozen: false, lastHeartbeatAt: null, lastMetricsReportAt: null, nowMs: now }), 'offline')
   assert.equal(computeAgentHealth({ agentStatus: 'online', frozen: true, lastHeartbeatAt: now, lastMetricsReportAt: now, nowMs: now }), 'frozen')
-  // 配置心跳 10 分钟：新鲜窗口 3×10=30 分钟（容忍两轮漏报），迟滞窗口 9×10=90 分钟
+  // battement configuré à 10 minutes : fenêtre de fraîcheur 3×10=30 minutes (tolère deux tours manqués), fenêtre de traîne 9×10=90 minutes
   const base = { agentStatus: 'online', frozen: false, lastMetricsReportAt: null, heartbeatIntervalMinutes: 10 }
   assert.equal(computeAgentHealth({ ...base, lastHeartbeatAt: now - 30 * 60_000, nowMs: now }), 'healthy')
   assert.equal(computeAgentHealth({ ...base, lastHeartbeatAt: now - 31 * 60_000, nowMs: now }), 'stale')
   assert.equal(computeAgentHealth({ ...base, lastHeartbeatAt: now - 90 * 60_000, nowMs: now }), 'stale')
   assert.equal(computeAgentHealth({ ...base, lastHeartbeatAt: now - 91 * 60_000, nowMs: now }), 'silent')
-  // 未配置心跳：24h 宽松口径，无心跳但有提报时用提报时点
+  // battement non configuré : référentiel tolérant 24 h ; sans battement mais avec rapport, on utilise la datation du rapport
   const loose = { agentStatus: 'online', frozen: false, heartbeatIntervalMinutes: 0 }
   assert.equal(computeAgentHealth({ ...loose, lastHeartbeatAt: null, lastMetricsReportAt: now - 3_600_000, nowMs: now }), 'healthy')
   assert.equal(computeAgentHealth({ ...loose, lastHeartbeatAt: null, lastMetricsReportAt: null, nowMs: now }), 'silent')
-  // trial 也算运行态
+  // trial compte aussi comme état de marche
   assert.equal(computeAgentHealth({ agentStatus: 'trial', frozen: false, lastHeartbeatAt: now, lastMetricsReportAt: null, nowMs: now }), 'healthy')
 })
 
 // ---------------------------------------------------------------------------
-// 任务状态机 / 依赖解除
+// Machine à états des tâches / levée des dépendances
 // ---------------------------------------------------------------------------
 
 test('issueCanTransition：显式流转表与终态', () => {
   assert.ok(issueCanTransition('todo', 'in_progress'))
   assert.ok(issueCanTransition('in_progress', 'review'))
   assert.ok(issueCanTransition('review', 'done'))
-  assert.ok(issueCanTransition('review', 'in_progress')) // 打回
+  assert.ok(issueCanTransition('review', 'in_progress')) // renvoi
   assert.ok(issueCanTransition('todo', 'cancelled'))
   assert.ok(issueCanTransition('review', 'cancelled'))
-  assert.ok(!issueCanTransition('todo', 'done'))        // 不允许跳过执行/审阅
+  assert.ok(!issueCanTransition('todo', 'done'))        // sauter exécution/revue n'est pas permis
   assert.ok(!issueCanTransition('todo', 'review'))
   assert.ok(!issueCanTransition('done', 'todo'))
   assert.ok(!issueCanTransition('cancelled', 'todo'))
@@ -185,34 +185,34 @@ test('cronIsValid：词法校验', () => {
   assert.ok(cronIsValid('*/5 * * * *'))
   assert.ok(cronIsValid('30 9 * * 1-5'))
   assert.ok(cronIsValid('0 0 1 1 *'))
-  assert.ok(!cronIsValid('* * * *'))           // 段数不足
-  assert.ok(!cronIsValid('* * * * * *'))       // 段数过多
-  assert.ok(!cronIsValid('60 * * * *'))        // 分钟越界
-  assert.ok(!cronIsValid('*/0 * * * *'))       // 步进 0
-  assert.ok(!cronIsValid('a * * * *'))         // 非数字
-  assert.ok(!cronIsValid('5-1 * * * *'))       // 区间倒置
+  assert.ok(!cronIsValid('* * * *'))           // pas assez de champs
+  assert.ok(!cronIsValid('* * * * * *'))       // trop de champs
+  assert.ok(!cronIsValid('60 * * * *'))        // minute hors bornes
+  assert.ok(!cronIsValid('*/0 * * * *'))       // pas 0
+  assert.ok(!cronIsValid('a * * * *'))         // non numérique
+  assert.ok(!cronIsValid('5-1 * * * *'))       // intervalle inversé
 })
 
 test('cronMatches：命中矩阵（UTC）', () => {
-  const at = new Date('2026-10-14T09:30:00Z') // 周三
+  const at = new Date('2026-10-14T09:30:00Z') // mercredi
   assert.ok(cronMatches('* * * * *', at))
   assert.ok(cronMatches('30 * * * *', at))
-  assert.ok(cronMatches('*/15 * * * *', at))  // 30 是 15 的倍数
-  assert.ok(!cronMatches('*/7 * * * *', at))  // 30 不是 7 的倍数（0,7,14,21,28）
+  assert.ok(cronMatches('*/15 * * * *', at))  // 30 est multiple de 15
+  assert.ok(!cronMatches('*/7 * * * *', at))  // 30 n'est pas multiple de 7 (0,7,14,21,28)
   assert.ok(cronMatches('30 9 * * *', at))
   assert.ok(!cronMatches('30 10 * * *', at))
   assert.ok(cronMatches('30 9 14 10 *', at))
   assert.ok(!cronMatches('30 9 15 10 *', at))
-  assert.ok(cronMatches('30 9 * * 3', at))    // 周三
-  assert.ok(!cronMatches('30 9 * * 0', at))   // 0=周日：不该命中周三（0 统一归一到 7 的值域之外）
-  // 周日命中：2026-10-18 是周日
+  assert.ok(cronMatches('30 9 * * 3', at))    // mercredi
+  assert.ok(!cronMatches('30 9 * * 0', at))   // 0=dimanche : ne doit pas correspondre à un mercredi (0 est normalisé à 7, hors du domaine)
+  // correspondance dimanche : 2026-10-18 est un dimanche
   const sunday = new Date('2026-10-18T09:30:00Z')
   assert.ok(cronMatches('30 9 * * 0', sunday))
   assert.ok(cronMatches('30 9 * * 7', sunday))
   assert.ok(!cronMatches('30 9 * * 3', sunday))
-  // 日/周双收窄 POSIX 或语义：每月 13 号或每个周三（时刻取 00:00 以命中分/时字段）
-  assert.ok(cronMatches('0 0 13 * 3', new Date('2026-10-14T00:00:00Z')))   // 10-14 周三命中（周满足）
-  assert.ok(!cronMatches('0 0 13 * 3', new Date('2026-10-15T00:00:00Z'))) // 周四非 13 号
+  // sémantique OU POSIX jour/semaine doublement restreinte : le 13 de chaque mois ou chaque mercredi (instant à 00:00 pour satisfaire champs minute/heure)
+  assert.ok(cronMatches('0 0 13 * 3', new Date('2026-10-14T00:00:00Z')))   // mercredi 10-14 : correspondance (semaine satisfaite)
+  assert.ok(!cronMatches('0 0 13 * 3', new Date('2026-10-15T00:00:00Z'))) // jeudi non 13
 })
 
 test('wakeIdempotencyKey：拼接稳定', () => {
@@ -221,23 +221,23 @@ test('wakeIdempotencyKey：拼接稳定', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 执行租约纯决策（附录 A 决策 3：认领幂等 / 租约迁移 / complete 主体校验）
+// Décision pure des baux d'exécution (décision 3 de l'annexe A : idempotence de réclamation / migration de bail / validation de principal du complete)
 // ---------------------------------------------------------------------------
 
 test('decideLeaseClaim：同主体重复认领=幂等，他主体=拒绝，过期=可重取', () => {
-  // 受管员工：按 employeeId 判同（换绑 agentKey 不影响幂等——契约「同员工+同任务返回既有 run」）
+  // employé géré : identité par employeeId (changer l'agentKey lié ne casse pas l'idempotence — contrat « même employé+même tâche renvoie le run existant »)
   assert.deepEqual(decideLeaseClaim({
     activeLeasePresent: true, activeLeaseExpired: false,
     existingEmployeeId: 'emp_1', existingAgentKey: 'employee:emp_1',
     requestedEmployeeId: 'emp_1', requestedAgentKey: 'qc bot',
   }), { kind: 'idempotent' })
-  // 他员工持有 → held-by-other（holder 取 agentKey 优先）
+  // détenu par un autre employé → held-by-other (holder privilégie l'agentKey)
   assert.deepEqual(decideLeaseClaim({
     activeLeasePresent: true, activeLeaseExpired: false,
     existingEmployeeId: 'emp_1', existingAgentKey: 'employee:emp_1',
     requestedEmployeeId: 'emp_2', requestedAgentKey: 'employee:emp_2',
   }), { kind: 'held-by-other', holder: 'employee:emp_1' })
-  // legacy 机器直认领（employeeId 空串）：按 agentKey 判同
+  // réclamation directe legacy par machine (employeeId chaîne vide) : identité par agentKey
   assert.deepEqual(decideLeaseClaim({
     activeLeasePresent: true, activeLeaseExpired: false,
     existingEmployeeId: '', existingAgentKey: 'qc bot',
@@ -248,19 +248,19 @@ test('decideLeaseClaim：同主体重复认领=幂等，他主体=拒绝，过�
     existingEmployeeId: '', existingAgentKey: 'qc bot',
     requestedEmployeeId: '', requestedAgentKey: 'pack bot',
   }), { kind: 'held-by-other', holder: 'qc bot' })
-  // legacy 认领不得幂等接管受管租约（employeeId 口径不同即他主体）
+  // une réclamation legacy ne peut pas reprendre idempotemment un bail géré (référentiel employeeId différent = autre principal)
   assert.equal(decideLeaseClaim({
     activeLeasePresent: true, activeLeaseExpired: false,
     existingEmployeeId: 'emp_1', existingAgentKey: 'employee:emp_1',
     requestedEmployeeId: '', requestedAgentKey: 'employee:emp_1',
   }).kind, 'held-by-other')
-  // 过期租约＝无人实际持有 → acquire（新版本+1）
+  // bail expiré = personne ne détient effectivement → acquire (nouvelle version+1)
   assert.deepEqual(decideLeaseClaim({
     activeLeasePresent: true, activeLeaseExpired: true,
     existingEmployeeId: 'emp_1', existingAgentKey: 'employee:emp_1',
     requestedEmployeeId: 'emp_1', requestedAgentKey: 'employee:emp_1',
   }), { kind: 'acquire' })
-  // 无租约 → acquire
+  // pas de bail → acquire
   assert.deepEqual(decideLeaseClaim({
     activeLeasePresent: false, activeLeaseExpired: false,
     existingEmployeeId: '', existingAgentKey: '',
@@ -270,43 +270,43 @@ test('decideLeaseClaim：同主体重复认领=幂等，他主体=拒绝，过�
 
 test('decideLeaseRenewal：同主体+active+未过期才续，旧租约一律 stale', () => {
   assert.deepEqual(decideLeaseRenewal({ status: 'active', expired: false, principalMatches: true }), { kind: 'renew' })
-  // 旧租约（被更高版本取代）
+  // bail périmé (remplacé par une version supérieure)
   assert.deepEqual(decideLeaseRenewal({ status: 'superseded', expired: false, principalMatches: true }), { kind: 'stale' })
-  // 已释放
+  // déjà libéré
   assert.deepEqual(decideLeaseRenewal({ status: 'released', expired: false, principalMatches: true }), { kind: 'stale' })
-  // 已过期（即使 active 且同主体）
+  // déjà expiré (même actif et même principal)
   assert.deepEqual(decideLeaseRenewal({ status: 'active', expired: true, principalMatches: true }), { kind: 'stale' })
-  // 他主体（fail-closed：主体缺席视为不一致）
+  // autre principal (fail-closed : principal absent considéré divergent)
   assert.deepEqual(decideLeaseRenewal({ status: 'active', expired: false, principalMatches: false }), { kind: 'stale' })
 })
 
 test('decideCompleteOwnership：无租约兼容放行；旧租约=LEASE_STALE；主体不符=RUN_NOT_OWNED', () => {
-  // 旧路径 run（无租约记录）→ 兼容放行（D07 口径：有租约记录才强制主体一致）
+  // run de l'ancien chemin (sans enregistrement de bail) → passage compatible (référentiel D07 : la coïncidence de principal n'est imposée qu'avec enregistrement de bail)
   assert.deepEqual(decideCompleteOwnership({
     hasLeaseRecord: false, status: 'released', expired: true,
     callerPrincipalId: '', leasePrincipalId: '',
   }), { kind: 'allow' })
-  // 主体一致 + active + 未过期 → allow
+  // principal coïncidant + actif + non expiré → allow
   assert.deepEqual(decideCompleteOwnership({
     hasLeaseRecord: true, status: 'active', expired: false,
     callerPrincipalId: 'prin_a', leasePrincipalId: 'prin_a',
   }), { kind: 'allow' })
-  // 旧租约（superseded）→ LEASE_STALE（先于主体判定）
+  // bail périmé (superseded) → LEASE_STALE (avant le jugement de principal)
   assert.deepEqual(decideCompleteOwnership({
     hasLeaseRecord: true, status: 'superseded', expired: false,
     callerPrincipalId: 'prin_a', leasePrincipalId: 'prin_a',
   }), { kind: 'deny', code: 'LEASE_STALE', reason: '执行租约已过期或被更高版本取代（旧租约），请先重新认领' })
-  // 过期 active → LEASE_STALE
+  // actif expiré → LEASE_STALE
   assert.equal(decideCompleteOwnership({
     hasLeaseRecord: true, status: 'active', expired: true,
     callerPrincipalId: 'prin_a', leasePrincipalId: 'prin_a',
   }).code, 'LEASE_STALE')
-  // 主体不符 → RUN_NOT_OWNED（V06：员工用另一个 run 提交完成被拒）
+  // principal divergent → RUN_NOT_OWNED (V06 : l'employé soumettant la complétion avec un autre run est refusé)
   assert.equal(decideCompleteOwnership({
     hasLeaseRecord: true, status: 'active', expired: false,
     callerPrincipalId: 'prin_b', leasePrincipalId: 'prin_a',
   }).code, 'RUN_NOT_OWNED')
-  // 调用主体缺席 + 有租约 → fail-closed 拒绝（不能匿名交回他人 run）
+  // principal appelant absent + bail présent → refus fail-closed (on ne peut pas rendre anonymement le run d'autrui)
   assert.equal(decideCompleteOwnership({
     hasLeaseRecord: true, status: 'active', expired: false,
     callerPrincipalId: '', leasePrincipalId: 'prin_a',
@@ -316,6 +316,6 @@ test('decideCompleteOwnership：无租约兼容放行；旧租约=LEASE_STALE；
 test('decideRunAdoption：投影运行中=adopt（V05 不因预持锁卡死），缺席/脏投影=create', () => {
   assert.deepEqual(decideRunAdoption({ projectedRunIdPresent: true, projectedRunRunning: true }), { kind: 'adopt' })
   assert.deepEqual(decideRunAdoption({ projectedRunIdPresent: false, projectedRunRunning: false }), { kind: 'create' })
-  // 投影指向已终态/已消失的 run＝脏投影 → 新建
+  // projection pointant un run terminal/disparu = projection sale → création
   assert.deepEqual(decideRunAdoption({ projectedRunIdPresent: true, projectedRunRunning: false }), { kind: 'create' })
 })

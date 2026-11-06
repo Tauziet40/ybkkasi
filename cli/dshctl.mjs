@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 /**
- * dshctl —— 企业 AI 资源平台命令行（CLI/Skill 双封装的 CLI 端）。
+ * dshctl — CLI de la plateforme de ressources IA d'entreprise (volet CLI du double empaquetage CLI/Skill).
  *
- * 统一动词集合：list / get / create / update / freeze / deploy / rollback
+ * Ensemble de verbes unifié : list / get / create / update / freeze / deploy / rollback
  *               / offline / invoke / submit / approve / publish / install
  *               / metrics / logs / token / sync / topology / cost
- *               / a2a 目录·派活·任务·验收·履约·规则·巡检 / uhp 发现·harness·执行记录
+ *               / a2a annuaire·délégation·tâches·acceptation·exécution conforme·règles·inspection / uhp découverte·harness·enregistrements d'exécution
  *
- * 全局约定（方案 §4.2）：
- *   --output json|table   机器可读优先，默认 table
- *   --dry-run             仅支持预演的命令可变更预览；其他写请求拒绝执行
- *   --yes                 非交互模式（供 Agent 调用）
- *   错误码统一且带修复建议
+ * Conventions globales (plan §4.2) :
+ *   --output json|table   lisible machine d'abord, table par défaut
+ *   --dry-run             aperçu de changements uniquement pour les commandes gérant la simulation ; les autres requêtes d'écriture sont refusées
+ *   --yes                 mode non interactif (pour appel par Agent)
+ *   codes d'erreur unifiés et assortis d'une suggestion de correction
  *
- * 认证：DSHCTL_TOKEN 环境变量，或 admin 账号自动登录。
+ * Authentification : variable d'environnement DSHCTL_TOKEN, ou connexion automatique avec le compte admin.
  */
 import fs from 'node:fs'
 let BASE = process.env.DSHCTL_URL ?? 'http://127.0.0.1:7300'
@@ -21,7 +21,7 @@ const argv = process.argv.slice(2)
 
 // ------------------------------------------------------------------ utils
 function flag(name, fallback) {
-  // 支持 --name value 与 --name=value 两种风格
+  // Gère les deux styles --name value et --name=value
   const index = argv.findIndex((item) => item === `--${name}` || (item.startsWith(`--${name}=`)))
   if (index === -1) return fallback
   const item = argv[index]
@@ -32,7 +32,7 @@ function flag(name, fallback) {
 function argOf(name) {
   return flag(name.replace(/^--/, ''), undefined)
 }
-// 布尔语义旗标归一：--x / --x=true / --x on 均为真；--x=false|0|no|off 为假
+// Normalisation des drapeaux booléens : --x / --x=true / --x on sont vrais ; --x=false|0|no|off sont faux
 function truthyFlag(name) {
   const value = flag(name)
   if (value === undefined || value === false) return false
@@ -40,9 +40,10 @@ function truthyFlag(name) {
   return !['false', '0', 'no', 'off'].includes(String(value).trim().toLowerCase())
 }
 
-// 全局选项（D4）：既可前置也可后置。前置的若不剥离会被当成「资源名」报「未知资源：--output」，
-// 故在资源识别前统一从 argv 头部剥离并记入 GLOBALS；后置的仍由 flag() 就地查找。
-// --token 特例：前置位视为平台令牌；后置位保留给子命令私有语义（nas create --token= 是 NAS 访问令牌）。
+// Options globales (D4) : acceptées en tête ou en queue. Une option de tête non retirée serait prise
+// pour un « nom de ressource » et déclencherait « ressource inconnue : --output » ; d'où un retrait
+// systématique de la tête de argv avant identification de la ressource, avec report dans GLOBALS ; celles en queue restent résolues localement par flag().
+// Cas particulier --token : en tête il vaut jeton de plateforme ; en queue il garde la sémantique privée de la sous-commande (nas create --token= est le jeton d'accès NAS).
 const GLOBAL_VALUE_FLAGS = ['output', 'lang', 'url', 'token']
 const GLOBAL_BOOL_FLAGS = ['dry-run', 'yes', 'confirm']
 const GLOBALS = {}
@@ -67,15 +68,15 @@ const leadingDryRun = GLOBALS['dry-run']
 const DRY_RUN = truthyFlag('dry-run') || (leadingDryRun !== undefined && leadingDryRun !== false &&
   !['false', '0', 'no', 'off'].includes(String(leadingDryRun).trim().toLowerCase()))
 const ASSUME_YES = truthyFlag('yes') || truthyFlag('confirm') || GLOBALS.yes === true || GLOBALS.confirm === true
-// --url：CLI 旗标优先于 DSHCTL_URL 环境变量（前置后置均可）
+// --url : le drapeau CLI prime sur la variable d'environnement DSHCTL_URL (tête ou queue)
 {
   const urlFlag = GLOBALS.url !== undefined ? GLOBALS.url : flag('url')
   if (urlFlag && urlFlag !== true) BASE = String(urlFlag).replace(/\/+$/, '')
 }
 
 // ------------------------------------------------------------------ i18n
-// 界面语言决议（协议口径 R10）：--lang 旗标 > DSHCTL_LANG > PLATFORM_LOCALE > zh-CN。
-// 宽容归一（en-GB→en-US 等）；不支持的语言逐级降级，最终回 zh-CN（输出与历史版本逐字节一致）。
+// Résolution de la langue d'interface (règle protocolaire R10) : drapeau --lang > DSHCTL_LANG > PLATFORM_LOCALE > zh-CN.
+// Normalisation tolérante (en-GB→en-US etc.) ; les langues non prises en charge rétrogradent par étapes, avec repli final sur zh-CN (sortie identique octet par octet aux versions antérieures).
 const LANG_PREFIXES = [['zh', 'zh-CN'], ['en', 'en-US'], ['ja', 'ja-JP']]
 function normalizeLocale(input) {
   const lower = String(input ?? '').trim().toLowerCase()
@@ -89,8 +90,8 @@ const LOCALE = normalizeLocale(GLOBALS.lang !== undefined ? GLOBALS.lang : flag(
   ?? normalizeLocale(process.env.DSHCTL_LANG)
   ?? normalizeLocale(process.env.PLATFORM_LOCALE)
   ?? 'zh-CN'
-// 词典：复用 packages/platform-i18n/locales/<locale>/*.json（按文件名序浅合并，与平台 t() 同源）。
-// 目录缺失或解析失败静默降级中文（零依赖单文件约束：不经由 platform-i18n TS 模块）。
+// Dictionnaires : réutilise packages/platform-i18n/locales/<locale>/*.json (fusion superficielle par ordre de nom de fichier, même source que le t() de la plateforme).
+// Répertoire absent ou analyse en échec → repli silencieux sur le chinois (contrainte de fichier unique sans dépendance : sans passer par le module TS platform-i18n).
 const I18N = (() => {
   if (LOCALE === 'zh-CN') return {}
   try {
@@ -102,7 +103,7 @@ const I18N = (() => {
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
           for (const [key, value] of Object.entries(parsed)) if (typeof value === 'string') merged[key] = value
         }
-      } catch { /* 单个词典文件损坏跳过（fail-soft，等价缺翻译降级中文） */ }
+      } catch { /* fichier de dictionnaire individuel corrompu : ignoré (fail-soft, équivalent au repli chinois faute de traduction) */ }
     }
     return merged
   } catch { return {} }
@@ -112,7 +113,7 @@ function interpolate(template, params) {
   return template.replace(/\{(\w+)\}/g, (whole, name) =>
     Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : whole)
 }
-// t(中文原文)：zh-CN 原样（{name} 插值）；其它语言命中词典用译文、未命中回中文原文，再统一插值。
+// t(texte original chinois) : zh-CN tel quel (interpolation {name}) ; autres langues : traduction du dictionnaire si présente, sinon retour au texte chinois original, puis interpolation uniforme.
 function t(zh, params) {
   if (LOCALE === 'zh-CN') return interpolate(zh, params)
   return interpolate(I18N[zh] ?? zh, params)
@@ -121,8 +122,8 @@ function t(zh, params) {
 let token = process.env.DSHCTL_TOKEN ?? ''
 
 async function call(method, path, body) {
-  // 默认拒绝预演模式下的写请求；只放行服务端明确实现 dryRun 的接口和认证登录。
-  // 防止调用者误以为所有命令都支持 --dry-run，实际却执行了变更。
+  // Par défaut, refuse les requêtes d'écriture en mode simulation ; seuls les endpoints implémentant explicitement dryRun côté serveur et la connexion d'authentification sont autorisés.
+  // Évite qu'un appelant croie que toutes les commandes gèrent --dry-run alors qu'un changement est réellement exécuté.
   const previewEndpoint = method === 'POST' && body?.dryRun === true && (
     /^\/api\/mcp\/services\/[^/]+\/deploy$/.test(path) ||
     path === '/api/connector/execute' || path === '/api/update/apply'
@@ -174,9 +175,9 @@ async function ensureToken() {
   }
 }
 
-// 宽容调用（免鉴权规范端点）：A2A well-known 与 UHP /v1 均为规范裸 JSON（无 {ok,data} 信封）。
-// 兼容规则：响应含布尔 ok 字段按平台信封解（ok=false 报错退出），否则整体视为数据。
-// 信封分支保留仅为对接升级窗口内的旧版被管实例，不再是主路径。
+// Appel tolérant (endpoints normatifs sans authentification) : A2A well-known et UHP /v1 renvoient tous deux du JSON normatif nu (sans enveloppe {ok,data}).
+// Règle de compatibilité : si la réponse contient un champ booléen ok, elle est décodée comme enveloppe plateforme (ok=false → erreur et sortie), sinon elle est traitée globalement comme donnée.
+// La branche enveloppe n'est conservée que pour les instances gérées anciennes durant la fenêtre de mise à niveau, ce n'est plus le chemin principal.
 async function callLoose(method, path) {
   const headers = {}
   if (token) headers.authorization = `Bearer ${token}`
@@ -194,7 +195,7 @@ async function callLoose(method, path) {
   return payload
 }
 
-// A2A JSON-RPC 调用：平台信封内的 JSON-RPC 2.0。error 分支 exit 非 0 并打印 error.message 与 error.data.code。
+// Appel A2A JSON-RPC : JSON-RPC 2.0 à l'intérieur de l'enveloppe plateforme. La branche error sort avec un code non nul et affiche error.message et error.data.code.
 async function callJsonRpc(slug, method, params) {
   const data = await call('POST', `/api/agents/${encodeURIComponent(slug)}/a2a`, { jsonrpc: '2.0', id: 1, method, params })
   if (data && typeof data === 'object' && data.error) {
@@ -207,8 +208,8 @@ async function callJsonRpc(slug, method, params) {
   return data?.result
 }
 
-// ------------------------------------------------------------------ 输出
-// 表头中文标签：键为列名（--output json 的协议键，保留 ASCII），值为 table 模式的中文显示名
+// ------------------------------------------------------------------ sortie
+// Libellés chinois d'en-têtes de tableau : la clé est le nom de colonne (clé protocolaire de --output json, conservée en ASCII), la valeur le libellé affiché chinois en mode table
 const HEADER_ZH = {
   id: 'ID', name: '名称', status: '状态', createdAt: '创建时间', username: '用户名', org: '组织',
   code: '编码', builtin: '内置', permissions: '权限', provider: '提供方', kind: '类型',
@@ -234,7 +235,7 @@ const HEADER_ZH = {
   slug: 'Slug', agentId: 'AgentID', autonomy: '自主度', ceiling: '密级上限', harnessId: 'Harness',
   stepBudget: '步数预算', received: '接收数', completionRate: '完成率', acceptancePassRate: '验收通过率',
 }
-// 状态枚举中文伴随：协议值保留 ASCII（json 输出原样），table 模式经此映射展示（对齐 errors.js 映射表做法）
+// Accompagnement chinois des énumérations d'état : valeurs protocolaires conservées en ASCII (sortie json telle quelle), affichage en mode table via cette correspondance (même approche que la table de mise en correspondance de errors.js)
 const STATUS_ZH = {
   active: '活跃', inactive: '停用', pending: '待审批', approved: '已通过', rejected: '已驳回',
   published: '已上架', deprecated: '已弃用', online: '在线', offline: '离线', degraded: '降级',
@@ -286,12 +287,12 @@ function ok(message) {
   console.log(`✔ ${message}`)
 }
 
-// ------------------------------------------------------------------ 命令表
+// ------------------------------------------------------------------ table des commandes
 const COMMANDS = {
   help: {
     desc: '显示帮助',
     run: () => {
-      // 帮助逐行输出：每行独立过 t()（含中文的整行为词典键，纯 ASCII 行原样）
+      // Sortie de l'aide ligne par ligne : chaque ligne passe individuellement par t() (les lignes contenant du chinois servent de clés de dictionnaire, les lignes ASCII pures restent telles quelles)
       const lines = [
         'dshctl —— 企业 AI 资源平台 CLI（基于 DeepSeek Harness 一切皆插件架构）',
         '',
@@ -510,7 +511,7 @@ const COMMANDS = {
         const fingerprint = fingerprintOf(files)
         const privateKeyPem = await fs.readFile(path.join(dir, 'publisher-private-key.pem'), 'utf8')
         const signature = edSign(null, Buffer.from(fingerprint), createPrivateKey(privateKeyPem)).toString('base64')
-        token = '' // 开发者身份域登录（独立于平台管理员令牌）
+        token = '' // connexion au domaine d'identité développeur (indépendante du jeton admin de la plateforme)
         const login = await call('POST', '/api/market/developers/login', { username: user, password: argOf('--password') ?? '' })
         token = login.token
         const submission = await call('POST', '/api/market/submit', { files, signature })
@@ -723,7 +724,7 @@ const COMMANDS = {
       if (action === 'rotate') {
         if (!id) fail(t('用法：credential rotate <principalId>'))
         const data = await call('POST', `/api/authn/principals/${id}/rotate-secret`)
-        // 机器可读分支：--output json 时输出纯净 JSON（✔ 人类提示不进 stdout，避免破坏管道消费）
+        // Branche lisible machine : avec --output json, sortie JSON pur (le message humain ✔ n'entre pas dans stdout afin de ne pas casser la consommation par pipeline)
         if (OUTPUT === 'json') { out(data); return }
         ok(t('clientSecret 已轮换（新值仅此一次展示，旧值立即失效，存量令牌已全部吊销）'))
         out(data)
@@ -745,8 +746,8 @@ const COMMANDS = {
         return
       }
       if (action === 'get') {
-        // D2 修复：原写法 `out(await call(...)).services` 括号错位（对 out() 返回值取 .services），
-        // 正确语义：取列表后按 id 过滤出单条详情。
+        // Correctif D2 : l'écriture d'origine `out(await call(...)).services` avait des parenthèses déplacées (prise de .services sur la valeur de retour de out()) ;
+        // sémantique correcte : récupérer la liste puis filtrer sur id pour obtenir le détail unique.
         if (!id) fail(t('用法：mcp get <服务ID>'))
         const data = await call('GET', '/api/mcp/services')
         const service = (data.services ?? []).find((item) => item.id === id)
@@ -792,8 +793,8 @@ const COMMANDS = {
         let args = {}
         if (flag('args')) { try { args = JSON.parse(String(flag('args'))) } catch { fail(t('--args 必须是合法 JSON')) } }
         const data = await call('POST', '/api/mcp/invoke', { serviceId: id, tool: argOf('--tool'), args })
-        // D6 修复：denied / error / rate_limited / breaker_open 均为业务失败（HTTP 200 但 ok=false），
-        // 必须以非 0 退出码呈现，供脚本与 Agent 判定。
+        // Correctif D6 : denied / error / rate_limited / breaker_open sont tous des échecs métier (HTTP 200 mais ok=false) ;
+        // ils doivent ressortir avec un code de sortie non nul pour l'appréciation des scripts et Agents.
         if (!data || data.ok === false || (data.status && data.status !== 'ok')) {
           console.error(`\n✘ ${t('MCP 调用未成功：{error}（status={status}{code}）', {
             error: data?.error ?? '—',
@@ -1063,7 +1064,7 @@ const COMMANDS = {
           ? await import('node:fs/promises').then((fs) => fs.readFile(String(raw).slice(1), 'utf8'))
           : String(raw))
       }
-      // ---- 网关 ----
+      // ---- passerelle ----
       if (group === 'gateway') {
         if (sub === 'set') {
           const baseUrl = argOf('--base-url')
@@ -1099,7 +1100,7 @@ const COMMANDS = {
         out(await call('GET', '/api/connector/gateway'))
         return
       }
-      // ---- 目录 ----
+      // ---- catalogue ----
       if (group === 'catalog') {
         if (sub === 'providers') {
           const data = await call('GET', '/api/connector/catalog' + (flag('search') ? `?q=${encodeURIComponent(flag('search'))}&kind=providers` : '?kind=providers'))
@@ -1126,7 +1127,7 @@ const COMMANDS = {
           return
         }
       }
-      // ---- 连接 ----
+      // ---- connexions ----
       if (group === 'connections') {
         if (sub === 'list') {
           const search = new URLSearchParams()
@@ -1194,7 +1195,7 @@ const COMMANDS = {
           else ok(t('连接已下线：{alias}', { alias: data.reference?.alias ?? id }))
           return
         }
-      // ---- 执行 ----
+      // ---- exécution ----
       if (group === 'execute') {
         const actionId = argOf('--action')
         if (!actionId) fail(t('用法：connector execute --action=<actionId> [--connection=<alias>] [--input=@file.json] [--dry-run]'))
@@ -1214,7 +1215,7 @@ const COMMANDS = {
         out(data)
         return
       }
-      // ---- 权限组 ----
+      // ---- groupes de permissions ----
       if (group === 'perm-groups') {
         if (sub === 'create') {
           const file = argOf('--file')
@@ -1246,7 +1247,7 @@ const COMMANDS = {
         out(data.groups.map((g) => ({ id: g.id, name: g.name, org: g.orgId, policies: Object.keys(g.policies).join('|'), subjects: g.subjects.length })), ['id', 'name', 'org', 'policies', 'subjects'])
         return
       }
-      // ---- 运行日志 / 对账 / 台账 ----
+      // ---- journaux d'exécution / réconciliation / registre ----
       if (group === 'runs') {
         const search = new URLSearchParams()
         if (flag('service')) search.set('service', flag('service'))
@@ -1294,7 +1295,7 @@ const COMMANDS = {
         out(data)
         return
       }
-      // D1 修复：Agent 详情（GET /api/agents/:id）自带 topology 字段（依赖/绑定树，深度 2），直接投影输出
+      // Correctif D1 : le détail Agent (GET /api/agents/:id) embarque le champ topology (arbre dépendances/liaisons, profondeur 2), projeté directement en sortie
       if (action === 'topology') {
         if (!id) fail(t('用法：agent topology <id>'))
         const topology = (await call('GET', `/api/agents/${id}`)).topology
@@ -1323,7 +1324,7 @@ const COMMANDS = {
         const requesterId = argOf('--requesterId'), requesterName = argOf('--requesterName')
         if (!requesterId || !requesterName) fail(t('offline 需要 --requesterId 与 --requesterName（审批发起人）'))
         const data = await call('POST', `/api/agents/${id}/transition`, { action: 'offline', note: String(reason) }).catch(async () => {
-          // 降级：直接走 transition 接口（当前用户为发起人）
+          // Repli : passer directement par l'endpoint transition (l'utilisateur courant est le demandeur)
           return null
         })
         void data
@@ -1373,7 +1374,7 @@ const COMMANDS = {
     },
   },
 
-  // ---------------------------------------------------------------- a2a / uhp（协作与执行驱动）
+  // ---------------------------------------------------------------- a2a / uhp (collaboration et moteur d'exécution)
   a2a: {
     desc: 'A2A 协作面（目录 / Agent Card / 派活 / 任务 / 验收 / 履约 / 规则 / 巡检）',
     run: async () => {
@@ -1499,7 +1500,7 @@ const COMMANDS = {
     run: async () => {
       const action = argv[0] ?? 'discover'
       if (!action || action === 'discover') {
-        // 规范要求免鉴权：/v1/uhp 不在 /api 鉴权域；裸 JSON / 信封双兼容
+        // La norme exempte d'authentification : /v1/uhp est hors du domaine authentifié /api ; double compatibilité JSON nu / enveloppe
         out(await callLoose('GET', '/v1/uhp'))
         return
       }
@@ -1588,7 +1589,7 @@ const COMMANDS = {
       if (action === 'decide') {
         const decision = flag('decision')
         if (!['approve', 'reject'].includes(decision)) fail(t('--decision 必须是 approve|reject'))
-        // D5 修复：高风险审批（如上线单）服务端要求 confirmed=true 二次确认；--final-review 走终审口径。
+        // Correctif D5 : pour les approbations à haut risque (ex. mise en ligne), le serveur exige la double confirmation confirmed=true ; --final-review suit le régime de revue finale.
         const body = { decision, opinion: flag('opinion', 'CLI 审批') }
         if (truthyFlag('confirmed')) body.confirmed = true
         if (truthyFlag('final-review')) body.finalReview = true
@@ -1795,15 +1796,15 @@ async function confirm() {
 
 // ------------------------------------------------------------------ main
 const resource = argv.shift() ?? 'help'
-// 后置 --token 作为平台令牌（前置的已在 consumeLeadingGlobals 剥离）。
-// 例外：nas create 的 --token 是 NAS 访问令牌（子命令私有语义），不当平台令牌消费。
+// --token en position de queue sert de jeton de plateforme (celui en tête a déjà été retiré par consumeLeadingGlobals).
+// Exception : le --token de nas create est le jeton d'accès NAS (sémantique privée de la sous-commande), non consommé comme jeton de plateforme.
 if (GLOBALS.token !== undefined) {
   if (GLOBALS.token !== true) token = String(GLOBALS.token)
 } else {
   const trailingToken = flag('token')
   if (trailingToken !== undefined && trailingToken !== true && !(resource === 'nas' && argv[0] === 'create')) token = String(trailingToken)
 }
-// 5.1：--help / -h / help（含任意位置出现的 --help / -h）一律干净输出帮助并以 0 退出
+// 5.1 : --help / -h / help (y compris --help / -h apparus à n'importe quelle position) affichent toujours une aide propre et sortent avec le code 0
 if (resource === '--help' || resource === '-h' || resource === 'help' || argv.includes('--help') || argv.includes('-h')) {
   COMMANDS.help.run()
   process.exit(0)

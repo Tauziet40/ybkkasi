@@ -1,11 +1,11 @@
 /**
- * 客户端本地配置界面：远程电脑上打开浏览器完成/修改宿主连接配置的轻量单页。
+ * Interface de configuration locale du client : page unique légère où, sur l'ordinateur distant, on ouvre un navigateur pour compléter/modifier la configuration de connexion à l'hôte.
  *
- * 形态：独立小 HTTP 服务（默认仅监听 127.0.0.1:7390，仅本机浏览器可访问），
- * 页面零依赖原生 JS。供「安装完插件不知道怎么配凭证」的场景可视化操作，
- * 与 Agent 工具（connect_setup 等）双通道等价。
+ * Forme : petit service HTTP autonome (par défaut n'écoute que 127.0.0.1:7390, accessible uniquement au navigateur local),
+ * page en JS natif sans dépendance. Pour les scénarios « extension installée mais on ne sait pas comment configurer les identifiants », opération visuelle,
+ * équivalente en double canal aux outils Agent (connect_setup etc.).
  *
- * 防护：Host 头白名单（防 DNS rebinding）+ 跨域 Origin 拒绝（防浏览器 CSRF）。
+ * Protections : liste blanche d'en-tête Host (contre le DNS rebinding) + refus d'Origin inter-origines (contre le CSRF de navigateur).
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
@@ -64,7 +64,7 @@ export class ConnectConfigServer extends Service {
     const host = String(req.headers['host'] ?? '').split(':')[0]!.toLowerCase()
     if (!ALLOWED_HOSTS.has(host)) return false
     const origin = req.headers['origin']
-    if (origin === undefined) return true // 同源 GET/非浏览器客户端（curl 等）
+    if (origin === undefined) return true // GET same-origin/client non navigateur (curl etc.)
     try {
       return ALLOWED_HOSTS.has(new URL(String(origin)).hostname.toLowerCase())
     } catch {
@@ -138,22 +138,22 @@ export class ConnectConfigServer extends Service {
     }
   }
 
-  /** 连通性 + 令牌 + 一次真实读调用（列 Agent）三合一体检。 */
+  /** Bilan trois-en-un : connectivité + jeton + un vrai appel en lecture (liste des Agents). */
   private async probe(): Promise<Record<string, unknown>> {
     const config = this.client.getConfig()
     if (!config) return { configured: false, hint: t('请先填写宿主地址与接入码完成接入') }
     const result = await this.client.status()
     let sample: Record<string, unknown> = {}
     try {
-      const value = await this.client.forward('agent_list', {}) // 走一次完整转发链路（含令牌获取）
+      const value = await this.client.forward('agent_list', {}) // parcourt une fois la chaîne de transfert complète (acquisition du jeton incluse)
       sample = { toolProxy: 'ok', sampleCall: { tool: 'agent_list', total: (value as { total?: number })?.total } }
-    } catch { /* forward 失败信息已在 status.lastError */ }
+    } catch { /* en cas d'échec de forward, le détail est déjà dans status.lastError */ }
     return { ...result, ...sample }
   }
 }
 
 // ---------------------------------------------------------------------------
-// 内嵌单页（原生 JS，无外部依赖）
+// Page unique intégrée (JS natif, sans dépendance externe)
 // ---------------------------------------------------------------------------
 
 const CONFIG_PAGE_HTML = `<!doctype html>

@@ -1,15 +1,15 @@
 /**
- * 门户契约映射层（api.md v1.0「AI 数字化门户 · 数据接口对接文档」）：
- * 平台资源 → 门户只读 JSON 的唯一映射点。
+ * Couche de cartographie du contrat du portail (api.md v1.0 « portail numérique IA · document d'interconnexion des interfaces de données ») :
+ * unique point de mise en correspondance ressources plateforme → JSON lecture seule du portail.
  *
- * 设计约束（门户与推送方式可能变化，本能力为外部对接、非平台核心）：
- *   - 门户字段契约变化时只改本文件（换来源/加字段），端点与事件留痕不受影响；
- *   - 全部为纯函数，空值一律回退空串（契约约定：不返回 null / 缺省字段）。
+ * Contraintes de conception (le portail et le mode de poussée peuvent changer, cette capacité est une interconnexion externe, pas un cœur de plateforme) :
+ *   - quand le contrat de champs du portail change, ne modifier que ce fichier (changer de source/ajouter des champs), sans impact sur les endpoints ni les traces d'événements ;
+ *   - tout en fonctions pures, toute valeur vide retombe sur chaîne vide (convention du contrat : pas de null / pas de champ absent).
  */
 import type { ResourceEntity } from '../../platform-core/src/index.ts'
 import { t } from '../../platform-i18n/src/index.ts'
 
-// ---- 门户字段契约（api.md §4） ------------------------------------------------
+// ---- Contrat de champs du portail (api.md §4) ------------------------------------------------
 
 export interface PortalApp {
   id: string
@@ -72,7 +72,7 @@ export interface PortalStat {
   label: string
 }
 
-/** Skill 上架记录的映射所需最小结构（结构化类型，避免跨插件类型耦合）。 */
+/** Structure minimale requise pour la cartographie d'un enregistrement de skill publié (type structuré, évitant le couplage de types inter-plugins). */
 export interface PortalSkillSource {
   id: string
   name: string
@@ -87,23 +87,23 @@ export interface PortalSkillSource {
   versions: Array<{ status: string; publishedAt?: string }>
 }
 
-/** 映射上下文：跨域服务（组织名/Skill 名/下载地址）经回调注入，映射函数保持无依赖可测。 */
+/** Contexte de cartographie : les services inter-domaines (nom d'organisation/nom de skill/adresse de téléchargement) sont injectés par rappel, les fonctions de cartographie restent sans dépendance et testables. */
 export interface PortalMappingContext {
   deptName: (orgId: string) => string
   skillName: (skillId: string) => string
-  /** 技能包公开下载地址（门户免鉴权下载端点）。 */
+  /** Adresse publique de téléchargement du paquet de skill (endpoint de téléchargement sans authentification du portail). */
   skillDownloadUrl: (skillId: string) => string
-  /** 机密应用不出门户（PORTAL_HIDE_CONFIDENTIAL=1 开启，默认关闭）。 */
+  /** Les applications de niveau secret ne sortent pas vers le portail (PORTAL_HIDE_CONFIDENTIAL=1, fermé par défaut). */
   hideConfidential: boolean
 }
 
-// ---- 映射辅助 ----------------------------------------------------------------
+// ---- Aides de cartographie ----------------------------------------------------------------
 
 const s = (value: unknown): string => (value === undefined || value === null ? '' : String(value))
 
 const tags = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
 
-/** 应用形态 → 门户分类标签（门户按 tag 筛选；未登记发布渠道时兜底为形态标签）。 */
+/** Forme d'application → étiquette de catégorie du portail (le portail filtre par tag ; sans canal de publication enregistré, repli sur l'étiquette de forme). */
 const APP_TYPE_LABELS: Record<string, string> = {
   web: 'Web',
   h5: 'H5',
@@ -113,9 +113,9 @@ const APP_TYPE_LABELS: Record<string, string> = {
 }
 
 /**
- * 公开门户链接脱敏（安全审查 P1-03，2026-10-31）：link/entryUrl 指向回环/私网/链路本地
- * 地址或无点内部主机名时不进匿名清单——防公网访客借门户枚举内网拓扑。返回空串（契约
- * 允许缺省 link，门户侧展示为「暂无入口」），不影响其余字段。
+ * Masquage des liens publics du portail (revue de sécurité P1-03, 2026-10-31) : quand link/entryUrl pointe une adresse de bouclage/réseau privé/lien local
+ * ou un nom d'hôte interne sans point, n'entre pas dans la liste anonyme — contre l'énumération de la topologie interne par un visiteur public. Renvoie chaîne vide (le contrat
+ * admet un link absent, le portail affiche « pas encore d'entrée »), sans impact sur les autres champs.
  */
 export function publicLink(value: unknown): string {
   const raw = s(value).trim()
@@ -134,7 +134,7 @@ export function publicLink(value: unknown): string {
   return raw
 }
 
-/** 卡片主题色调板（契约要求 #RRGGBB；平台无该属性，按 id 稳定散列取色，同应用恒定）。 */
+/** Palette de teintes de thème des cartes (le contrat exige #RRGGBB ; la plateforme n'a pas cet attribut, couleur par hachage stable de l'id, constante pour une même application). */
 const ACCENTS = ['#00AECC', '#7C3AED', '#059669', '#D97706', '#DB2777', '#0891B2', '#6366F1', '#F97316']
 
 export function accentFor(id: string): string {
@@ -143,17 +143,17 @@ export function accentFor(id: string): string {
   return ACCENTS[hash % ACCENTS.length]!
 }
 
-/** 生命周期历史中最近一次进入 online 的日期（YYYY-MM-DD）；从未上线返回空串（契约：「未上线」）。 */
+/** Date de la dernière entrée en online dans l'historique de cycle de vie (YYYY-MM-DD) ; jamais mise en ligne = chaîne vide (contrat : « non mise en ligne »). */
 export function lastOnlineDate(entity: Pick<ResourceEntity, 'lifecycleHistory'>): string {
   const at = (entity.lifecycleHistory ?? []).filter((entry) => entry.to === 'online').at(-1)?.at ?? ''
   return /^\d{4}-\d{2}-\d{2}/.test(at) ? at.slice(0, 10) : ''
 }
 
-// ---- 端点映射 ----------------------------------------------------------------
+// ---- Cartographie des endpoints ----------------------------------------------------------------
 
 /**
- * 已上线 AI 应用 → 门户 /apps。
- * 「上线」即门户可见：应用经 L4 审批上线后，status=online 才进入清单（未上线不出门户）。
+ * Applications IA mises en ligne → portail /apps.
+ * « mise en ligne » = visible du portail : après mise en ligne L4 de l'application, seul status=online entre dans la liste (non mise en ligne ne sort pas vers le portail).
  */
 export function mapApps(entities: ResourceEntity[], mctx: PortalMappingContext): PortalApp[] {
   return entities
@@ -175,7 +175,7 @@ export function mapApps(entities: ResourceEntity[], mctx: PortalMappingContext):
     })
 }
 
-/** 已上线 Agent → 门户 /employees（数字员工）。 */
+/** Agents mis en ligne → portail /employees (employés numériques). */
 export function mapEmployees(entities: ResourceEntity[], mctx: PortalMappingContext): PortalEmployee[] {
   return entities
     .filter((agent) => agent.status === 'online')
@@ -195,7 +195,7 @@ export function mapEmployees(entities: ResourceEntity[], mctx: PortalMappingCont
     })
 }
 
-/** 已上架 Skill → 门户 /skills（launchDate 取最近一次版本上架时间）。 */
+/** Skills publiés → portail /skills (launchDate prend la date de publication de la dernière version). */
 export function mapSkills(skills: PortalSkillSource[], mctx: PortalMappingContext): PortalSkill[] {
   return skills
     .filter((skill) => skill.status === 'published')
@@ -212,14 +212,14 @@ export function mapSkills(skills: PortalSkillSource[], mctx: PortalMappingContex
         desc: s(skill.summary) || s(skill.description),
         dept: mctx.deptName(skill.orgId) || s(skill.authorName),
         version: s(skill.currentVersion),
-        // 已上架技能包的公开下载端点（门户免鉴权可下载，平台侧登记下载计量）
+        // Endpoint public de téléchargement des paquets de skills publiés (téléchargeable sans authentification par le portail, metering de téléchargement enregistré côté plateforme)
         downloadUrl: mctx.skillDownloadUrl(s(skill.id)),
         launchDate: /^\d{4}-\d{2}-\d{2}/.test(publishedAt) ? publishedAt.slice(0, 10) : '',
       }
     })
 }
 
-/** 首页统计 4 卡（契约：value 必须为字符串，门户按数组顺序渲染 4 个指标卡）。 */
+/** 4 cartes statistiques de la page d'accueil (contrat : value doit être une chaîne, le portail rend 4 cartes d'indicateurs dans l'ordre du tableau). */
 export function mapStats(counts: { apps: number; employees: number; skills: number; mcp: number }): PortalStat[] {
   return [
     { value: String(counts.apps), unit: '+', label: t('已上线AI应用') },
@@ -229,12 +229,12 @@ export function mapStats(counts: { apps: number; employees: number; skills: numb
   ]
 }
 
-/** /solutions：平台暂无对应数据源，返回空数组（契约 §5：门户自动降级展示内置样板）。 */
+/** /solutions : la plateforme n'a pas encore de source de données, renvoie un tableau vide (contrat §5 : le portail dégrade en affichant ses gabarits intégrés). */
 export function emptySolutions(): PortalSolution[] {
   return []
 }
 
-/** /tools：同上（数据源明确后再在 mapping.ts 补一个 map 函数即可）。 */
+/** /tools : idem (quand la source de données sera claire, il suffira d'ajouter une fonction map dans mapping.ts). */
 export function emptyTools(): PortalTool[] {
   return []
 }

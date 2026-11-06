@@ -1,14 +1,14 @@
 /**
- * @dsh-ops/plugin-nas —— NAS（FS 文件存储类）资产纳管。
+ * @dsh-ops/plugin-nas — gestion des actifs NAS (classe FS stockage de fichiers).
  *
- * 访问模型：每台 NAS 经「MCP 文件网关」（参考 synology-filestation-mcp）访问——
- * 网关地址 + Bearer 令牌 + X-NAS-IP 设备路由头；全部文件操作（列表/检索/建删/
- * 上传/下载/改名/移动复制）经网关 tools/call 完成，平台不直连 DSM 私有 API。
+ * Modèle d'accès : chaque NAS est accédé via une « passerelle de fichiers MCP » (voir synology-filestation-mcp) —
+ * adresse de passerelle + jeton Bearer + en-tête de routage d'appareil X-NAS-IP ; toutes les opérations de fichiers (liste/recherche/création-suppression/
+ * upload/download/renommage/déplacement-copie) passent par tools/call de la passerelle, la plateforme ne se connecte jamais aux API privées DSM.
  *
- * 基于 resource-core 底座（Pattern A）：属性表 + 生命周期状态机 + 依赖图复用，
- * 本插件补充：网关客户端、健康探活、工具发现、文件操作面与 Skill 包存储配置。
- * 全部写类文件操作审计留痕；读类操作仅在线资产可调；全部文件操作进 usage 计量
- * （nas:* 资源、calls/bytes 口径，默认零费率——观测先行，计费由价格簿调价决定）。
+ * Sur le socle resource-core (Pattern A) : table d'attributs + machine à états de cycle de vie + graphe de dépendances réutilisés,
+ * cette extension apporte : client de passerelle, sondage de santé, découverte d'outils, face d'opérations de fichiers et configuration du stockage des paquets Skill.
+ * Toutes les écritures de fichiers sont tracées dans l'audit ; les lectures ne sont appelables que sur les actifs en ligne ; toutes les opérations entrent au metering usage
+ * (ressource nas:*, référentiel calls/bytes, tarif nul par défaut — l'observation d'abord, la facturation décidée par le tarif).
  */
 import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { join, normalize, sep } from 'node:path'
@@ -25,7 +25,7 @@ import { NasShareLinkService } from './share-link.ts'
 import * as nasTools from './tools.ts'
 
 // ---------------------------------------------------------------------------
-// 数据模型
+// Modèle de données
 // ---------------------------------------------------------------------------
 
 export interface NasHealthRecord extends RecordBase {
@@ -43,7 +43,7 @@ export interface NasToolCacheRecord extends RecordBase {
   syncedAt: string
 }
 
-/** Skill 包存储后端配置（单例）：local = 平台内联存储；nas = 上架时上传到指定 NAS 资产。 */
+/** Configuration du backend de stockage des paquets Skill (singleton) : local = stockage en ligne de la plateforme ; nas = upload vers l'actif NAS désigné à la publication. */
 export interface SkillStorageConfigRecord extends RecordBase {
   mode: 'local' | 'nas'
   nasId?: string
@@ -53,30 +53,30 @@ export interface SkillStorageConfigRecord extends RecordBase {
 }
 
 /**
- * 文件操作 actor（D15 additive）：kind 由调用面显式标注——'machine' 一律不透传
- * X-On-Behalf-User（机器 principal ID 绝不冒充真人）；缺省（存量内部调用方）保持原判定逻辑。
+ * Acteur d'opération de fichiers (additive D15) : kind est explicitement marqué par la face appelante — 'machine' ne transmet jamais
+ * X-On-Behalf-User (un ID de principal machine n'usurpe jamais un humain) ; par défaut (appelants internes existants), la logique de jugement d'origine est conservée.
  */
 export type NasFsActor = { id: string; name: string; kind?: 'human' | 'machine' }
 
 /**
- * 文件调用附加选项（D15 additive）：serviceSubject 仅限受信任内部路径——服务端代码显式传入
- * （如 plugin-workforce 岗位适配器）时以网关令牌绑定的岗位服务主体执行：不带 X-On-Behalf-User、
- * 不借用任何真人数据权限；计量以 svc:<serviceSubject> 归因。
- * HTTP 工具面（nas_fs_*）禁止传本选项（结构上不可达：fsCall 为服务私有方法）。
+ * Options additionnelles d'appel de fichiers (additive D15) : serviceSubject est réservé aux chemins internes de confiance — quand du code serveur le passe explicitement
+ * (ex. adaptateur de poste plugin-workforce), l'exécution se fait sous le principal de service de poste lié au jeton de passerelle : sans X-On-Behalf-User,
+ * sans emprunter aucune permission de données d'un humain ; le metering est attribué à svc:<serviceSubject>.
+ * La face outils HTTP (nas_fs_*) interdit ce paramètre (structurellement inatteignable : fsCall est une méthode privée du service).
  */
 export interface NasFsCallOptions {
   serviceSubject?: string
 }
 
 /**
- * 受管数字员工受控 staging 白名单根（D12/V15 常量化）：受管放行者经 nas_fs_upload 上传时，
- * localFile 仅允许指向 `<dataDir>/workforce-artifacts/` 前缀（workforce artifact 受控上传区），
- * 其余平台任意路径一律中文拒绝（ARTIFACT_SCOPE_DENIED），引导走 POST /api/workforce/artifacts。
+ * Racine de la liste blanche du staging contrôlé de l'employé numérique géré (constantes D12/V15) : lors d'un upload par nas_fs_upload d'un passage géré,
+ * localFile n'accepte que le préfixe `<dataDir>/workforce-artifacts/` (zone d'upload contrôlée des artefacts workforce),
+ * tout autre chemin de la plateforme est refusé en chinois (ARTIFACT_SCOPE_DENIED), avec invitation à passer par POST /api/workforce/artifacts.
  */
 export const WORKFORCE_ARTIFACTS_ROOT = join(process.cwd(), 'data', 'workforce-artifacts')
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 export class NasRegistryService extends Service {
@@ -101,7 +101,7 @@ export class NasRegistryService extends Service {
     return this.ctx.opsStorage.collection<SkillStorageConfigRecord>('skill:storage')
   }
 
-  // -- 注册与生命周期 -------------------------------------------------------
+  // -- Enregistrement et cycle de vie -------------------------------------------------------
 
   register(input: { name: string; slug?: string; attrs?: Record<string, unknown>; ownerId: string; orgId: string }): ResourceEntity {
     const entity = this.ctx.resourceCore.create('nas', input)
@@ -112,7 +112,7 @@ export class NasRegistryService extends Service {
 
   update(id: string, patch: { name?: string; attrs?: Record<string, unknown> }): ResourceEntity {
     const entity = this.ctx.resourceCore.update('nas', id, patch)
-    // 接入属性变更后作废缓存的网关客户端（令牌轮换/换网关即时生效）
+    // Invalide le client de passerelle en cache après changement des attributs d'accès (rotation de jeton/changement de passerelle à effet immédiat)
     this.clients.delete(id)
     return entity
   }
@@ -125,7 +125,7 @@ export class NasRegistryService extends Service {
     return this.ctx.resourceCore.list('nas', filter)
   }
 
-  /** 上线：先做网关 initialize 探活（不可达拒绝上线），再走状态机迁移与工具发现。 */
+  /** Mise en ligne : d'abord un sondage initialize de la passerelle (injoignable = mise en ligne refusée), puis la transition de la machine à états et la découverte d'outils. */
   async online(id: string, actor: string): Promise<ResourceEntity> {
     const nas = this.requireNas(id)
     const probe = await this.probe(id)
@@ -150,16 +150,16 @@ export class NasRegistryService extends Service {
     return this.ctx.resourceCore.transition('nas', id, 'archive', actor).entity
   }
 
-  /** 删除后的关联清理：健康档案、工具发现缓存与网关客户端句柄。 */
+  /** Nettoyage des liaisons après suppression : dossier de santé, cache de découverte d'outils et handle du client de passerelle. */
   purge(id: string): void {
     this.clients.delete(id)
     for (const record of this.health().find((item) => item.nasId === id)) this.health().remove(record.id)
     for (const record of this.toolCache().find((item) => item.nasId === id)) this.toolCache().remove(record.id)
   }
 
-  // -- 健康与工具发现 -------------------------------------------------------
+  // -- Santé et découverte d'outils -------------------------------------------------------
 
-  /** initialize 探活：延迟 > 800ms 记 degraded；连续失败 3 次记 down 并告警。 */
+  /** Sondage initialize : latence > 800 ms = degraded ; 3 échecs consécutifs = down avec alerte. */
   async probe(id: string): Promise<NasHealthRecord> {
     const nas = this.requireNas(id)
     const existing = this.health().findOne((item) => item.nasId === id)
@@ -201,7 +201,7 @@ export class NasRegistryService extends Service {
       ?? { id: `hlt_${id}`, nasId: id, status: 'unknown', latencyMs: 0, lastProbeAt: '', consecutiveFails: 0 }
   }
 
-  /** 工具发现：网关 tools/list 结果落缓存（展示网关提供的 fs_* 能力面）。 */
+  /** Découverte d'outils : le résultat tools/list de la passerelle tombe en cache (affiche la face de capacités fs_* offerte par la passerelle). */
   async discoverTools(id: string): Promise<McpToolInfo[]> {
     const nas = this.requireNas(id)
     const tools = await this.clientFor(nas).listTools()
@@ -216,9 +216,9 @@ export class NasRegistryService extends Service {
     return this.toolCache().findOne((item) => item.nasId === id)?.tools ?? []
   }
 
-  // -- 文件操作面（全部经网关 tools/call） -----------------------------------
-  // 各方法 additive 尾参 opts?: NasFsCallOptions（D15）：仅受信任内部路径显式传入
-  // serviceSubject 时以岗位服务主体执行；HTTP 工具面不传，行为与原签名完全一致。
+  // -- Face d'opérations de fichiers (tout passe par tools/call de la passerelle) -----------------------------------
+  // Chaque méthode reçoit en paramètre additionnel de queue opts?: NasFsCallOptions (D15) : seul un chemin interne de confiance passant explicitement
+  // serviceSubject exécute sous le principal de service de poste ; la face outils HTTP ne le passe pas, comportement strictement identique à la signature d'origine.
 
   async listShares(id: string, actor?: NasFsActor, opts?: NasFsCallOptions): Promise<unknown> {
     return await this.fsCall(id, 'fs_list_shares', { additional: ['name', 'path', 'isdir'] }, { actor }, opts)
@@ -269,11 +269,11 @@ export class NasRegistryService extends Service {
   }
 
   /**
-   * 上传文件到 NAS：buffer/本地文件 → 平台 staging 目录 → 网关 fs_upload（网关读本地 staging）。
-   * 超时随字节数放宽（基线 30s + 每 MB 1s，上限 10 分钟）。跨机部署需共享 staging 卷。
-   * onBehalf=false（默认 true）为平台服务身份直连：不透传 X-On-Behalf-User 头（网关以令牌
-   * 绑定账号做数据权限判定，须有目标目录的显式 allow 例外），actor 仅进平台审计/计量——
-   * 用于平台自有存储区写入（如 Skill 包上架），不应随操作人个人数据权限起伏。
+   * Upload d'un fichier vers le NAS : buffer/fichier local → répertoire staging de la plateforme → fs_upload de la passerelle (la passerelle lit le staging local).
+   * Timeout relâché selon les octets (base 30 s + 1 s par Mo, plafond 10 minutes). Un déploiement multi-machines exige un volume staging partagé.
+   * onBehalf=false (défaut true) = connexion directe sous l'identité de service de la plateforme : pas d'en-tête X-On-Behalf-User transmis (la passerelle juge
+   * les permissions de données avec le compte lié au jeton, qui doit avoir une exception allow explicite sur le répertoire cible), l'actor n'entre que dans l'audit/le metering de la plateforme —
+   * pour l'écriture dans la zone de stockage propre de la plateforme (ex. publication de paquets Skill), qui ne doit pas fluctuer avec les permissions de données personnelles de l'opérateur.
    */
   async uploadFile(id: string, input: { buffer?: Buffer; localFile?: string; destPath: string; actor: NasFsActor; onBehalf?: boolean }, opts?: NasFsCallOptions): Promise<{ path: string; sizeBytes: number }> {
     const nas = this.requireNas(id)
@@ -299,10 +299,10 @@ export class NasRegistryService extends Service {
   }
 
   /**
-   * localFile 读取边界（安全审查 P0-04，2026-10-31）：localFile 上传让平台进程读取服务器
-   * 本地文件——不收敛即构成「有 NAS 写权限即可外传任意本地文件」的越权读取面。仅允许
-   * ① 本 NAS staging 目录（平台自产文件），② workforce 受控 artifact 区（受管数字员工
-   * 经受控上传接口落盘的文件）。realpath 解析后做前缀比对，符号链接指向边界外同样拒绝。
+   * Frontière de lecture de localFile (revue de sécurité P0-04, 2026-10-31) : l'upload localFile fait lire au processus de la plateforme des fichiers locaux
+   * du serveur — sans resserrement, cela constitue une face de lecture non autorisée « avec la permission d'écriture NAS, on exporte n'importe quel fichier local ». Ne sont permis que
+   * ① le répertoire staging de ce NAS (fichiers produits par la plateforme), ② la zone d'artefacts contrôlée workforce (fichiers déposés par l'employé numérique géré
+   * via l'interface d'upload contrôlée). Comparaison de préfixe après résolution realpath ; un lien symbolique pointant hors frontière est également refusé.
    */
   private async assertLocalFileInScope(nas: ResourceEntity, localFile: string): Promise<string> {
     const { resolve, sep } = await import('node:path')
@@ -326,10 +326,10 @@ export class NasRegistryService extends Service {
   }
 
   /**
-   * 从 NAS 下载到平台 staging（网关 fs_download 在网关侧落盘到 dest_dir）。返回本地绝对路径 + 字节数。
-   * 安全审查 P0-04：网关回执的 saved_to 不再被信任为读取路径——仅当其 realpath 落在本 NAS
-   * staging/downloads 目录内才采信，否则忽略并按「预期落盘名」解析；防恶意网关借回执让平台
-   * 流出任意本地文件。符号链接解析（realpath）后仍在边界内方可读取。
+   * Téléchargement du NAS vers le staging de la plateforme (fs_download de la passerelle écrit côté passerelle dans dest_dir). Renvoie chemin local absolu + octets.
+   * Revue de sécurité P0-04 : le saved_to reçu de la passerelle n'est plus cru comme chemin de lecture — cru seulement si son realpath tombe dans le répertoire
+   * staging/downloads de ce NAS, sinon ignoré et résolu selon « le nom de dépôt attendu » ; contre une passerelle malveillante qui ferait sortir à la plateforme
+   * n'importe quel fichier local via son reçu. Lecture possible seulement après résolution des liens symboliques (realpath) restant dans la frontière.
    */
   async downloadFile(id: string, path: string, actor: NasFsActor, opts?: NasFsCallOptions): Promise<{ localFile: string; bytes: number; savedTo?: string }> {
     const nas = this.requireNas(id)
@@ -373,8 +373,8 @@ export class NasRegistryService extends Service {
   }
 
   /**
-   * 批量上传（保留目录结构）：files = [{ relativePath, contentBase64 | localPath }]
-   * 顺序调用 fs_upload（NAS 端 create_parents 即可建链），返回每项的最终路径/字节数。
+   * Upload en lot (structure de répertoires conservée) : files = [{ relativePath, contentBase64 | localPath }]
+   * appels séquentiels à fs_upload (create_parents côté NAS suffit à créer la chaîne), renvoie chemin final/octet de chaque élément.
    */
   async uploadMany(id: string, items: Array<{ relativePath: string; contentBase64?: string; localPath?: string }>, destDir: string, actor: NasFsActor, opts?: NasFsCallOptions): Promise<{ uploaded: Array<{ path: string; sizeBytes: number }>; failed: Array<{ relativePath: string; error: string }> }> {
     const uploaded: Array<{ path: string; sizeBytes: number }> = []
@@ -399,7 +399,7 @@ export class NasRegistryService extends Service {
     return { uploaded, failed }
   }
 
-  /** 解析网关 fs_download 落盘的本地文件绝对路径（不重新调用网关），给 HTTP 层 streamReadFile 使用。 */
+  /** Résout le chemin local absolu du fichier déposé par fs_download de la passerelle (sans rappeler la passerelle), pour streamReadFile de la couche HTTP. */
   async resolveDownloadedFile(id: string, path: string): Promise<{ localFile: string; bytes: number }> {
     const nas = this.requireNas(id)
     const dir = join(this.stagingDir(nas), 'downloads')
@@ -416,7 +416,7 @@ export class NasRegistryService extends Service {
     return { localFile: candidate, bytes }
   }
 
-  // -- Skill 包存储配置 -----------------------------------------------------
+  // -- Configuration du stockage des paquets Skill -----------------------------------------------------
 
   getSkillStorage(): SkillStorageConfigRecord {
     return this.skillStorage().get('singleton')
@@ -424,8 +424,8 @@ export class NasRegistryService extends Service {
   }
 
   setSkillStorage(patch: { mode?: 'local' | 'nas'; nasId?: string; basePath?: string }, actor: string): SkillStorageConfigRecord {
-    // REL-06：mode 枚举收口——只接受小写 local/nas（与运行时 mode!=='nas' 判定一致）；
-    // 此前 "NAS"/任意串都能入库，运行时静默回落本地存储
+    // REL-06 : fermeture de l'énumération mode — n'accepte que local/nas minuscules (cohérent avec le jugement runtime mode!=='nas') ;
+    // auparavant "NAS"/une chaîne quelconque pouvait entrer en base, et le runtime retombait silencieusement sur le stockage local
     if (patch.mode !== undefined && patch.mode !== 'local' && patch.mode !== 'nas') {
       throw new Error(t('非法的存储模式：{value}（只允许 local 或 nas）', { value: String(patch.mode) }))
     }
@@ -448,7 +448,7 @@ export class NasRegistryService extends Service {
     return this.skillStorage().insert(next)
   }
 
-  // -- 内部 -----------------------------------------------------------------
+  // -- Interne -----------------------------------------------------------------
 
   private requireNas(id: string): ResourceEntity {
     const nas = this.ctx.resourceCore.get('nas', id)
@@ -480,8 +480,8 @@ export class NasRegistryService extends Service {
 
   private async fsCall(id: string, tool: string, args: Record<string, unknown>, meter?: { actor?: NasFsActor; bytes?: number; timeoutMs?: number; onBehalf?: boolean }, opts?: NasFsCallOptions): Promise<unknown> {
     const nas = this.requireOnline(id)
-    // D15：serviceSubject 仅受信任内部路径可用（服务端代码显式传入，如 workforce 岗位适配器）——
-    // 以网关令牌绑定的岗位服务主体执行：不带 X-On-Behalf-User，不借用任何真人数据权限。
+    // D15 : serviceSubject n'est disponible que pour un chemin interne de confiance (passé explicitement par du code serveur, ex. adaptateur de poste workforce) —
+    // exécution sous le principal de service de poste lié au jeton de passerelle : sans X-On-Behalf-User, sans emprunt de permissions de données d'un humain.
     const serviceSubject = typeof opts?.serviceSubject === 'string' && opts.serviceSubject.trim() !== '' ? opts.serviceSubject.trim() : undefined
     const onBehalf = serviceSubject ? {} : (meter?.onBehalf === false ? {} : this.onBehalfHeaders(meter?.actor))
     const raw = await this.clientFor(nas).call(tool, args, {
@@ -493,13 +493,13 @@ export class NasRegistryService extends Service {
   }
 
   /**
-   * X-On-Behalf-User 解析（dev-plan-nas-authz §2.4 / P0-2 教训）：真实用户身份只经请求头
-   * 透传给网关，绝不进网关工具参数。优先钉钉 userId（identityLinks 事实源反查），否则平台 userId。
-   * 机器/工具自身调用（无真实用户或 actor 非账号标识，如内部系统中文名）不带该头——
-   * 网关以令牌绑定身份为准（防伪造），且 HTTP 头仅收 ByteString。
-   * D15 收紧：actor.kind === 'machine' 一律不带该头——机器 principal ID 绝不当真人透传；
-   * on-behalf 仅当调用链确有已验证真人（kind==='human'，或 OBO 链真人终点且现有验证逻辑认可）。
-   * kind 缺省（存量内部调用方，如控制台 REST / skillhub 服务身份）保持原有判定不变。
+   * Résolution X-On-Behalf-User (dev-plan-nas-authz §2.4 / leçon P0-2) : l'identité de l'utilisateur réel n'est transmise à la passerelle
+   * que par en-tête de requête, jamais dans les paramètres d'outils de la passerelle. Priorité au userid DingTalk (recherche inverse sur la source de fait identityLinks), sinon le userId plateforme.
+   * Les appels machine/de l'outil lui-même (sans utilisateur réel, ou actor non identifiant de compte, ex. nom chinois d'un système interne) ne portent pas l'en-tête —
+   * la passerelle fait foi de l'identité liée au jeton (anti-falsification), et un en-tête HTTP n'accepte que des ByteString.
+   * Resserrement D15 : actor.kind === 'machine' ne porte jamais l'en-tête — un ID de principal machine n'est jamais transmis comme un humain ;
+   * on-behalf seulement si la chaîne d'appel a vraiment un humain vérifié (kind==='human', ou terminal humain de la chaîne OBO reconnu par la logique de vérification existante).
+   * kind par défaut (appelants internes existants, ex. service d'identité REST console/skillhub) conserve le jugement d'origine.
    */
   private onBehalfHeaders(actor?: NasFsActor): Record<string, string> {
     if (!actor?.id) return {}
@@ -512,13 +512,13 @@ export class NasRegistryService extends Service {
         const link = this.ctx.iam.identityLinks().findOne((item) => item.userId === user.id && item.provider === 'dingtalk')
         return { 'X-On-Behalf-User': link ? link.providerUserId : user.id }
       }
-    } catch { /* IAM 不可用时不带身份头（fail-closed 由网关侧兜底） */ }
-    // 未落库的裸标识：仅 ASCII 可打印字符才可作头值（中文姓名等非账号标识一律不透传）
+    } catch { /* IAM indisponible : pas d'en-tête d'identité (fail-closed garanti côté passerelle) */ }
+    // Identifiant nu non en base : seuls les caractères ASCII imprimables peuvent servir de valeur d'en-tête (les noms chinois et autres non-identifiants de compte ne sont jamais transmis)
     if (!/^[\x21-\x7e]+$/.test(rawId)) return {}
     return { 'X-On-Behalf-User': rawId }
   }
 
-  /** 计量管道（观测补齐）：全部文件操作进 usage 事件（nas:* 默认零费率，失败只告警不阻断）。 */
+  /** Pipeline de metering (complément d'observation) : toutes les opérations de fichiers entrent dans les événements usage (nas:* tarif nul par défaut, échec = alerte seule, pas d'interruption). */
   private meterFsUsage(nas: ResourceEntity, meter?: { actor?: NasFsActor; bytes?: number }, serviceSubject?: string): void {
     try {
       this.ctx.usage.record({
@@ -539,9 +539,9 @@ export class NasRegistryService extends Service {
     }
   }
 
-  /** 平台路径 → 真实网关契约的"绝对路径"（dsm 完整路径，如 /video/folder），并收敛到授权根路径内。
-   *  真实 synology-filestation 网关以 `/volume1/<share>/<sub>` 形态传递，本平台取"平台路径"
-   *  直接作为 DSM 路径（rootPath 默认 "/" 与网关 share 列表根等价）。 */
+  /** Chemin de plateforme → « chemin absolu » du vrai contrat de passerelle (chemin complet DSM, ex. /video/folder), resserré dans le chemin racine autorisé.
+   *  La vraie passerelle synology-filestation transmet sous la forme `/volume1/<share>/<sub>` ; la plateforme prend le « chemin de plateforme »
+   *  directement comme chemin DSM (rootPath par défaut "/" équivaut à la racine de la liste de partages de la passerelle). */
   private toFullPath(id: string, path: string): string {
     const nas = this.requireNas(id)
     const normalized = normalize(`/${path}`).replace(/\\/g, '/').replace(/\/+$/, '') || '/'
@@ -556,7 +556,7 @@ export class NasRegistryService extends Service {
     return root === '/' ? `/${segments.join('/')}` : normalized
   }
 
-  /** 解析创建目录所需的「父目录绝对路径 + 文件名」并保证在 rootPath 内。 */
+  /** Résout « le chemin absolu du répertoire parent + nom de fichier » requis pour créer un répertoire, en garantissant l'intérieur du rootPath. */
   private parentAndName(id: string, path: string): { parent: string; name: string } {
     const full = this.toFullPath(id, path)
     const segments = full.split('/').filter(Boolean)
@@ -588,7 +588,7 @@ export class NasRegistryService extends Service {
   }
 }
 
-// opsStorage 集合类型的本地别名（避免与服务名冲突的轻量声明）
+// Alias local des types de collections opsStorage (déclaration légère évitant le conflit avec le nom de service)
 interface CollectionLike<T extends RecordBase> {
   get(id: string): T | undefined
   findOne(predicate: (item: T) => boolean): T | undefined
@@ -606,7 +606,7 @@ function parseMaybeJson(text: string): unknown {
   }
 }
 
-/** 兼容网关返回：单字符串块 / 数组块 / 嵌套 JSON；从数组/对象中提取首个 JSON 文本。 */
+/** Compatibilité avec les retours de passerelle : bloc chaîne unique / blocs en tableau / JSON imbriqué ; extrait le premier texte JSON du tableau/objet. */
 function extractFirstJson(result: unknown): Record<string, unknown> | undefined {
   if (!result) return undefined
   if (typeof result === 'object' && !Array.isArray(result)) return result as Record<string, unknown>
@@ -617,7 +617,7 @@ function extractFirstJson(result: unknown): Record<string, unknown> | undefined 
 }
 
 // ---------------------------------------------------------------------------
-// 插件
+// Extension
 // ---------------------------------------------------------------------------
 
 declare module '@deepseek-ai/cordis' {

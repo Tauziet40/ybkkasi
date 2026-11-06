@@ -1,15 +1,15 @@
 /**
- * 接入宿主端点：远程 dsh 运行时（插件市场安装形态）向本平台申请凭证的管理面。
+ * Endpoints d'accès côté hôte : plan de gestion par lequel le runtime dsh distant (forme installée via le marché de plugins) demande ses identifiants à cette plateforme.
  *
- * 流程（对应 docs/deploy-enterprise.md 形态 C）：
- *   1. 管理员在控制台/CLI 创建一次性接入码（TTL + 权限模板）
- *   2. 远程电脑 dsh 安装插件后，Agent 调 connect_setup 或打开本地配置页，
- *      以接入码调 POST /api/connect/enroll 换取机器凭证（clientId/clientSecret）
- *   3. 客户端以机器凭证走 client-credentials 换机器令牌，工具调用全部经
- *      /api/tools/execute 在宿主侧执行（权限按模板快照收敛）
+ * Déroulé (correspond à la forme C de docs/deploy-enterprise.md) :
+ *   1. l'admin crée dans la console/CLI un code d'accès à usage unique (TTL + gabarit de permissions)
+ *   2. une fois l'extension installée sur le dsh de l'ordinateur distant, l'Agent appelle connect_setup ou ouvre la page de configuration locale,
+ *      et échange le code d'accès via POST /api/connect/enroll contre des identifiants machine (clientId/clientSecret)
+ *   3. le client échange ses identifiants machine via client-credentials contre un jeton machine, tous les appels d'outils passent par
+ *      /api/tools/execute et s'exécutent côté hôte (permissions resserrées selon l'instantané du gabarit)
  *
- * 安全基线：接入码只存哈希（创建时一次性展示）、一次性消费、TTL 默认 15 分钟、
- * 按 来源 IP 接入宿主既有失败锁定（15 分钟窗口 5 次锁定）、全程审计。
+ * Base de sécurité : les codes d'accès ne sont stockés que hachés (affichage unique à la création), consommation à usage unique, TTL par défaut 15 minutes,
+ * verrouillage d'échec existant de l'hôte d'accès par IP d'origine (verrouillage après 5 échecs sur une fenêtre de 15 minutes), audit de bout en bout.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { generateSecret, mask, newId, sha256Hex, PlatformEvents, type Collection, type RecordBase } from '../../platform-core/src/index.ts'
@@ -17,7 +17,7 @@ import { t as translate } from '../../platform-i18n/src/index.ts'
 import { PermissionCatalog } from '../../plugin-iam/src/index.ts'
 import { defineTool } from '../../platform-core/src/index.ts'
 
-/** 接入码记录（code 仅存哈希，创建时一次性返回明文）。 */
+/** Enregistrement de code d'accès (le code n'est stocké que haché, la forme claire n'est renvoyée qu'une fois à la création). */
 export interface EnrollCodeRecord extends RecordBase {
   codeHash: string
   codeMask: string
@@ -31,7 +31,7 @@ export interface EnrollCodeRecord extends RecordBase {
   revokedAt?: string
 }
 
-/** 已接入客户端登记（principalId 关联 authn 机器身份）。 */
+/** Enregistrement des clients connectés (principalId rattaché à l'identité machine authn). */
 export interface ConnectClientRecord extends RecordBase {
   principalId: string
   clientId: string
@@ -42,9 +42,9 @@ export interface ConnectClientRecord extends RecordBase {
   enrolledBy: string
   enrolledAt: string
   status: 'active' | 'disabled'
-  /** 最近一次心跳时间（客户端接入后周期性主动上报，宿主侧做接入资产存活监测）。 */
+  /** Horodatage du dernier battement de cœur (poussée périodique du client après connexion, pour la supervision de survie des actifs d'accès côté hôte). */
   lastHeartbeatAt?: string
-  /** 心跳携带的运行元信息（客户端自报，未校验口径，仅作观测展示）。 */
+  /** Métadonnées d'exécution transportées par le battement (déclarées par le client, non vérifiées, affichage d'observation uniquement). */
   heartbeat?: { tools?: number; version?: string; uptimeSec?: number }
 }
 
@@ -60,7 +60,7 @@ export interface TemplateSpec {
 const DEFAULT_TTL_MINUTES = 15
 const MAX_TTL_MINUTES = 24 * 60
 
-/** 权限模板：接入码创建时快照语义，enroll 时按当前权限目录解析为具体权限点。 */
+/** Gabarits de permissions : sémantique d'instantané prise à la création du code d'accès, résolue en points de permission concrets lors de l'enroll selon le catalogue de permissions courant. */
 export function connectTemplates(): Array<Omit<TemplateSpec, 'scopes'>> {
   return [
     { name: 'readonly', label: translate('只读运维'), description: translate('全部查询类权限点（list/get/metrics/logs），适合只读巡检 Agent') },
@@ -72,7 +72,7 @@ export function connectTemplates(): Array<Omit<TemplateSpec, 'scopes'>> {
 
 export function templateScopes(template: TemplateName): string[] {
   if (template === 'full') return ['*']
-  // 工具桥需要 console.login；该权限也隐含 console.read（概览只读）。
+  // Le pont d'outils exige console.login ; cette permission implique aussi console.read (vue d'ensemble en lecture seule).
   if (template === 'executor') return ['console.login', 'exec.read', 'exec.write']
   const readPoints = PermissionCatalog.filter((item) => item.point.endsWith('.read') || item.point === 'console.login').map((item) => item.point)
   if (template === 'readonly') return readPoints
@@ -92,24 +92,24 @@ export function codesCollection(ctx: Context): Collection<EnrollCodeRecord> {
 }
 
 // ---------------------------------------------------------------------------
-// D13 归因观测（connect 转发路径：client.forward() → 宿主 /api/tools/execute）
+// Observation d'attribution D13 (chemin de transfert connect : client.forward() → hôte /api/tools/execute)
 // ---------------------------------------------------------------------------
 
-/** 多主体归因检测的短窗口长度：同一客户端凭证在该窗口内出现多个不同主体即告警一次。 */
+/** Durée de la fenêtre courte de détection d'attribution multi-principaux : une alerte si le même identifiant client présente plusieurs principaux distincts dans cette fenêtre. */
 const FORWARD_PRINCIPAL_WINDOW_MS = 60_000
 
-/** 每个客户端凭证一份窗口状态（进程内观测态，不落库；条目随窗口过期被替换，规模以接入客户端数为上界）。 */
+/** Un état de fenêtre par identifiant client (état d'observation en processus, non persisté ; les entrées sont remplacées à expiration de la fenêtre, taille bornée par le nombre de clients connectés). */
 const forwardPrincipalWindows = new Map<string, { windowStart: number; seen: Set<string> }>()
 
 /**
- * 共享接入客户端多主体归因风险检测（D13/观测，不阻断）：
- * 接入客户端转发工具调用时以 meta.principal 信封透传主体绑定（见 client.forward）；宿主工具桥侧
- * 消费本函数——同一客户端凭证短窗口内出现多个不同 principalId（共享凭证承载多员工/多运行时）
- * → logger.warn 中文提示「归因风险」。仅观测：不阻断调用、不参与鉴权（鉴权仍以 Bearer 令牌
- * 服务端验证为唯一事实），无观测也不伪造执行归属（技术健康与业务进展分维度，D13）。
- * @param logger 带 warn 的日志面（cordis ctx.logger('connect') 结构化满足即可）
- * @param clientPrincipalId 宿主侧 Bearer 令牌验证出的客户端机器主体（唯一鉴权事实）
- * @param forwardedPrincipalId 转发信封申报的主体（仅作归因观测，缺省回落客户端主体本身）
+ * Détection du risque d'attribution multi-principaux sur un client d'accès partagé (D13/observation, sans blocage) :
+ * lors du transfert d'un appel d'outil, le client d'accès transmet la liaison de principal via l'enveloppe meta.principal (voir client.forward) ; le pont d'outils côté hôte
+ * consomme cette fonction — un même identifiant client présentant plusieurs principalId distincts dans une fenêtre courte (identifiants partagés portant plusieurs employés/runtimes)
+ * → logger.warn « risque d'attribution ». Observation seule : pas de blocage de l'appel, pas de participation à l'autorisation (l'authentification reste uniquement fondée sur la vérification
+ * serveur du jeton Bearer), et sans observation aucune attribution d'exécution n'est fabriquée (santé technique et avancement métier sont des dimensions distinctes, D13).
+ * @param logger façade de log dotée de warn (la forme structurée de cordis ctx.logger('connect') convient)
+ * @param clientPrincipalId principal machine du client vérifié côté hôte via le jeton Bearer (seul fait d'authentification)
+ * @param forwardedPrincipalId principal déclaré par l'enveloppe de transfert (observation d'attribution uniquement ; à défaut, retombe sur le principal du client lui-même)
  */
 export function noteForwardedPrincipal(
   logger: { warn: (message: string, ...args: unknown[]) => void },
@@ -125,7 +125,7 @@ export function noteForwardedPrincipal(
     return
   }
   entry.seen.add(claimed)
-  // 恰好到 2 个不同主体时告警一次（窗口内不重复刷屏；窗口过期后重建会再次允许首个新主体告警）
+  // Alerte une unique fois quand on atteint exactement 2 principaux distincts (pas de répétition dans la fenêtre ; après expiration, la fenêtre reconstruite autorise à nouveau une alerte pour le premier nouveau principal)
   if (entry.seen.size === 2) {
     logger.warn(
       `归因风险提示：同一接入客户端凭证（${clientPrincipalId}）在 ${Math.round(FORWARD_PRINCIPAL_WINDOW_MS / 1000)} 秒窗口内出现多个不同主体（${[...entry.seen].join('、')}），`
@@ -141,17 +141,17 @@ export function clientsCollection(ctx: Context): Collection<ConnectClientRecord>
 }
 
 // ---------------------------------------------------------------------------
-// REST 装配（挂载在宿主 httpServer 上；除 enroll 外均由 console 鉴权中间件保护）
+// Assemblage REST (monté sur le httpServer de l'hôte ; tout sauf enroll est protégé par le middleware d'authentification console)
 // ---------------------------------------------------------------------------
 
-/** 客户端定位：登记记录 ID 或机器凭证 clientId（mc- 开头）均可。 */
+/** Localisation du client : aussi bien l'ID de l'enregistrement que le clientId des identifiants machine (préfixe mc-). */
 function findClient(ctx: Context, key: string): ConnectClientRecord | undefined {
   const clients = clientsCollection(ctx)
   return clients.get(key) ?? clients.findOne((item) => item.clientId === key)
 }
 
 export interface ConnectHostApiConfig {
-  /** enroll 端点对外的展示信息。 */
+  /** Informations de présentation exposées par l'endpoint enroll. */
   hubName?: string
   hubVersion?: string
 }
@@ -176,7 +176,7 @@ export const connectHostApi = {
       return false
     }
 
-    // -- 接入码换机器凭证（公开端点，接入码本身即凭证；按 IP 失败锁定） ---------
+    // -- Échange du code d'accès contre des identifiants machine (endpoint public, le code d'accès sert lui-même d'identifiant ; verrouillage d'échec par IP) ---------
     http.register('POST', '/api/connect/enroll', async (exchange) => {
       const input = (exchange.body ?? {}) as { enrollmentCode?: string; clientName?: string; meta?: { hostname?: string; platform?: string; node?: string } }
       const code = (input.enrollmentCode ?? '').trim()
@@ -243,7 +243,7 @@ export const connectHostApi = {
       })
     }, { access: 'public', selfValidated: true })
 
-    // -- 客户端心跳（接入方主动推送存活/运行元信息；高频不入审计，避免刷爆日志） ----
+    // -- Battement de cœur du client (poussée active de survie/métadonnées d'exécution par le côté accès ; haute fréquence hors audit pour ne pas noyer les logs) ----
     http.register('POST', '/api/connect/heartbeat', (exchange) => {
       const info = exchange.principal as { principalId?: string } | undefined
       if (!info?.principalId) { exchange.fail(401, 'UNAUTHORIZED', translate('缺少 Bearer 令牌')); return }
@@ -261,7 +261,7 @@ export const connectHostApi = {
       exchange.ok({ ok: true, clientId: client.clientId, template: client.template })
     }, { access: 'authenticated' })
 
-    // -- 接入码管理 ----------------------------------------------------------
+    // -- Gestion des codes d'accès ----------------------------------------------------------
     http.register('POST', '/api/connect/codes', (exchange) => {
       if (!requireManage(exchange)) return
       const input = (exchange.body ?? {}) as { template?: string; ttlMinutes?: number; remark?: string }
@@ -317,7 +317,7 @@ export const connectHostApi = {
       exchange.ok({ id: record.id, status: 'revoked' })
     }, { access: 'guarded', permission: 'connect.manage' })
 
-    // -- 已接入客户端管理 -----------------------------------------------------
+    // -- Gestion des clients connectés -----------------------------------------------------
     http.register('GET', '/api/connect/clients', (exchange) => {
       if (!requireManage(exchange)) return
       const clients = clientsCollection(ctx).all()
@@ -379,7 +379,7 @@ export const connectHostApi = {
 }
 
 // ---------------------------------------------------------------------------
-// 宿主侧对模型暴露的工具（dsh Agent 在宿主侧用自然语言管理接入）
+// Outils exposés au modèle côté hôte (l'Agent dsh gère les accès en langage naturel côté hôte)
 // ---------------------------------------------------------------------------
 
 export const connectHostTools = {

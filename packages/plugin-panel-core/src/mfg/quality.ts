@@ -1,32 +1,32 @@
 /**
- * 制造工具箱 —— Skill 放行门禁与执行期质量检查（自「制造业 AI 工具集」server/quality.ts 并入）。
+ * Boîte à outils manufacture — passe de libération des Skills et contrôles qualité à l'exécution (intégrée depuis « jeu d'outils IA manufacture » server/quality.ts).
  *
- * 源项目铁律（docs/skill-quality.md，并入后语义不变）：
- *   1. 配了模型 ≠ 开放 AI 工具。必须真实模型评估 → 领域人员审阅 → 版本放行，三步齐全才可普通调用；
- *   2. 自动结构/引文检查不等于专业结论正确，报告里如实写明；
- *   3. 质量检查不合格一律按错误交付（502），绝不降级成「看起来成功」的结果。
+ * Lois d'airain du projet source (docs/skill-quality.md, sémantique inchangée après intégration) :
+ *   1. avoir configuré un modèle ≠ ouvrir les outils IA. Il faut vraie évaluation par modèle → revue par un métier → libération versionnée, les trois pas réunis avant l'appel ordinaire ;
+ *   2. les contrôles automatiques structure/citations ne valent pas justesse d'un jugement professionnel, le rapport le dit honnêtement ;
+ *   3. tout échec de contrôle qualité est livré en erreur (502), jamais rétrogradé en résultat « en apparence réussi ».
  *
- * 并入改编点（平台化，登记于 docs/plan-mfg-toolkit-fusion-20261019.md）：
- *   - 放行记录从源项目 `.local/quality/releases.json` 文件改为面板存储集合（ReleaseStore 接口，
- *     由 index.ts 用 opsStorage 实现；测试用内存实现）——平台形态下无「本机 .local」概念；
- *   - 源项目的「协议维度」（openai/anthropic 各一套放行）收敛为平台模型标识维度：模型选择、
- *     密钥与出站现在由平台模型网关（modelgw / dsh llm 桥）拥有，面板不再持协议配置；
- *   - 评估执行的调用面从源项目自带 env 客户端改为平台模型网关（见 evaluate.ts），
- *     面板不持有任何密钥（源项目「密钥只在服务端」的边界在平台形态下进一步收紧为「密钥只在平台」）。
+ * Points d'adaptation de l'intégration (mise en forme plateforme, consignés dans docs/plan-mfg-toolkit-fusion-20261019.md) :
+ *   - l'enregistrement de libération passe du fichier `.local/quality/releases.json` du projet source à une collection de stockage du panneau (interface ReleaseStore,
+ *     implémentée par index.ts avec opsStorage ; implémentation mémoire pour les tests) — en forme plateforme, plus de notion de « .local local » ;
+ *   - la « dimension protocole » du projet source (une libération par openai/anthropic) converge vers la dimension identifiant de modèle de la plateforme : choix du modèle,
+ *     clés et sortie appartiennent désormais à la passerelle de modèles (modelgw / pont llm dsh), le panneau ne détient plus de configuration de protocole ;
+ *   - la face d'appel de l'évaluation passe du client env du projet source à la passerelle de modèles de la plateforme (voir evaluate.ts),
+ *     le panneau ne détient aucune clé (la frontière « clés seulement côté serveur » du projet source est resserrée en forme plateforme en « clés seulement dans la plateforme »).
  */
 import { createHash } from 'node:crypto'
 import { skills } from './skills.ts'
 import { checkModelOutputSchema, fail, type ModelOutput } from './validate.ts'
 
-/** Skill 内容指纹：内核改动即指纹变化 → 既有放行立即失效。 */
+/** Empreinte du contenu du Skill : changer le noyau change l'empreinte → la libération existante est immédiatement invalidée. */
 export const skillHash = (id: string): string =>
   createHash('sha256').update(JSON.stringify(skills[id] ?? null)).digest('hex')
 
-/** 模型标识指纹：模型名或服务地址变化即指纹变化 → 既有放行立即失效。 */
+/** Empreinte de l'identifiant du modèle : changer le nom du modèle ou l'adresse de service change l'empreinte → la libération existante est immédiatement invalidée. */
 export const modelIdentityHash = (identity: { model: string; endpoint?: string }): string =>
   createHash('sha256').update(JSON.stringify({ model: identity.model, endpoint: identity.endpoint ?? '' })).digest('hex')
 
-/** 放行记录：报告指纹 + Skill 指纹 + 模型指纹 + 审核人 + 期限（任一不符即失效）。 */
+/** Enregistrement de libération : empreinte de rapport + empreinte Skill + empreinte modèle + réviseur + échéance (toute divergence = invalidation). */
 export type SkillRelease = {
   skillId: string
   skillHash: string
@@ -38,7 +38,7 @@ export type SkillRelease = {
   expiresAt: string
 }
 
-/** 真实模型评估报告：live=false 的 mock 报告永远不足以放行。 */
+/** Rapport d'évaluation sur vrai modèle : un rapport mock live=false ne suffit jamais à libérer. */
 export type EvalReport = {
   skillId: string
   skillHash: string
@@ -53,7 +53,7 @@ export type EvalReport = {
   finishedAt: string
 }
 
-/** 放行记录存储面（index.ts 以 opsStorage 集合实现；测试用内存实现）。 */
+/** Face de stockage des enregistrements de libération (index.ts l'implémente avec une collection opsStorage ; implémentation mémoire pour les tests). */
 export interface ReleaseStore {
   get(skillId: string): SkillRelease | undefined
   put(release: SkillRelease): void
@@ -61,7 +61,7 @@ export interface ReleaseStore {
   list(): SkillRelease[]
 }
 
-/** 内存实现（单测与无存储形态）。 */
+/** Implémentation mémoire (tests unitaires et forme sans stockage). */
 export class MemoryReleaseStore implements ReleaseStore {
   private map = new Map<string, SkillRelease>()
   get(skillId: string): SkillRelease | undefined { return this.map.get(skillId) }
@@ -70,12 +70,12 @@ export class MemoryReleaseStore implements ReleaseStore {
   list(): SkillRelease[] { return [...this.map.values()] }
 }
 
-/** 默认放行期（源项目同为 30 天）。 */
+/** Durée de libération par défaut (30 jours aussi dans le projet source). */
 export const RELEASE_TTL_DAYS = 30
 
 /**
- * 放行判定（fail-closed）：报告指纹、真实调用标记、通过状态、Skill 指纹、模型指纹、审核人、
- * 期限——任一不满足即未放行。这是「配了模型也不自动开放」的运行时强制点。
+ * Jugement de libération (fail-closed) : empreinte de rapport, marque d'appel réel, statut de passage, empreinte Skill, empreinte modèle, réviseur,
+ * échéance — tout manquement = non libéré. C'est le point de contrainte à l'exécution de « configurer un modèle n'ouvre pas automatiquement ».
  */
 export function releaseReady(
   store: ReleaseStore,
@@ -94,8 +94,8 @@ export function releaseReady(
 }
 
 /**
- * 由评估报告 + 审核人签署生成放行记录。
- * 拒绝面（与源项目 approve-skill 等价）：报告未通过、非真实调用、指纹不符、重复次数不足、审核人为空。
+ * Génère un enregistrement de libération à partir du rapport d'évaluation + signature du réviseur.
+ * Faces de refus (équivalent d'approve-skill du projet source) : rapport non passé, appel non réel, empreinte divergente, répétitions insuffisantes, réviseur vide.
  */
 export function buildRelease(
   report: EvalReport,
@@ -122,7 +122,7 @@ export function buildRelease(
   }
 }
 
-/** 输出门禁提示词（与源项目逐字一致：固定章节 + 逐字证据 + 待确认项 + 禁 HTML）。 */
+/** Prompt de la passe de sortie (mot pour mot comme le projet source : sections fixes + preuves littérales + points à confirmer + HTML interdit). */
 export function qualityInstructions(skillId: string): string {
   const skill = skills[skillId]
   if (!skill) fail('SKILL_NOT_FOUND', `未找到工具对应的 Skill：${skillId}`, 404)
@@ -130,8 +130,8 @@ export function qualityInstructions(skillId: string): string {
 }
 
 /**
- * 执行期输出检查（源项目 checkModelOutput 等价）：结构 → 章节齐全与顺序 → 引文可在输入中定位
- * → 禁止 HTML。任何一项不合格抛 502，结果不交付。
+ * Contrôle de sortie à l'exécution (équivalent du checkModelOutput du projet source) : structure → sections complètes et ordonnées → citations localisables dans l'entrée
+ * → HTML interdit. Toute non-conformité lève 502, le résultat n'est pas livré.
  */
 export function checkModelOutput(skillId: string, raw: unknown, source: string): ModelOutput {
   const parsed = checkModelOutputSchema(raw)

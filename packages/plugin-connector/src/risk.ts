@@ -1,29 +1,29 @@
 /**
- * riskLevel 启发式映射（计划书 §2.4 P2 修正⑭）+ 声明式风险目录覆盖（R6，
- * 吸收 paperclip app-definitions 声明式目录模式）：
- * open-connector action 本体无 risk 字段——优先采用 catalog/risk-overrides.json
- * 声明目录（gen-connector-catalog.mjs 生成 RISK_OVERRIDES 常量），
- * 无声明时按 requiredScopes/providerPermissions + action 名称启发式映射；
- * 无法判定的默认 admin 兜底 fail-closed。
+ * Mise en correspondance heuristique des riskLevel (plan §2.4 correctif P2 ⑭) + couverture par catalogue déclaratif de risques (R6,
+ * absorbe le modèle de catalogue déclaratif de paperclip app-definitions) :
+ * l'action open-connector n'a pas de champ risk en soi — on privilégie le catalogue déclaratif
+ * catalog/risk-overrides.json (gen-connector-catalog.mjs génère la constante RISK_OVERRIDES),
+ * à défaut, mise en correspondance heuristique selon requiredScopes/providerPermissions + nom de l'action ;
+ * les cas indécidables retombent par défaut sur admin en fail-closed.
  */
 
 import { RISK_OVERRIDES } from './risk-overrides.generated.ts'
 
 export type RiskLevel = 'read' | 'write' | 'admin'
 
-/** provider 分层（对齐 paperclip S2 分层）：本迭代仅声明与展示，S2 审批联动后续迭代。 */
+/** Étage provider (aligné sur l'étagement S2 de paperclip) : déclaration et affichage seulement dans cette itération, couplage approbation S2 à venir. */
 export type RiskTier = 'S1' | 'S2'
 
-/** 声明式目录单 provider 条目（risk-overrides.json 生成物的元素类型）。 */
+/** Entrée de catalogue déclaratif pour un provider (type d'élément du généré risk-overrides.json). */
 export interface RiskOverrideEntry {
-  /** 未在 actions 中显式声明的 action 的回落风险级（必填）。 */
+  /** Niveau de risque de repli pour les actions non explicitement déclarées dans actions (obligatoire). */
   defaultRisk: RiskLevel
-  /** S1=低风险常规连接（只读为主）；S2=高敏连接（写/管理面、资金/权限/组织变更类）。 */
+  /** S1 = connexion conventionnelle à bas risque (surtout lecture) ; S2 = connexion haute sensibilité (écriture/plan de gestion, ordres de type fonds/droits/organisation). */
   riskTier: RiskTier
   actions: Record<string, RiskLevel>
 }
 
-/** 声明式风险目录：service → 覆盖声明。 */
+/** Catalogue déclaratif de risques : service → déclaration de couverture. */
 export type RiskOverrides = Record<string, RiskOverrideEntry>
 
 export const RISK_RANK: Record<RiskLevel, number> = { read: 0, write: 1, admin: 2 }
@@ -55,7 +55,7 @@ function scopeStrings(input: RiskInputLike): string[] {
   ].map((item) => String(item))
 }
 
-/** 目录同步与授权链共用的风险分级入口。显式 riskLevel 存在时直接采信（前向兼容上游加字段）。 */
+/** Entrée partagée par la synchronisation du catalogue et la chaîne d'autorisation pour la gradation des risques. Un riskLevel explicite est retenu tel quel (compatibilité avant si l'amont ajoute le champ). */
 export function heuristicRiskLevel(action: RiskInputLike): RiskLevel {
   if ((action as { riskLevel?: unknown }).riskLevel === 'read' || (action as { riskLevel?: unknown }).riskLevel === 'write' || (action as { riskLevel?: unknown }).riskLevel === 'admin') {
     return (action as { riskLevel: RiskLevel }).riskLevel
@@ -79,10 +79,10 @@ function isRiskLevel(value: unknown): value is RiskLevel {
 }
 
 /**
- * 风险分级统一入口（R6 声明式目录）。优先级：
- *   action 显式 riskLevel > 声明目录 actions 级 > 声明目录 provider defaultRisk
- *   > heuristicRiskLevel 启发式（含 admin 兜底）。
- * service 取参（显式入参优先于 action.service）；声明命中后不再走启发式——声明即口径。
+ * Entrée unifiée de gradation des risques (catalogue déclaratif R6). Priorité :
+ *   riskLevel explicite de l'action > niveau actions du catalogue déclaré > defaultRisk du provider déclaré
+ *   > heuristique heuristicRiskLevel (avec dernier recours admin).
+ * Prise du paramètre service (l'entrée explicite prime sur action.service) ; après une déclaration atteinte, plus d'heuristique — la déclaration fait foi.
  */
 export function resolveRiskLevel(action: RiskInputLike, service?: string): RiskLevel {
   if (isRiskLevel((action as { riskLevel?: unknown }).riskLevel)) {
@@ -98,7 +98,7 @@ export function resolveRiskLevel(action: RiskInputLike, service?: string): RiskL
   return heuristicRiskLevel(action)
 }
 
-/** provider 风险分层读取（声明目录命中时返回 S1/S2，否则 undefined）。 */
+/** Lecture de l'étage de risque du provider (renvoie S1/S2 si le catalogue déclaré est atteint, sinon undefined). */
 export function riskTierOf(service: unknown): RiskTier | undefined {
   const svc = String(service ?? '').trim()
   return svc ? RISK_OVERRIDES[svc]?.riskTier : undefined

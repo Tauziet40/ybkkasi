@@ -1,5 +1,5 @@
 /**
- * skillhub 插件对模型暴露的工具。
+ * Outils exposés au modèle par l'extension skillhub.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '../../platform-core/src/index.ts'

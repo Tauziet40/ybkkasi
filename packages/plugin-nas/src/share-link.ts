@@ -1,16 +1,16 @@
 /**
- * NasShareLinkService —— NAS 签名分享链接（HMAC 签名 URL + 权限复核 + 可吊销）。
+ * NasShareLinkService — liens de partage signés NAS (URL signée HMAC + revérification de permissions + révocables).
  *
- * 设计依据：docs-20260921「NAS 下载链接签名化」交接清单（产品侧已拍板决策 ①②③）：
- * - 替代 10 分钟硬编码票据：档位 1h / 24h（默认）/ 7d / 30d / 永久；
- * - 决策 ①（泛化到全部档位）：签名用**独立长期密钥**（`nas-share-link-secret`），
- *   与 authn 令牌密钥完全解耦——令牌轮换不打穿长链接；轮换后旧密钥进**永久退役集合**
- *   （`nas-share-link-secret-history.json`）持续用于验签，已发链接不因运维动作失效；
- * - 无状态签名（exp/sub/jti 全在载荷里，重启不失效）+ 有状态吊销（nas:shareLinks 落库）；
- * - 取流三关 fail-closed：签名 → 吊销 → 权限复核（nasAuthz.check op='download'，以签发者身份）。
+ * Fondements : liste de passation docs-20260921 « signature des liens de téléchargement NAS » (décisions ①②③ entérinées côté produit) :
+ * - remplace le billet codé en dur de 10 minutes : paliers 1 h / 24 h (défaut) / 7 j / 30 j / permanent ;
+ * - décision ① (généralisée à tous les paliers) : la signature emploie une **clé longue durée dédiée** (`nas-share-link-secret`)
+ *   totalement découplée de la clé des jetons authn — la rotation des jetons ne perce pas les liens longs ; après rotation, l'ancienne clé entre dans l'**ensemble retraite permanente**
+ *   (`nas-share-link-secret-history.json`) et continue de servir à la vérification ; les liens déjà émis ne meurent pas d'une action d'exploitation ;
+ * - signature sans état (exp/sub/jti tous dans la charge, survit au redémarrage) + révocation avec état (nas:shareLinks en base) ;
+ * - trois barrières fail-closed pour prendre le flux : signature → révocation → revérification de permissions (nasAuthz.check op='download', sous l'identité de l'émetteur).
  *
- * 密钥 fail-closed 语义（决策 ①）：密钥文件缺失（首启）→ 生成并落盘；
- * 存在但不可读/不可写 → 进入故障态，签发响亮报错（KEY_UNAVAILABLE），绝不静默换新密钥。
+ * Sémantique fail-closed de la clé (décision ①) : fichier de clé absent (premier démarrage) → génération et écriture ;
+ * présent mais illisible/non inscriptible → état de panne, l'émission échoue bruyamment (KEY_UNAVAILABLE), jamais de nouvelle clé en silence.
  */
 import { createHmac } from 'node:crypto'
 import { existsSync } from 'node:fs'
@@ -24,22 +24,22 @@ import { NasAuthzService, type ShareLinkPolicy } from './authz.ts'
 import { normalizePath } from './authz/engine.ts'
 
 // ---------------------------------------------------------------------------
-// 数据模型与档位
+// Modèle de données et paliers
 // ---------------------------------------------------------------------------
 
-/** 签发记录（nas:shareLinks，durable：吊销返回 200 后崩溃不得丢失）。id 即 jti。 */
+/** Enregistrement d'émission (nas:shareLinks, durable : une révocation renvoyant 200 puis un crash ne doit rien perdre). L'id est le jti. */
 export interface ShareLinkRecord extends RecordBase {
   nasId: string
   path: string
-  /** 签发者 principal（审计主体；取流 actor 复用）。 */
+  /** Principal émetteur (sujet d'audit ; réutilisé comme actor à la prise de flux). */
   principalId: string
-  /** 签发者 userId（权限复核身份）；机器身份不可签发，恒有值。 */
+  /** userId de l'émetteur (identité de la revérification de permissions) ; une identité machine ne peut pas émettre, toujours renseigné. */
   userId: string
   userName: string
   mode: 'link'
-  /** ISO 时间；永久链接存 null（UI/审计显式标注「永久」，不留歧义）。 */
+  /** Temps ISO ; lien permanent = null (l'UI/l'audit marque explicitement « permanent », sans ambiguïté). */
   expiresAt: string | null
-  /** 签发时使用的长期密钥标识（sha256(secret) 前 12 位；支撑轮换后定向定位受影响链接）。 */
+  /** Identifiant de la clé longue durée employée à l'émission (12 premiers caractères de sha256(secret) ; permet de localiser les liens affectés après rotation). */
   keyId: string
   note?: string
   revokedAt?: string
@@ -51,7 +51,7 @@ export interface ShareLinkRecord extends RecordBase {
 
 export type ShareLinkTier = '1h' | '24h' | '7d' | '30d' | 'permanent' | 'custom'
 
-/** 档位预设（决策 ②：默认 24h；30 天与永久属显式选择，不预选、不兜底）。 */
+/** Préréglages de paliers (décision ② : défaut 24 h ; 30 jours et permanent relèvent d'un choix explicite, ni présélection ni repli). */
 export const SHARE_LINK_TTL_PRESETS: Array<{ tier: ShareLinkTier; ttlSec: number; label: string }> = [
   { tier: '1h', ttlSec: 3600, label: '1 小时' },
   { tier: '24h', ttlSec: 86400, label: '24 小时' },
@@ -59,14 +59,14 @@ export const SHARE_LINK_TTL_PRESETS: Array<{ tier: ShareLinkTier; ttlSec: number
   { tier: '30d', ttlSec: 2592000, label: '30 天' },
 ]
 
-/** 策略默认值（决策 ②③：上限 30 天；永久默认关，开启后限 permanentPermission 持有者）。 */
+/** Valeurs par défaut de politique (décisions ②③ : plafond 30 jours ; permanent fermé par défaut, ouvert il est limité aux détenteurs de permanentPermission). */
 export const DEFAULT_SHARE_LINK_POLICY: ShareLinkPolicy = {
   maxTtlSec: 2592000,
   allowPermanent: false,
   permanentPermission: 'nas.authz.write',
 }
 
-/** 带语义的签发失败（REST 层按 httpStatus/code 透出，不吞成笼统 400）。 */
+/** Échec d'émission porteur de sémantique (la couche REST expose httpStatus/code, sans l'avaler en un 400 générique). */
 export class ShareLinkError extends Error {
   readonly code: string
   readonly httpStatus: number
@@ -86,20 +86,20 @@ export type ShareLinkVerdict =
 const EXPIRED_CLEANUP_DELAY_MS = 7 * 24 * 3600_000
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 export class NasShareLinkService extends Service {
   static readonly provide = 'nasShareLinks'
 
-  /** nasAuthz 为同插件服务：经 Service.inject 声明（插件级 inject 不自引用，防装载期死锁）。 */
+  /** nasAuthz est un service du même plugin : déclaré via Service.inject (l'inject au niveau extension ne se référence pas soi-même, contre l'impasse au chargement). */
   static readonly inject = ['nasAuthz']
 
   private currentSecret: string | undefined
   private currentKeyId: string | undefined
-  /** 密钥故障态（存在但不可读/不可写）：置位后签发响亮失败，验签同样 fail-closed。 */
+  /** État de panne de la clé (présente mais illisible/non inscriptible) : posé, l'émission échoue bruyamment, la vérification pareillement fail-closed. */
   private keyError: string | undefined
-  /** 永久退役密钥集合（决策 ① 拍板 (a)：轮换后旧密钥永久保留验签，已发链接不因轮换失效）。 */
+  /** Ensemble des clés en retraite permanente (décision ① entérinée (a) : après rotation, l'ancienne clé reste à vie pour la vérification, les liens émis ne meurent pas de la rotation). */
   private retiredSecrets: Array<{ secret: string; keyId: string; retiredAt: number; note?: string }> = []
   private cleanupTimer: ReturnType<typeof setInterval> | undefined
 
@@ -109,9 +109,9 @@ export class NasShareLinkService extends Service {
     this.loadKey()
     this.loadRetiredSecrets()
     this.cleanupExpired()
-    // 过期记录滚动清理（参照 authn：过期 7 天后物理删除；永久/未过期记录不动）
+    // Nettoyage glissant des enregistrements expirés (sur le modèle authn : suppression physique 7 jours après expiration ; les permanents/non expirés intouchés)
     this.cleanupTimer = setInterval(() => this.cleanupExpired(), 3600_000)
-    this.cleanupTimer.unref?.() // lint-timers：测试/嵌入形态允许进程自然退出
+    this.cleanupTimer.unref?.() // lint-timers : les formes test/intégrée permettent la sortie naturelle du processus
     ctx.effect(() => () => {
       if (this.cleanupTimer) clearInterval(this.cleanupTimer)
     })
@@ -125,7 +125,7 @@ export class NasShareLinkService extends Service {
     return this.ctx.nasAuthz
   }
 
-  // -- 独立长期密钥（决策 ①） -------------------------------------------------
+  // -- Clé longue durée dédiée (décision ①) -------------------------------------------------
 
   private keyFilePath(): string {
     return join(this.ctx.opsStorage.dataDirPath, 'nas-share-link-secret')
@@ -139,7 +139,7 @@ export class NasShareLinkService extends Service {
     return sha256Hex(secret).slice(0, 12)
   }
 
-  /** 首启生成、幂等不覆盖；存在但不可读 → 故障态（不静默换新，否则既发链接全部失效）。 */
+  /** Générée au premier démarrage, idempotente sans écrasement ; présente mais illisible → état de panne (pas de nouvelle clé en silence, sinon tous les liens déjà émis mourraient). */
   private loadKey(): void {
     const file = this.keyFilePath()
     try {
@@ -170,7 +170,7 @@ export class NasShareLinkService extends Service {
         .filter((item) => typeof item?.secret === 'string' && item.secret)
         .map((item) => ({ secret: item.secret, keyId: item.keyId ?? this.keyIdOf(item.secret), retiredAt: Number(item.retiredAt ?? 0), ...(item.note ? { note: item.note } : {}) }))
     } catch (error) {
-      // 历史文件损坏：不阻断启动，但响亮告警（旧密钥签发的链接将验签失败）
+      // Fichier d'historique corrompu : n'interrompt pas le démarrage, mais alerte bruyamment (les liens signés avec l'ancienne clé échoueront à la vérification)
       console.error('[nasShareLinks] 退役密钥历史读取失败——旧密钥签发的既有链接将验签失败（401）', error)
     }
   }
@@ -183,7 +183,7 @@ export class NasShareLinkService extends Service {
     }
   }
 
-  /** 轮换独立长期密钥（显式运维动作）：新钥落盘，旧钥进永久退役集合继续用于验签。 */
+  /** Rotation de la clé longue durée dédiée (action d'exploitation explicite) : la nouvelle clé tombe en fichier, l'ancienne entre dans l'ensemble retraite permanente et continue de servir. */
   rotateSecret(note?: string): { keyId: string; retiredKeyId?: string; retiredCount: number } {
     mkdirSync(this.ctx.opsStorage.dataDirPath, { recursive: true })
     const secret = generateSecret('nsl')
@@ -215,7 +215,7 @@ export class NasShareLinkService extends Service {
     }
   }
 
-  /** 签发前密钥可用性闸（fail-closed，决策 ①）：故障态响亮报错，绝不静默换新密钥。 */
+  /** Barrière de disponibilité de la clé avant émission (fail-closed, décision ①) : l'état de panne échoue bruyamment, jamais de nouvelle clé en silence. */
   private ensureKey(): void {
     if (!this.currentSecret || !this.currentKeyId || this.keyError) {
       throw new ShareLinkError('SHARE_LINK_KEY_UNAVAILABLE',
@@ -227,13 +227,13 @@ export class NasShareLinkService extends Service {
     return createHmac('sha256', secret).update(body).digest('base64url')
   }
 
-  /** 签名比对：当前密钥优先，其后全部永久退役密钥（决策 ① (a)：老密钥签发的历史链接永久可验）。 */
+  /** Comparaison de signature : clé courante d'abord, puis toutes les clés en retraite permanente (décision ① (a) : les liens historiques signés par les vieilles clés restent vérifiables à vie). */
   private signatureMatches(body: string, signature: string): boolean {
     if (this.currentSecret && this.sign(body, this.currentSecret) === signature) return true
     return this.retiredSecrets.some((item) => this.sign(body, item.secret) === signature)
   }
 
-  // -- 档位策略（载体 = AuthzRulesRecord.shareLinkPolicy，与数据权限治理面同源） --
+  // -- Politique de paliers (porteur = AuthzRulesRecord.shareLinkPolicy, même source que la face de gouvernance des permissions de données) --
 
   policy(): ShareLinkPolicy {
     const stored = this.nasAuthz.getRules().shareLinkPolicy
@@ -244,7 +244,7 @@ export class NasShareLinkService extends Service {
     }
   }
 
-  /** 更新策略（经 AuthzRules 乐观锁；ifVersion 缺省取当前版本，末写者胜——策略低频且有审计留痕）。 */
+  /** Met à jour la politique (verrou optimiste via AuthzRules ; ifVersion par défaut prend la version courante, le dernier écrivain gagne — politique basse fréquence et trace d'audit conservée). */
   updatePolicy(patch: Partial<ShareLinkPolicy>, ifVersion: number | undefined, actor: string): ShareLinkPolicy {
     if (patch.maxTtlSec !== undefined && (!Number.isInteger(patch.maxTtlSec) || patch.maxTtlSec <= 0)) {
       throw new ShareLinkError('INVALID_POLICY', t('maxTtlSec 须为正整数，收到 {value}', { value: patch.maxTtlSec }))
@@ -260,11 +260,11 @@ export class NasShareLinkService extends Service {
     return saved.shareLinkPolicy ?? merged
   }
 
-  // -- 签发 -------------------------------------------------------------------
+  // -- Émission -------------------------------------------------------------------
 
   /**
-   * 签发签名分享链接。校验序（服务端强制，与前端显隐无关，决策 ②）：
-   * 机器身份拒绝 → permanent/ttlSec 互斥 → 永久策略开关（优先于权限点）→ 永久权限点 → TTL 上限。
+   * Émet un lien de partage signé. Ordre de validation (imposé serveur, indépendant de la visibilité front, décision ②) :
+   * identité machine refusée → exclusion mutuelle permanent/ttlSec → interrupteur de politique permanente (prioritaire sur le point de permission) → point de permission permanente → plafond de TTL.
    */
   issue(input: {
     nasId: string
@@ -294,7 +294,7 @@ export class NasShareLinkService extends Service {
     let ttlLabel: string
     let ttlSec: number | null
     if (input.permanent === true) {
-      // 决策 ③：策略开关优先于权限点——默认形态（allowPermanent=false）下不存在永久链接
+      // Décision ③ : l'interrupteur de politique prime sur le point de permission — sous la forme par défaut (allowPermanent=false), il n'existe aucun lien permanent
       if (!policy.allowPermanent) {
         throw new ShareLinkError('PERMANENT_DISABLED_BY_POLICY', t('永久链接档位未开启（share-link-policy.allowPermanent=false，策略开关优先于权限点）'), 403)
       }
@@ -307,7 +307,7 @@ export class NasShareLinkService extends Service {
       ttlLabel = t('永久')
       ttlSec = null
     } else {
-      ttlSec = input.ttlSec ?? 86400 // 决策 ②：缺省 24 小时
+      ttlSec = input.ttlSec ?? 86400 // décision ② : défaut 24 heures
       if (!Number.isInteger(ttlSec) || ttlSec <= 0) {
         throw new ShareLinkError('INVALID_TTL', t('ttlSec 须为正整数（秒），收到 {value}', { value: String(input.ttlSec) }))
       }
@@ -340,7 +340,7 @@ export class NasShareLinkService extends Service {
     return { record, exp, sub, sig, tier, ttlLabel, ttlSec }
   }
 
-  // -- 清单 / 吊销 ------------------------------------------------------------
+  // -- Liste / révocation ------------------------------------------------------------
 
   list(filter: { nasId?: string; userId?: string; path?: string; includeRevoked?: boolean }): Array<ShareLinkRecord & { status: 'active' | 'revoked' | 'expired'; remainingSec: number | null }> {
     return this.links().find((item) => {
@@ -360,7 +360,7 @@ export class NasShareLinkService extends Service {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }
 
-  /** 状态与剩余有效期（永久链接 remainingSec=null）。 */
+  /** État et durée de validité restante (lien permanent : remainingSec=null). */
   describeStatus(record: ShareLinkRecord): { status: 'active' | 'revoked' | 'expired'; remainingSec: number | null } {
     if (record.revokedAt) return { status: 'revoked', remainingSec: 0 }
     if (record.expiresAt !== null) {
@@ -371,7 +371,7 @@ export class NasShareLinkService extends Service {
     return { status: 'active', remainingSec: null }
   }
 
-  /** 吊销单条（幂等：已吊销再调返回既有状态，不报错）。 */
+  /** Révoque un lien (idempotent : rappeler sur un lien déjà révoqué renvoie l'état existant, sans erreur). */
   revoke(jti: string, by: string, reason: string): { record: ShareLinkRecord; alreadyRevoked: boolean } {
     const record = this.links().get(jti)
     if (!record) throw new ShareLinkError('SHARE_LINK_NOT_FOUND', t('分享链接不存在：{id}', { id: jti }), 404)
@@ -384,7 +384,7 @@ export class NasShareLinkService extends Service {
     return { record: updated, alreadyRevoked: false }
   }
 
-  /** 批量吊销（按人/按路径/全部；「某人离职 → 一次性吊销其全部链接」是最高频场景）。 */
+  /** Révocation en lot (par personne/par chemin/tout ; « quelqu'un part → révoquer tous ses liens d'un coup » est le scénario le plus fréquent). */
   revokeBatch(filter: { nasId?: string; userId?: string; path?: string; all?: boolean }, by: string, reason: string): { count: number } {
     if (!filter.userId && !filter.path && filter.all !== true) {
       throw new ShareLinkError('REVOKE_CRITERIA_REQUIRED', t('批量吊销须至少给出 userId、path 之一，或显式 all:true（防误伤全量）'))
@@ -413,25 +413,25 @@ export class NasShareLinkService extends Service {
     return { count }
   }
 
-  // -- 取流三关（签名 → 吊销 → 权限复核；fail-closed，缺一不可） ------------------
+  // -- Trois barrières de prise de flux (signature → révocation → revérification de permissions ; fail-closed, aucune ne manque) ------------------
 
   verifyStreamAccess(input: { nasId: string; path: string; exp: string; sub: string; jti: string; sig: string }): ShareLinkVerdict {
     const invalid = (reason: string): ShareLinkVerdict => ({ outcome: 'invalid', reason })
     if (!input.path || !input.exp || !input.sub || !input.jti || !input.sig) return invalid(t('参数缺失'))
     if (!/^\d+$/.test(input.exp)) return invalid(t('exp 非法'))
     const exp = Number(input.exp)
-    // 关 1：签名（独立长期密钥，重启不失效）+ 过期判定（exp=0 为永久，跳过）
+    // Barrière 1 : signature (clé longue durée dédiée, survit au redémarrage) + jugement d'expiration (exp=0 = permanent, sauté)
     if (!this.signatureMatches(`${input.path}|${input.nasId}|${input.exp}|${input.sub}|${input.jti}`, input.sig)) {
       return invalid(t('签名校验失败（链接被篡改或密钥不匹配）'))
     }
     if (exp !== 0 && exp * 1000 < Date.now()) return invalid(t('链接已过期'))
-    // 关 2：吊销（jti 指向签发记录；记录不存在/已吊销/与载荷不一致 → 拒绝）
+    // Barrière 2 : révocation (jti pointe l'enregistrement d'émission ; enregistrement inexistant/déjà révoqué/incohérent avec la charge → refus)
     const record = this.links().get(input.jti)
     if (!record) return invalid(t('链接记录不存在（伪造或已清理）'))
     if (record.revokedAt) return invalid(t('链接已被吊销（{by}）', { by: record.revokedBy ?? '-' }))
     if (record.nasId !== input.nasId || record.path !== input.path || record.userId !== input.sub) return invalid(t('链接记录与载荷不一致'))
     if (record.expiresAt !== null && Date.parse(record.expiresAt) < Date.now()) return invalid(t('链接已过期'))
-    // 关 3：权限复核（核心增量）：以签发者身份实时判定，票据只是「身份+文件」的封装
+    // Barrière 3 : revérification de permissions (l'incrément clé) : jugement en temps réel sous l'identité de l'émetteur, le billet n'est qu'une encapsulation « identité+fichier »
     const decision = this.nasAuthz.check({
       nasId: input.nasId,
       userId: input.sub,
@@ -445,7 +445,7 @@ export class NasShareLinkService extends Service {
     return { outcome: 'ok', record }
   }
 
-  /** 使用画像（取流成功后调用；支撑异常使用发现与「从未使用的失效链接」清理）。 */
+  /** Profil d'usage (appelé après une prise de flux réussie ; soutient la détection d'usage anormal et le nettoyage des « liens morts jamais utilisés »). */
   recordUse(jti: string): void {
     try {
       const record = this.links().get(jti)
@@ -456,7 +456,7 @@ export class NasShareLinkService extends Service {
     }
   }
 
-  /** 过期记录滚动清理：过期 7 天后物理删除（取证窗口；审计另有 changeLog/decisions 留痕）。 */
+  /** Nettoyage glissant des enregistrements expirés : suppression physique 7 jours après expiration (fenêtre de constat ; l'audit conserve par ailleurs changeLog/decisions). */
   cleanupExpired(): number {
     const cutoff = Date.now() - EXPIRED_CLEANUP_DELAY_MS
     let removed = 0
@@ -470,7 +470,7 @@ export class NasShareLinkService extends Service {
 }
 
 // ---------------------------------------------------------------------------
-// 插件
+// Extension
 // ---------------------------------------------------------------------------
 
 declare module '@deepseek-ai/cordis' {

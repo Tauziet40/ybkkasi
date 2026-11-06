@@ -1,5 +1,5 @@
 /**
- * mcp 插件对模型暴露的工具。
+ * Outils exposés au modèle par l'extension mcp.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ToolPrincipal, type WorkRefIndex } from '../../platform-core/src/index.ts'
@@ -9,10 +9,10 @@ export const name = 'mcp-tools'
 export const inject = ['tools', 'mcpRegistry', 'authn', 'iam', 'audit', 'resourceCore']
 
 /**
- * work 参数白名单提取（施工蓝本 §10.4：技术参数透传与可信作用域）：
- * work 只允许携带 permitId/runId/stepKey 三个索引键（仅作索引，授权事实一律服务端回查）；
- * 其他任何键（包括 caller、employeeId 等身份字段）一律忽略——身份与授权不来自请求参数。
- * 导出供 console REST 面（routes/mcp.ts /api/mcp/invoke）复用：工具与 REST 两个入口一套白名单口径。
+ * Extraction en liste blanche des paramètres work (blueprint §10.4 : transmission de paramètres techniques et périmètre de confiance) :
+ * work n'accepte que les trois clés d'index permitId/runId/stepKey (simple index, les faits d'autorisation sont toujours revérifiés côté serveur) ;
+ * toute autre clé (dont caller, employeeId et autres champs d'identité) est ignorée — l'identité et l'autorisation ne viennent pas des paramètres de requête.
+ * Exporté pour réutilisation par la face REST de console (routes/mcp.ts /api/mcp/invoke) : deux entrées outil et REST, un même référentiel de liste blanche.
  */
 export function workRefFromArgs(raw: unknown): WorkRefIndex | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
@@ -31,7 +31,7 @@ export function workRefFromArgs(raw: unknown): WorkRefIndex | undefined {
 export function apply(ctx: Context) {
   const t = ctx.tools
 
-  /** 调用方身份取自执行上下文（入口从令牌解析），缺失即 fail-closed；schema 不声明 caller* 参数。 */
+  /** L'identité de l'appelant vient du contexte d'exécution (analysée à l'entrée depuis le jeton), absente = fail-closed ; le schéma ne déclare pas de paramètre caller*. */
   const callerFromPrincipal = (principal?: ToolPrincipal): { type: 'user' | 'agent' | 'app'; id: string; name: string } => {
     if (!principal) throw new Error(translate('工具执行缺少身份上下文（fail-closed）'))
     if (principal.kind === 'human') return { type: 'user', id: principal.userId ?? principal.principalId, name: principal.name }
@@ -41,13 +41,13 @@ export function apply(ctx: Context) {
     return { type: 'app', id: principal.principalId, name: principal.name }
   }
 
-  /** 登记/评审类工具的调用方投影（fail-closed）：owner/审批人取令牌身份，禁止从 args 组装。 */
+  /** Projection de l'appelant pour les outils d'enregistrement/revue (fail-closed) : owner/approbateur pris depuis l'identité du jeton, interdits d'assemblage depuis args. */
   const registrarOf = (principal?: ToolPrincipal): { id: string; name: string } => {
     if (!principal) throw new Error(translate('工具执行缺少身份上下文（fail-closed）'))
     return { id: principal.userId ?? principal.principalId, name: principal.name }
   }
 
-  /** 工具面等价 changeLog（与 REST changeLog 同一 audit.record 口径，单点事实源）：登记/评审动作必落审计。 */
+  /** changeLog équivalent de la face outils (même référentiel audit.record que le changeLog REST, source de fait unique) : tout acte d'enregistrement/revue tombe dans l'audit. */
   const auditChange = (principal: ToolPrincipal | undefined, actor: { id: string; name: string }, action: string, resourceType: string, resourceId: string, resourceName: string, detail: string): void => {
     ctx.audit.record({
       type: 'change',
@@ -149,9 +149,9 @@ export function apply(ctx: Context) {
     },
   }))
 
-  // 【兼容层（MCP 治理契约 §9，W2-T3）】行为不变：Agent 标准默认路径是服务级数据面
-  // POST /mcp/services/:serviceSlug（委托令牌 aud=mcp:service:<slug>，见 plugin-console
-  // routes/mcp-dataplane.ts）。本工具仅供存量 Agent 工具面调用方过渡使用。
+  // [Couche de compatibilité (contrat de gouvernance MCP §9, W2-T3)] comportement inchangé : le chemin standard d'un Agent est le plan de données au niveau service
+  // POST /mcp/services/:serviceSlug (jeton délégué aud=mcp:service:<slug>, voir plugin-console
+  // routes/mcp-dataplane.ts). Le présent outil ne sert qu'à la transition des appelants existants de la face outils Agent.
   t.register(defineTool({
     name: 'mcp_invoke',
     description: '通过 MCP 网关调用工具（统一鉴权/限流/审计）。调用方身份由服务端从令牌解析。（兼容层：Agent 标准默认路径是 POST /mcp/services/<服务slug> 服务级数据面）',
@@ -210,7 +210,7 @@ export function apply(ctx: Context) {
       const tools = Array.isArray(args.tools) ? (args.tools as Array<Record<string, unknown>>).map((tool) => ({
         name: String(tool['name'] ?? ''),
         description: String(tool['description'] ?? ''),
-        // 与 REST POST /api/mcp/services 同口径：风险缺省不隐式 read——未申报即 unknown
+        // Même référentiel que REST POST /api/mcp/services : pas de repli implicite read pour le risque — non déclaré = unknown
         riskLevel: (['read', 'write', 'admin'].includes(String(tool['riskLevel'])) ? tool['riskLevel'] : 'unknown') as 'read' | 'write' | 'admin' | 'unknown',
         ...(tool['inputSchema'] && typeof tool['inputSchema'] === 'object' && Object.keys(tool['inputSchema'] as object).length > 0
           ? { inputSchema: tool['inputSchema'] as Record<string, unknown> }

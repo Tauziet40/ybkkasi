@@ -1,25 +1,25 @@
 /**
- * @dsh-ops/plugin-modelgw —— 统一模型接入网关（用量透明计量版，元冰可开发计划 M0-3）。
+ * @dsh-ops/plugin-modelgw — passerelle d'accès unifiée aux modèles (version metering d'usage transparent, plan de développement method M0-3).
  *
- * 平台统一代理外部模型厂商（OpenAI 兼容 chat/completions 形态）：
- *   真实 HTTP 转发 → usage 计量（input/output tokens 实测值，不伪造）→
- *   零价快照入账（charge_cents=0，不对外呈现任何金额结算语义）+ 内部采购成本参考（成本穿透报表口径）。
+ * La plateforme mandataire uniformément les fournisseurs de modèles externes (forme OpenAI-compatible chat/completions) :
+ *   transfert HTTP réel → metering usage (input/output tokens mesurés, sans fabrication) →
+ *   inscription en instantané à prix zéro (charge_cents=0, aucune sémantique de règlement en montant présentée à l'extérieur) + référence de coût d'achat interne (référentiel du rapport de perçage des coûts).
  *
- * 商业模式（M0 收敛）：私有化年费 + 治理包——网关不再做「转售/预检/扣费」，
- * 价格簿仅内部成本参考（cost_cents_per_unit），list 侧恒零价。
+ * Modèle économique (convergence M0) : licence annuelle privatif + pack de gouvernance — la passerelle ne fait plus « revente/pré-contrôle/prélèvement »,
+ * le tarif n'est qu'une référence de coût interne (cost_cents_per_unit), la face list toujours à prix zéro.
  *
- * 真实化红线（第 0 步原则）：模型未配置真实 endpoint 时调用直接报错，
- * 绝不生成假 completion 充数——演示环境请在目录中配置指向 stub 的 endpoint。
+ * Ligne rouge de véridicité (principe de l'étape 0) : appeler un modèle sans vrai endpoint configuré jette directement une erreur,
+ * jamais de faux completion de remplissage — en démonstration, configurer dans le catalogue un endpoint pointant vers un stub.
  *
- * 治理面（IAW 交接批次 2026-09-11，PRD M2/§7.2）：
- *   - 渠道分级路由（1-1）：模型登记 dataClassLimit（公开/内部/秘密），会话请求携带 dataClass
- *     时按「分级上限」过滤候选——涉密数据永远不会路由到公开级渠道，越级调用直接拒绝（锁死+原因）；
- *   - 降级链（1-2）：渠道组（主/备1/备2/人工）按步超时逐级降级，每次降级发 modelgw.degraded
- *     （面板 SSE 提示条 + 审计订阅）；内容安全拦截钩子留待外部内容安全网关接入（诚实缺位）；
- *   - 渠道遥测（1-3）：滚动调用遥测（7d 可用率/延迟/TPS 代理/采纳率）；TTFT 需流式通道，
- *     非流式单轮诚实缺列（ttft=null，口径随端点返回）；
- *   - 预算熔断（1-4）：org/平台级预算（日/月），warn 阈值告警（modelgw.budget.warning），
- *     block 动作在调用前熔断——预算进程内去重告警（每预算每自然日最多一条）。
+ * Face gouvernance (livraison IAW 2026-09-11, PRD M2/§7.2) :
+ *   - routage par gradation de canal (1-1) : le modèle enregistre dataClassLimit (public/interne/secret) ; une requête de session portant dataClass
+ *     filtre les candidats selon « plafond de gradation » — les données secrètes ne sont jamais routées vers un canal public, l'appel hors gradation est directement refusé (verrouillé + motif) ;
+ *   - chaîne de repli (1-2) : groupe de canaux (principal/secours1/secours2/manuel) dégrade par paliers au timeout de pas, chaque dégradation émet modelgw.degraded
+ *     (bandeau SSE du panneau + souscription audit) ; le crochet d'interception de sécurité de contenu attend la passerelle de sécurité de contenu externe (absence honnête) ;
+ *   - télémétrie de canal (1-3) : télémétrie d'appels glissante (7 j taux de disponibilité/latence/proxy TPS/taux d'adoption) ; le TTFT exige un canal de streaming,
+ *     tour unique non streamé = colonne honnêtement absente (ttft=null, référentiel selon le retour de l'endpoint) ;
+ *   - disjoncteur de budget (1-4) : budget org/plateforme (jour/mois), alerte au seuil warn (modelgw.budget.warning),
+ *     l'action block coupe avant l'appel — alerte dédupliquée en processus par budget (au plus une par jour naturel par budget).
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -33,23 +33,23 @@ import { t } from '../../platform-i18n/src/index.ts'
 import * as modelgwTools from './tools.ts'
 
 // ---------------------------------------------------------------------------
-// 数据模型
+// Modèle de données
 // ---------------------------------------------------------------------------
 
-/** 数据分级（PRD §4.1/§7.2）：公开 < 内部 < 秘密；渠道按上限接纳数据。 */
+/** Gradation des données (PRD §4.1/§7.2) : public < interne < secret ; le canal admet les données selon son plafond. */
 export type DataClass = 'public' | 'internal' | 'secret'
 
 export const DATA_CLASS_RANK: Record<DataClass, number> = { public: 0, internal: 1, secret: 2 }
 export const DATA_CLASS_LABELS: Record<DataClass, string> = { public: '公开', internal: '内部', secret: '秘密' }
 
 /**
- * D14 统一业务密级 → 网关渠道分级的显式映射表（禁止同名枚举直接等同、禁止缺失隐式回落）：
- *   public      → public    （公开→公开，一一对应）
- *   internal    → internal  （内部→内部，一一对应）
- *   secret      → secret    （业务秘密级 ↔ 渠道秘密级，语义同级）
- *   confidential→ secret    （机密钳制到网关最高分级：机密数据仅允许最高分级渠道承载，
- *                          网关无更高分级可表达，绝不向 public/internal 渠道路由）
- *   topsecret   → 不进映射：受管调用在映射前直接拒绝（绝密禁止数字员工处理，验收 V14 模型侧）。
+ * Table de mise en correspondance explicite D14 gradation métier unifiée → gradation de canal de la passerelle (interdiction d'assimiler des énumérations homonymes, interdiction d'un repli implicite sur absence) :
+ *   public      → public    (public→public, correspondance un à un)
+ *   internal    → internal  (interne→interne, correspondance un à un)
+ *   secret      → secret    (secret métier ↔ secret de canal, même niveau sémantique)
+ *   confidential→ secret    (le confidentiel est bridé au plus haut niveau de la passerelle : les données confidentielles n'admettent que les canaux
+ *                          du plus haut niveau ; la passerelle n'a pas de gradation supérieure à exprimer, jamais de routage vers public/internal)
+ *   topsecret   → hors correspondance : un appel géré est refusé avant la mise en correspondance (l'absolu-secret interdit le traitement par employé numérique, acceptation V14 côté modèle).
  */
 const WORK_DATA_CLASS_TO_GATEWAY: Record<Exclude<WorkDataClass, 'topsecret'>, DataClass> = {
   public: 'public',
@@ -62,52 +62,52 @@ export interface ModelRecord extends RecordBase {
   slug: string
   displayName: string
   provider: string
-  /** OpenAI 兼容基址（如 https://api.deepseek.com/v1）；未配置则不可调用。 */
+  /** URL de base compatible OpenAI (ex. https://api.deepseek.com/v1) ; sans configuration, pas d'appel possible. */
   endpoint: string
-  /** API Key（仅存引用名，真实密钥经环境变量注入；测试可直填 stub key）。 */
+  /** API Key (seul le nom de référence est stocké, la vraie clé injectée par variable d'environnement ; les tests peuvent remplir directement une clé stub). */
   apiKey: string
-  /** 内部采购成本参考（分/千 tokens）：仅用于成本穿透报表，不对外呈现金额结算。 */
+  /** Référence de coût d'achat interne (centimes/1k tokens) : uniquement pour le rapport de perçage des coûts, aucune sémantique de règlement présentée à l'extérieur. */
   costCentsPerKTokens: number
   /**
-   * 输入内部成本参考（分/千 tokens，#14 additive）：输入 token 与输出分开计价
-   * （组合计价行入 usage 事件）；缺省视为未定价（输入侧成本按 0，事件标 not_priced 语义由 usage 判定）。
+   * Référence de coût interne en entrée (centimes/1k tokens, #14 additive) : les jetons d'entrée et de sortie sont tarifés séparément
+   * (la ligne de prix combiné entre dans l'événement usage) ; par défaut considéré non tarifé (coût d'entrée à 0, la sémantique not_priced de l'événement est jugée par usage).
    */
   inputCostCentsPerKTokens?: number
   status: 'online' | 'offline'
-  /** 数据分级上限（1-1，additive）：该渠道可承载的最高数据分级；缺省 internal（存量登记兼容）。 */
+  /** Plafond de gradation des données (1-1, additive) : plus haute gradation de données que ce canal peut porter ; défaut internal (compatibilité des enregistrements existants). */
   dataClassLimit?: DataClass
 }
 
 export interface ModelInvokeInput {
   model: string
   messages: Array<{ role: string; content: string }>
-  /** 用量归口组织（部门维度报表口径）。 */
+  /** Organisation d'imputation de l'usage (référentiel des rapports en dimension département). */
   orgId: string
-  /** 最终用户/Agent（on-behalf-of 终点）。 */
+  /** Utilisateur final/Agent (point d'arrivée du on-behalf-of). */
   subject: string
   tenantId?: string
   maxTokens?: number
   temperature?: number
-  /** 本次会话请求的数据分级（1-1，缺省 internal）：高于渠道上限即拒绝（选择器锁死+原因）。 */
+  /** Gradation des données de la requête de session (1-1, défaut internal) : au-dessus du plafond du canal = refus (sélecteur verrouillé + motif). */
   dataClass?: DataClass
   /**
-   * 可信调用者（D10 additive，结构对齐 WorkCallerRef）：由调用入口从已验证令牌/会话组装，
-   * 禁止把请求体同形 JSON 当作可信身份（§10.4）。缺失时按非受管路径 legacy 直通（现状不变）。
+   * Appelant de confiance (additive D10, structure alignée sur WorkCallerRef) : assemblé par l'entrée d'appel depuis le jeton/la session vérifiés,
+   * interdiction de prendre un JSON homologue du corps de requête pour une identité de confiance (§10.4). Absent = passage direct legacy du chemin non géré (statu quo).
    */
   caller?: WorkCallerRef
   /**
-   * 工作引用索引（additive，§10.4）：仅 permitId/runId/stepKey/invocationId 四个索引键；
-   * 授权事实（permit/任用/租约/预算）一律由 workforce 侧服务端回查，本字段不作授权依据。
+   * Index de référence de travail (additive, §10.4) : seulement les quatre clés d'index permitId/runId/stepKey/invocationId ;
+   * les faits d'autorisation (permit/nomination/bail/budget) sont toujours revérifiés côté workforce, le présent champ ne fonde pas l'autorisation.
    */
   work?: ModelWorkRef
 }
 
-/** 模型调用的工作引用索引（与 WorkRefIndex 的模型侧子集对齐）。 */
+/** Index de référence de travail d'un appel de modèle (aligné sur le sous-ensemble modèle du WorkRefIndex). */
 export interface ModelWorkRef {
   permitId?: string
   runId?: string
   stepKey?: string
-  /** workforce 受控调用账本的调用 ID：透传 usage trace 关联（V23/V27，不改变历史幂等键口径）。 */
+  /** ID d'appel du registre des appels contrôlés workforce : association de trace pour transmission d'usage (V23/V27, sans changer le référentiel historique de clé idempotente). */
   invocationId?: string
 }
 
@@ -117,64 +117,64 @@ export interface ModelInvokeResult {
   model: string
   inputTokens: number
   outputTokens: number
-  /** 内部成本参考（分，按实测 output tokens 折算；仅报表口径，不参与任何结算）。 */
+  /** Référence de coût interne (centimes, convertie selon les output tokens mesurés ; référentiel rapport uniquement, aucune participation à un règlement). */
   costCents: number
-  /** 降级链流转记录（1-2，仅 invokeWithFallback 路径返回）。 */
+  /** Trace des passages de la chaîne de repli (1-2, renvoyée seulement sur le chemin invokeWithFallback). */
   degradations?: Array<{ from: string; reason: string; at: string }>
-  /** usage 事件 ID（D11 additive）：工作调用账本与消费事实的对账关联键（只关联不重复登记）。 */
+  /** ID d'événement usage (additive D11) : clé d'association de réconciliation entre le registre d'appels de travail et le fait de consommation (association seule, pas de double enregistrement). */
   usageEventId?: string
 }
 
 export interface ModelInvokeError extends Error {
-  /** 上游 HTTP 状态（5xx 判定降级用）；超时/网络错误无此字段。 */
+  /** Statut HTTP amont (pour juger la dégradation sur 5xx) ; absent sur timeout/erreur réseau. */
   status?: number
   kind?: 'timeout' | 'http' | 'network'
 }
 
-/** 渠道组（1-2）：主/备1/备2/人工 的降级链声明；链尾 manual=true 表示最终转人工。 */
+/** Groupe de canaux (1-2) : déclaration de la chaîne de repli principal/secours1/secours2/manuel ; chaîne terminale manual=true signifie escalation finale vers l'humain. */
 export interface ChannelGroupRecord extends RecordBase {
   slug: string
   name: string
   primary: string
   backup1?: string
   backup2?: string
-  /** 链尾转人工（true）：全链失败时返回 escalated=true 而非裸错误，由面板插提示条。 */
+  /** Escalade terminale vers l'humain (true) : à l'échec de toute la chaîne, renvoie escalated=true au lieu d'une erreur nue, le panneau insère un bandeau. */
   manual?: boolean
-  /** 单步超时（毫秒，PRD §4.1 口径 8s）；缺省 8000。 */
+  /** Timeout de pas (millisecondes, référentiel PRD §4.1 8 s) ; défaut 8000. */
   stepTimeoutMs?: number
   enabled: boolean
 }
 
-/** 调用遥测（1-3）：滚动窗口原始记录（默认保留 8 天，7d 查询窗）。 */
+/** Télémétrie d'appel (1-3) : enregistrements bruts à fenêtre glissante (conservation par défaut 8 jours, fenêtre de requête 7 j). */
 export interface TelemetryRecord extends RecordBase {
   model: string
   at: string
   ok: boolean
   latencyMs: number
   outputTokens: number
-  /** 降级链路径调用标记（备用渠道命中）。 */
+  /** Marque d'appel par le chemin de la chaîne de repli (canal de secours atteint). */
   degraded?: boolean
   error?: string
 }
 
-/** 预算（1-4）：org 级（缺省=平台级）日/月预算，warn 阈值 + block 熔断。 */
+/** Budget (1-4) : budget jour/mois au niveau org (défaut = niveau plateforme), seuil warn + disjoncteur block. */
 export interface BudgetRecord extends RecordBase {
   orgId?: string
   /**
-   * 模型范围（R3，2026-10-14）：缺省=不限模型；'*'=命中任意模型（通配语义，
-   * 花费取窗口总额不做 byResource 过滤）；其余字面量=仅该模型。
+   * Périmètre de modèles (R3, 2026-10-14) : défaut = sans limite de modèle ; '*' = atteint n'importe quel modèle (sémantique joker,
+   * la dépense prend le total de la fenêtre sans filtre byResource) ; tout autre littéral = seulement ce modèle.
    */
   modelSlug?: string
   /**
-   * 预算主体（R10 前置，2026-10-14）：形如 'agent:<id>' / 'app:<id>'，缺省=组织级预算。
-   * 与 invoke 计量口径一致（usage.subject），主体预算的花费按 usage.summary(subject=) 聚合。
+   * Sujet du budget (préambule R10, 2026-10-14) : de la forme 'agent:<id>' / 'app:<id>', défaut = budget au niveau organisation.
+   * Même référentiel que le metering d'invoke (usage.subject), la dépense du budget de sujet s'agrège par usage.summary(subject=).
    */
   subject?: string
-  /** 超额联动冻结（R10 前置）：超额熔断时联动冻结对应 Agent 并生成解冻审批（执行中枢消费）。 */
+  /** Gel couplé au dépassement (préambule R10) : au disjoncteur de dépassement, gèle l'Agent correspondant et génère une approbation de dégel (consommé par le centre d'exécution). */
   freezeAgent?: boolean
   dailyLimitCents?: number
   monthlyLimitCents?: number
-  /** 告警阈值比例（used/limit ≥ warnRatio 发 modelgw.budget.warning）；缺省 0.8。 */
+  /** Ratio de seuil d'alerte (used/limit ≥ warnRatio émet modelgw.budget.warning) ; défaut 0.8. */
   warnRatio: number
   action: 'warn' | 'block'
   enabled: boolean
@@ -189,7 +189,7 @@ export interface BudgetWindowStatus {
 }
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 const INVOKE_TIMEOUT_MS = 30_000
@@ -199,7 +199,7 @@ const TELEMETRY_RETENTION_MS = 8 * 86_400_000
 export class ModelGatewayService extends Service {
   static readonly provide = 'modelGateway'
 
-  /** 预算告警进程内去重：budgetId → 最近告警的自然日（每预算每日最多一条 warning 事件）。 */
+  /** Déduplication en processus des alertes de budget : budgetId → dernier jour naturel d'alerte (au plus un événement warning par jour et par budget). */
   private budgetWarnDay = new Map<string, string>()
 
   constructor(ctx: Context) {
@@ -216,8 +216,8 @@ export class ModelGatewayService extends Service {
     const existing = this.models().findOne((item) => item.slug === input.slug)
     if (existing) return this.models().update(existing.id, { ...input })
     const created = this.models().insert({ id: newId('mdl'), ...input })
-    // 价格簿登记：model:<slug> 按 output_tokens 计量——list 恒零价（不对外结算），
-    // cost 为内部采购成本参考（成本穿透报表口径）
+    // Enregistrement au tarif : model:<slug> mesuré sur output_tokens — la face list toujours à prix zéro (pas de règlement externe),
+    // cost est une référence de coût d'achat interne (référentiel du rapport de perçage des coûts)
     this.ctx.usage.upsertPrice({
       pattern: `model:${input.slug}`,
       meter_key: 'output_tokens',
@@ -228,8 +228,8 @@ export class ModelGatewayService extends Service {
       currency: 'CNY',
       rate_version: `model:${input.slug}:cost-v1`,
     })
-    // #14：输入 token 费率独立登记（model:<slug>:input 只是费率载体，事件 resource 恒为
-    // model:<slug> 命中主条目；invoke 时点经 priceOfResource 读取后以组合计价行入账）
+    // #14 : le taux des jetons d'entrée s'enregistre séparément (model:<slug>:input n'est qu'un porteur de taux, la ressource de l'événement est toujours
+    // model:<slug> atteignant l'entrée principale ; à l'invoke, lu via priceOfResource puis inscrit en ligne de prix combiné)
     this.ctx.usage.upsertPrice({
       pattern: `model:${input.slug}:input`,
       meter_key: 'input_tokens',
@@ -243,7 +243,7 @@ export class ModelGatewayService extends Service {
     return created
   }
 
-  /** 存量模型更新（不入 seed 的运营调价路径）：价格簿两条目同步刷新，费率与目录单一事实源。 */
+  /** Mise à jour des modèles existants (chemin opérationnel de retarification hors seed) : les deux entrées du tarif sont rafraîchies ensemble, taux et catalogue à source de fait unique. */
   updateModelCost(slug: string, cost: { outputCostCentsPerKTokens: number; inputCostCentsPerKTokens?: number }): void {
     this.ctx.usage.upsertPrice({
       pattern: `model:${slug}`,
@@ -267,12 +267,12 @@ export class ModelGatewayService extends Service {
     })
   }
 
-  // -- 工作级授权与密级映射（D10/D14，additive） ---------------------------------
+  // -- Autorisation au niveau travail et mise en correspondance des gradations (D10/D14, additive) ---------------------------------
 
   /**
-   * 窄端口运行时读取：platform-core 装配时注册 WorkforcePolicyRegistry（provide='workforcePolicy'）。
-   * Context 类型增补由 workforce 侧统一持有；这里防御式读取——服务未装配时返回 undefined，
-   * gateManagedWork 按端口未就绪走 legacy，非受管路径现状不变（V29：新工作路径不静默无策略放行）。
+   * Lecture du port étroit au runtime : platform-core enregistre WorkforcePolicyRegistry à l'assemblage (provide='workforcePolicy').
+   * L'appoint de type de Context est détenu côté workforce ; ici lecture défensive — service non assemblé = undefined,
+   * gateManagedWork suit le chemin legacy tant que le port n'est pas prêt, le chemin non géré reste au statu quo (V29 : le nouveau chemin de travail ne laisse pas passer sans politique en silence).
    */
   private workforcePolicy(): WorkforcePolicyRegistry | undefined {
     try {
@@ -283,10 +283,10 @@ export class ModelGatewayService extends Service {
   }
 
   /**
-   * 工作级授权闸门（受管数字员工模型调用）：入口在资源级校验之前执行；
-   * caller 缺失或端口未就绪 → legacy（返回 null，原有链一步不少）；拒绝 → 中文错误 + 领域码（fail-closed）。
-   * 判定只按可信 caller 反查，与是否携带 work 引用无关（D.5 防绕行）。
-   * registryId：单渠道传模型 slug；降级链传渠道组 slug（实际执行渠道仍在链内逐个过分级/预算校验）。
+   * Barrière d'autorisation au niveau travail (appels de modèle d'employé numérique géré) : exécutée à l'entrée avant la vérification au niveau ressource ;
+   * caller absent ou port non prêt → legacy (renvoie null, la chaîne d'origine sans y perdre une marche) ; refus → erreur en chinois + code de domaine (fail-closed).
+   * Le jugement ne fait que rechercher le caller de confiance, indépendamment de la présence d'une référence work (anti-contournement D.5).
+   * registryId : canal unique = slug du modèle ; chaîne de repli = slug du groupe de canaux (le canal réellement exécuté repasse un à un la vérification gradation/budget dans la chaîne).
    */
   private async gateManagedModelCall(
     caller: WorkCallerRef | undefined,
@@ -309,9 +309,9 @@ export class ModelGatewayService extends Service {
   }
 
   /**
-   * 受管调用的有效密级（D14）：max(请求 dataClass（缺省 internal）, 任用冻结密级上限)——
-   * 受管时必须以 max 口径走，禁止把缺失隐式回落 internal 造成降级。
-   * topsecret 在显式映射前直接拒绝（绝密禁止数字员工处理）；其余经显式映射表落到网关分级。
+   * Gradation effective d'un appel géré (D14) : max(dataClass de la requête (défaut internal), plafond de gradation gelé par la nomination) —
+   * en géré, il faut marcher au référentiel max, interdiction de laisser l'absence retomber implicitement sur internal, ce qui dégraderait.
+   * topsecret est refusé avant la mise en correspondance explicite (l'absolu-secret interdit le traitement par employé numérique) ; le reste passe par la table de correspondance explicite vers la gradation de la passerelle.
    */
   private effectiveManagedDataClass(requested: DataClass | undefined, workCeiling: WorkDataClass): DataClass {
     const base: WorkDataClass = requested ?? 'internal'
@@ -322,11 +322,11 @@ export class ModelGatewayService extends Service {
     return WORK_DATA_CLASS_TO_GATEWAY[effective]
   }
 
-  // -- 渠道分级路由（1-1） ---------------------------------------------------
+  // -- Routage par gradation de canal (1-1) ---------------------------------------------------
 
   /**
-   * 按数据分级过滤可用渠道：分级超过渠道上限的模型不出现（涉密场景选择器锁死公有云渠道）。
-   * 返回带原因的结构，供前端直接渲染锁死原因。
+   * Filtre les canaux disponibles par gradation des données : un modèle dont la gradation dépasse le plafond du canal n'apparaît pas (en scénario secret, le sélecteur verrouille les canaux publics).
+   * Renvoie une structure avec motif, pour que le front rende directement la raison du verrouillage.
    */
   resolveChannels(dataClass: DataClass, opts: { onlineOnly?: boolean } = {}): {
     dataClass: DataClass
@@ -350,7 +350,7 @@ export class ModelGatewayService extends Service {
     return { dataClass, available, excluded }
   }
 
-  /** 分级越界校验：目标渠道上限低于请求数据分级时直接拒绝（含原因文案，供选择器锁死提示）。 */
+  /** Validation de dépassement de gradation : plafond du canal cible inférieur à la gradation des données de la requête = refus direct (libellé du motif inclus, pour le verrouillage du sélecteur). */
   private assertDataClassAllowed(model: ModelRecord, dataClass: DataClass | undefined): void {
     const requestClass = dataClass ?? 'internal'
     const limit = model.dataClassLimit ?? 'internal'
@@ -361,7 +361,7 @@ export class ModelGatewayService extends Service {
     }
   }
 
-  // -- 渠道组与降级链（1-2） ---------------------------------------------------
+  // -- Groupe de canaux et chaîne de repli (1-2) ---------------------------------------------------
 
   channelGroups(): Collection<ChannelGroupRecord> {
     const collection = this.ctx.opsStorage.collection<ChannelGroupRecord>('modelgw:channelGroups')
@@ -381,16 +381,16 @@ export class ModelGatewayService extends Service {
   }
 
   /**
-   * 降级链调用（1-2）：主 → 备1 → 备2 逐级降级，每步按 stepTimeoutMs（默认 8s）超时；
-   * HTTP 5xx / 超时 / 网络错误触发降级，每次降级 emit modelgw.degraded（面板 SSE 提示条 + 审计）。
-   * 链尾 manual=true：全链失败返回 escalated=true（转人工）而非裸错误。
-   * 预算熔断（1-4 / BUG-2510-B1）：每次真实调用前复检（同单渠道路径口径），block 态 fail-closed
-   * 直接抛「预算熔断」错误终止整链（不进降级、不调上游、不入账）。
-   * 内容安全拦截：外部内容安全网关未接入（诚实缺位），接入后在 invokeOnce 返回路径上挂钩。
+   * Appel par chaîne de repli (1-2) : principal → secours1 → secours2, dégradation par paliers, chaque pas au timeout stepTimeoutMs (défaut 8 s) ;
+   * HTTP 5xx / timeout / erreur réseau déclenche la dégradation, chaque dégradation émet modelgw.degraded (bandeau SSE du panneau + audit).
+   * Chaîne terminale manual=true : à l'échec de toute la chaîne, renvoie escalated=true (escalade humaine) au lieu d'une erreur nue.
+   * Disjoncteur de budget (1-4 / BUG-2510-B1) : re-contrôle avant chaque appel réel (même référentiel que le chemin canal unique), l'état block
+   * jette directement « disjoncteur de budget » et termine toute la chaîne (pas de dégradation, pas d'appel amont, pas d'inscription).
+   * Interception de sécurité de contenu : passerelle de sécurité de contenu externe non connectée (absence honnête), à raccrocher sur le chemin de retour d'invokeOnce une fois connectée.
    */
   async invokeWithFallback(input: Omit<ModelInvokeInput, 'model'> & { group: string }): Promise<ModelInvokeResult | { ok: false; escalated: true; reason: string; degradations: Array<{ from: string; reason: string; at: string }> }> {
-    // 工作级授权闸门（D10）：入口先过闸，渠道组 slug 作为 registryId；拒绝直接终止整链。
-    // 受管时有效密级以 max(请求, 任用上限) 显式映射（D14）；非受管 legacy 路径 effectiveInput===input 现状不变。
+    // Barrière d'autorisation au niveau travail (D10) : la barrière d'abord à l'entrée, le slug du groupe de canaux sert de registryId ; un refus termine toute la chaîne.
+    // En géré, la gradation effective est la mise en correspondance explicite de max(requête, plafond de nomination) (D14) ; en legacy non géré, effectiveInput===input, statu quo.
     const work = await this.gateManagedModelCall(input.caller, input.group, input.work)
     const effectiveInput = work
       ? { ...input, dataClass: this.effectiveManagedDataClass(input.dataClass, work.dataClass) }
@@ -423,16 +423,16 @@ export class ModelGatewayService extends Service {
         continue
       }
       try {
-        // 分级路由（1-1）逐步校验：备用渠道分级低于请求数据分级时同样锁死
+        // Routage par gradation (1-1) vérifié pas à pas : un canal de secours de gradation inférieure à la gradation de la requête se verrouille pareil
         this.assertDataClassAllowed(model, effectiveInput.dataClass)
       } catch (error) {
         reject(error instanceof Error ? error.message : String(error))
         continue
       }
-      // 预算熔断（1-4 / BUG-2510-B1）：每次真实调用前与单渠道路径（invoke）同口径复检——
-      // 链内逐渠道计量入账会推进用量，降级前复检堵住 block 态经备用渠道继续调通上游；
-      // 按当前渠道 slug 评估（对被调模型的命中语义与单渠道路径完全一致，R3 通配/R10 主体不受影响），
-      // 熔断错误不进降级（reject）而直接终止整链——错误文案与信封和单渠道路径一致
+      // Disjoncteur de budget (1-4 / BUG-2510-B1) : avant chaque appel réel, re-contrôle au même référentiel que le chemin canal unique (invoke) —
+      // l'inscription du metering canal par canal dans la chaîne fait avancer l'usage, le re-contrôle avant dégradation bouche l'état block qui continuerait
+      // d'appeler l'amont via les canaux de secours ; évaluation selon le slug du canal courant (la sémantique d'atteinte du modèle appelé est strictement
+      // identique au chemin canal unique, joker R3/sujet R10 non affectés), l'erreur de disjoncteur n'entre pas en dégradation (reject) et termine toute la chaîne — libellé d'erreur et enveloppe identiques au chemin canal unique
       try {
         this.enforceBudget({ ...effectiveInput, model: slug })
       } catch (error) {
@@ -452,7 +452,7 @@ export class ModelGatewayService extends Service {
     throw new Error(t('渠道组 {slug} 全链失败（无转人工配置）：{message}', { slug: group.slug, message: lastError }))
   }
 
-  // -- 遥测（1-3） ------------------------------------------------------------
+  // -- Télémétrie (1-3) ------------------------------------------------------------
 
   telemetry(): Collection<TelemetryRecord> {
     return this.ctx.opsStorage.collection<TelemetryRecord>('modelgw:telemetry')
@@ -461,16 +461,16 @@ export class ModelGatewayService extends Service {
   recordTelemetry(input: { model: string; ok: boolean; latencyMs: number; outputTokens: number; degraded?: boolean; error?: string }): void {
     const collection = this.telemetry()
     collection.insert({ id: newId('mtel'), at: new Date().toISOString(), ...input })
-    // 滚动窗清理：只保留 8 天（7d 查询窗 + 1d 余量）
+    // Nettoyage de la fenêtre glissante : ne conserve que 8 jours (fenêtre de requête 7 j + 1 j de marge)
     const cutoff = new Date(Date.now() - TELEMETRY_RETENTION_MS).toISOString()
     for (const stale of collection.all().filter((row) => row.at < cutoff)) collection.remove(stale.id)
   }
 
   /**
-   * 渠道遥测聚合（7d 窗口径）：可用率 / 延迟 p50 / TPS 代理（output tokens / 总时延）/
-   * 采纳率（usage 反馈聚合，无反馈=null）。
-   * TTFT 诚实缺列：非流式单轮无法测首 token 时延——ttftMs=null + 口径说明随响应返回，
-   * 待网关流式通道上线后补真值。
+   * Agrégat de télémétrie de canal (référentiel fenêtre 7 j) : taux de disponibilité / latence p50 / proxy TPS (output tokens / latence totale) /
+   * taux d'adoption (agrégat des retours usage, sans retour = null).
+   * TTFT honnêtement absent : un tour unique non streamé ne peut pas mesurer la latence du premier jeton — ttftMs=null + note de référentiel avec la réponse,
+   * vraie valeur à compléter quand le canal de streaming de la passerelle sera en ligne.
    */
   telemetryFor(slug: string, windowDays = 7): {
     model: string
@@ -510,7 +510,7 @@ export class ModelGatewayService extends Service {
     }
   }
 
-  // -- 预算与熔断（1-4） --------------------------------------------------------
+  // -- Budget et disjoncteur (1-4) --------------------------------------------------------
 
   budgets(): Collection<BudgetRecord> {
     return this.ctx.opsStorage.collection<BudgetRecord>('modelgw:budgets')
@@ -520,12 +520,12 @@ export class ModelGatewayService extends Service {
     if (input.dailyLimitCents === undefined && input.monthlyLimitCents === undefined) {
       throw new Error(t('预算至少配置 dailyLimitCents / monthlyLimitCents 之一'))
     }
-    // 主体格式校验（R10 前置）：subject 必须是 'agent:'/'app:' 前缀的计量主体，
-    // 防止随手填自由文本造成「配了预算但永远匹配不到 usage」的静默失效
+    // Validation du format de sujet (préambule R10) : subject doit être un sujet de metering préfixé 'agent:'/'app:',
+    // contre le texte libre qui créerait une invalidation silencieuse « un budget configuré mais jamais apparié par usage »
     if (input.subject !== undefined && !/^(agent|app):.+/.test(input.subject)) {
       throw new Error(t('预算主体格式非法：{subject}（须形如 agent:<id> 或 app:<id>，与 invoke 计量主体同口径）', { subject: input.subject }))
     }
-    // 复合键（org × 模型 × 主体）：三者共同唯一——同一组织可同时挂组织级、按模型、按主体预算
+    // Clé composée (org × modèle × sujet) : les trois ensemble uniques — une même organisation peut porter simultanément budgets niveau org, par modèle, par sujet
     const existing = this.budgets().findOne((item) =>
       (item.orgId ?? '') === (input.orgId ?? '')
       && (item.modelSlug ?? '') === (input.modelSlug ?? '')
@@ -534,14 +534,14 @@ export class ModelGatewayService extends Service {
     return this.budgets().insert({ id: newId('mbgt'), ...input })
   }
 
-  /** 预算命中的花费口径：org×模型×主体过滤的 usage 成本聚合（内部成本参考口径 cost_cents）。 */
+  /** Référentiel de dépense d'un budget atteint : agrégat de coût d'usage filtré org×modèle×sujet (référentiel de référence de coût interne cost_cents). */
   private budgetUsedCents(budget: BudgetRecord, from: string, to: string): number {
     const summary = this.ctx.usage.summary({
       from, to,
       ...(budget.orgId ? { org: budget.orgId } : {}),
       ...(budget.subject ? { subject: budget.subject } : {}),
     })
-    // '*' 通配（R3）：命中任意模型——取窗口总额，不做 byResource 过滤
+    // Joker '*' (R3) : atteint n'importe quel modèle — prend le total de la fenêtre, sans filtre byResource
     if (budget.modelSlug === '*') return summary.cost_cents
     if (budget.modelSlug) {
       const row = summary.byResource.find((item) => item.resource === `model:${budget.modelSlug}`)
@@ -550,7 +550,7 @@ export class ModelGatewayService extends Service {
     return summary.cost_cents
   }
 
-  /** 单预算的两窗状态（今日 / 本月，UTC 日界与 usage 报表口径一致）。 */
+  /** État des deux fenêtres d'un budget (aujourd'hui / ce mois, jour UTC cohérent avec le référentiel des rapports usage). */
   budgetStatus(budget: BudgetRecord): { daily: BudgetWindowStatus | null; monthly: BudgetWindowStatus | null } {
     const now = new Date()
     const status = (limitCents: number | undefined, fromIso: string): BudgetWindowStatus | null => {
@@ -566,24 +566,24 @@ export class ModelGatewayService extends Service {
   }
 
   /**
-   * org 维度预算进度（面板 cost chip / usage summary 的 budget 字段数据源）；无预算=null。
-   * 只取「模型范围不限且无主体范围」的 org 级预算：模型范围不限 = 未声明 modelSlug，
-   * 或 modelSlug='*'（R3 通配=命中任意模型，即全模型口径，视同 org 进度计入——
-   * 此前 '*' 被 !modelSlug 一并排除，只配通配预算的组织在摘要里 budget 恒 null 与熔断面口径分裂）；
-   * 字面量模型级预算是单模型口径、subject 预算是主体维度（R10）——两者不进 org 级进度。
+   * Progression du budget en dimension org (source de données du chip coût du panneau / du champ budget de l'usage summary) ; sans budget = null.
+   * Ne prend que les budgets niveau org « sans limite de modèle et sans périmètre de sujet » : sans limite de modèle = modelSlug non déclaré
+   * ou modelSlug='*' (le joker R3 = atteint tout modèle, donc référentiel tous modèles, compté comme une progression org —
+   * auparavant '*' était exclu d'un bloc avec !modelSlug, une organisation ne configurant que des budgets joker avait un budget constamment null dans le résumé, divergent de la face disjoncteur) ;
+   * un budget littéral de niveau modèle est un référentiel mono-modèle, un budget de sujet est la dimension sujet (R10) — ni l'un ni l'autre n'entrent dans la progression niveau org.
    */
   budgetStatusFor(orgId: string): { orgId: string; daily: BudgetWindowStatus | null; monthly: BudgetWindowStatus | null } | null {
     const budget = this.budgets().all()
       .filter((item) => item.enabled && !item.subject && (!item.modelSlug || item.modelSlug === '*') && (item.orgId ?? '') === (orgId || ''))
-      .sort((a, b) => (a.orgId ? 0 : 1) - (b.orgId ? 0 : 1))[0] // org 专属优先于平台级
+      .sort((a, b) => (a.orgId ? 0 : 1) - (b.orgId ? 0 : 1))[0] // propre à l'org prioritaire sur niveau plateforme
     if (!budget) return null
     return { orgId: budget.orgId ?? t('（平台级）'), ...this.budgetStatus(budget) }
   }
 
   /**
-   * 主体（Agent/应用）维度预算清单（R10 前置，执行中枢预算前置检查的契约方法）：
-   * 过滤 enabled 且 subject 全等、预算无 orgId（平台级兜底）或 org 匹配的全部预算，
-   * 逐条返回两窗状态（daily UTC 今日 / monthly 本月，与 budgetStatus 同一窗口口径）。
+   * Liste des budgets en dimension sujet (Agent/application) (préambule R10, méthode de contrat du contrôle préalable de budget du centre d'exécution) :
+   * filtre les budgets enabled dont le sujet est strictement égal, sans orgId (repli niveau plateforme) ou à org concordant,
+   * renvoie pour chacun l'état des deux fenêtres (daily UTC aujourd'hui / monthly ce mois, même référentiel de fenêtre que budgetStatus).
    */
   budgetStatusForSubject(subject: string, orgId?: string): Array<{ budget: BudgetRecord; daily: BudgetWindowStatus | null; monthly: BudgetWindowStatus | null }> {
     return this.budgets().all()
@@ -593,22 +593,22 @@ export class ModelGatewayService extends Service {
       .map((budget) => ({ budget, ...this.budgetStatus(budget) }))
   }
 
-  /** 删除预算（2026-10-14 删除面 R4）：预算治理此前只增不删，配错的预算只能停用滞留。 */
+  /** Suppression d'un budget (face suppression R4, 2026-10-14) : la gouvernance des budgets n'ajoutait auparavant que sans supprimer, un budget mal configuré ne pouvait qu'être désactivé et rester. */
   removeBudget(id: string): void {
     const budget = this.budgets().get(id)
     if (!budget) throw new Error(t('预算不存在：{id}', { id }))
     this.budgets().remove(id)
-    // 进程内告警去重状态一并清理，防止同 id 复用后当日告警被旧状态吞掉
+    // L'état de déduplication d'alerte en processus est aussi nettoyé, pour éviter qu'une réutilisation du même id voie l'alerte du jour avalée par le vieil état
     this.budgetWarnDay.delete(id)
   }
 
-  /** 调用前熔断 + 阈值告警（每预算每自然日最多一条 warning 事件）。 */
+  /** Disjoncteur avant appel + alerte de seuil (au plus un événement warning par jour naturel et par budget). */
   private enforceBudget(input: ModelInvokeInput): void {
     const candidates = this.budgets().all().filter((item) => {
       if (!item.enabled) return false
-      // R3 通配：modelSlug='*' 命中任意模型；其余字面量精确匹配
+      // Joker R3 : modelSlug='*' atteint tout modèle ; tout autre littéral en correspondance exacte
       if (item.modelSlug && item.modelSlug !== '*' && item.modelSlug !== input.model) return false
-      // R10 主体：subject 预算只对同主体（agent:<id>/app:<id>，与 usage 计量主体同口径）生效
+      // Sujet R10 : un budget de sujet ne prend effet que pour le même sujet (agent:<id>/app:<id>, même référentiel que le sujet de metering usage)
       if (item.subject && item.subject !== (input.subject ?? '')) return false
       if (item.orgId && item.orgId !== input.orgId) return false
       return true
@@ -640,13 +640,13 @@ export class ModelGatewayService extends Service {
     }
   }
 
-  // -- 调用 ---------------------------------------------------------------------
+  // -- Appel ---------------------------------------------------------------------
 
   async invoke(input: ModelInvokeInput): Promise<ModelInvokeResult> {
-    // 工作级授权闸门（D10）：入口先过闸，再进资源级校验（渠道分级/预算/上游），两层授权取交集（§9.5）
+    // Barrière d'autorisation au niveau travail (D10) : la barrière d'abord à l'entrée, puis la vérification au niveau ressource (gradation de canal/budget/amont), intersection des deux autorisations (§9.5)
     const work = await this.gateManagedModelCall(input.caller, input.model, input.work)
-    // D14：受管时有效密级 = max(请求 dataClass 缺省 internal, 任用冻结上限)，经显式映射表落到网关分级
-    // （topsecret 已在映射前拒绝）；非受管 legacy 路径 effectiveInput===input，现状不变
+    // D14 : en géré, gradation effective = max(dataClass de la requête, défaut internal, plafond gelé par la nomination), passée par la table de correspondance explicite vers la gradation de la passerelle
+    // (topsecret déjà refusé avant correspondance) ; en legacy non géré, effectiveInput===input, statu quo
     const effectiveInput = work
       ? { ...input, dataClass: this.effectiveManagedDataClass(input.dataClass, work.dataClass) }
       : input
@@ -654,9 +654,9 @@ export class ModelGatewayService extends Service {
     if (!model) throw new Error(t('模型不存在：{slug}（请先在模型目录登记）', { slug: effectiveInput.model }))
     if (model.status !== 'online') throw new Error(t('模型已下线：{slug}', { slug: model.slug }))
     if (!model.endpoint) throw new Error(t('模型 {slug} 未配置 endpoint，拒绝调用（不生成假 completion）', { slug: model.slug }))
-    // 分级路由（1-1）：越级直接拒绝（选择器锁死+原因）
+    // Routage par gradation (1-1) : hors gradation = refus direct (sélecteur verrouillé + motif)
     this.assertDataClassAllowed(model, effectiveInput.dataClass)
-    // 预算熔断（1-4）：block 动作在调用前生效（受管调用预算不足自然失败 → workforce 侧落 BUDGET_EXCEEDED）
+    // Disjoncteur de budget (1-4) : l'action block prend effet avant l'appel (un appel géré à budget insuffisant échoue naturellement → côté workforce, inscription BUDGET_EXCEEDED)
     try {
       this.enforceBudget(effectiveInput)
     } catch (error) {
@@ -666,10 +666,10 @@ export class ModelGatewayService extends Service {
     return this.invokeTracked(model, effectiveInput, INVOKE_TIMEOUT_MS, false)
   }
 
-  /** 带遥测的单渠道调用：时延/成败/降级标记滚动落库（7d 可用率与 TPS 代理的数据源）。 */
+  /** Appel canal unique avec télémétrie : latence/succès/marque de repli inscrits en fenêtre glissante (source des 7 j taux de disponibilité et du proxy TPS). */
   private async invokeTracked(model: ModelRecord, input: ModelInvokeInput, timeoutMs: number, degraded: boolean): Promise<ModelInvokeResult> {
-    // #17（2026-10-29）：组织归属先于上游调用校验（fail-fast）——此前 orgId 空串会在模型已应答、
-    // token 已消耗后的计量落账处抛「usage 事件 org 必填」（先花钱后报错，且该次成本未入账）
+    // #17 (2026-10-29) : le rattachement organisationnel est vérifié avant l'appel amont (fail-fast) — auparavant, une chaîne vide orgId jetait « org obligatoire
+    // dans l'événement usage » à l'inscription du metering, après que le modèle avait répondu et les jetons consommés (on paie d'abord, erreur ensuite, et ce coût non inscrit)
     if (!input.orgId?.trim()) {
       throw new Error(t('模型调用缺少组织归属（orgId 必填）：调用方须解析主体/部门/平台根组织后重试（#17 fail-fast）'))
     }
@@ -700,8 +700,8 @@ export class ModelGatewayService extends Service {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
         body: JSON.stringify({
-          // QA B-02：以实际调用渠道为准——降级链入参为 Omit<…,'model'>，原写法转发体缺 model 字段，
-          // 真实 OpenAI 兼容上游下备渠道全链 400
+          // QA B-02 : le canal réellement appelé fait foi — l'entrée de la chaîne de repli est Omit<…,'model'>, l'écriture d'origine faisait manquer le champ model au corps transféré,
+          // sous un vrai amont compatible OpenAI, les canaux de secours passaient toute la chaîne en 400
           model: model.slug,
           messages: input.messages,
           ...(input.maxTokens !== undefined ? { max_tokens: input.maxTokens } : {}),
@@ -730,9 +730,9 @@ export class ModelGatewayService extends Service {
     const inputTokens = payload.usage?.prompt_tokens ?? 0
     const outputTokens = payload.usage?.completion_tokens ?? 0
 
-    // #14（2026-10-29）组合计价：input/output 分别按价格簿费率折算（调用时点读取，价格簿仍是
-    // 唯一调价面；行明细原样进 usage 快照 rate.line_items，对账可复算）。费率未登记的行不入列
-    //（usage 侧回落价格簿单米口径；主条目缺失时 record 照旧响亮拒绝）。
+    // #14 (2026-10-29) prix combiné : input/output convertis séparément selon les taux du tarif (lus à l'instant de l'appel, le tarif reste
+    // l'unique face de retarification ; le détail des lignes entre tel quel dans l'instantané usage rate.line_items, récalculable en réconciliation). Une ligne sans taux enregistré n'entre pas dans la liste
+    //(côté usage, repli sur le référentiel du tarif à entrée unique ; entrée principale manquante : record refuse toujours bruyamment).
     const outputPrice = this.ctx.usage.priceOfResource(`model:${model.slug}`)
     const inputPrice = this.ctx.usage.priceOfResource(`model:${model.slug}:input`)
     const costLineItems = [
@@ -744,8 +744,8 @@ export class ModelGatewayService extends Service {
         : []),
     ]
 
-    // 计量：input/output tokens 实测值（先计量后返回）；零价快照入账（charge=0），
-    // cost 按内部成本参考折算，供成本穿透报表
+    // Metering : input/output tokens mesurés (mesurer d'abord, renvoyer ensuite) ; inscription en instantané à prix zéro (charge=0),
+    // cost converti selon la référence de coût interne, pour le rapport de perçage des coûts
     const event = this.ctx.usage.record({
       org: input.orgId,
       subject: input.subject,
@@ -758,8 +758,8 @@ export class ModelGatewayService extends Service {
       ],
       ...(costLineItems.length > 0 ? { costLineItems } : {}),
       idempotency_key: `modelgw:${newId('mi')}`,
-      // 工作关联（D11/V23/V27 additive）：受管调用时把 workforce 调用 ID 作为统一 trace 附加——
-      // 幂等键 modelgw:<mi> 与历史键 model:<slug> 照旧不改；usage 侧未识别的关联字段由组7增量承接
+      // Liaison de travail (additive D11/V23/V27) : sur un appel géré, l'ID d'appel workforce est ajouté comme trace unifiée —
+      // la clé idempotente modelgw:<mi> et la clé historique model:<slug> restent inchangées ; les champs d'association non reconnus côté usage sont repris en incrément par le groupe 7
       ...(input.work?.invocationId ? { trace_id: input.work.invocationId } : {}),
     })
 
@@ -770,14 +770,14 @@ export class ModelGatewayService extends Service {
       inputTokens,
       outputTokens,
       costCents: event.pricing.cost_cents,
-      // usage 事件回执（additive）：供工作调用账本对账关联（只关联，不重复登记消费）
+      // Reçu d'événement usage (additive) : pour l'association de réconciliation du registre d'appels de travail (association seule, pas de double enregistrement de consommation)
       usageEventId: event.event_id,
     }
   }
 }
 
 // ---------------------------------------------------------------------------
-// 插件
+// Extension
 // ---------------------------------------------------------------------------
 
 declare module '@deepseek-ai/cordis' {

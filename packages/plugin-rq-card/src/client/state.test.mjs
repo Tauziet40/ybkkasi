@@ -1,20 +1,20 @@
 /**
- * 四态状态源映射纯函数自证（WP-06 交付物 2 的配套测试）。
+ * Auto-attestation de la fonction pure de mise en correspondance des quatre états (tests associés au livrable 2 de WP-06).
  *
- * 运行方式（Node ≥22.18 原生加载 TS，state.ts 零依赖故无需任何构建）：
+ * Mode d'exécution (Node ≥22.18 charge TS nativement, state.ts sans dépendance, donc sans aucun build) :
  *
  *     node packages/plugin-rq-card/src/client/state.test.mjs
  *
- * 覆盖面：四态各一 + 异常阻断六码各自命中 + 优先级链（逐个摘除标志）+
- * degraded 附加信息 + fail-safe 语义（阻断优先于已完成/调用中）+
- * 结果级异常兜底码 invoke-error。
+ * Couverture : un cas par état + les six codes de blocage chacun atteints + chaîne de priorité (retrait des marqueurs un à un) +
+ * information additionnelle degraded + sémantique fail-safe (blocage prioritaire sur terminé/en appel) +
+ * code de repli invoke-error de l'anomalie au niveau résultat.
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { deriveExecutionState } from './state.ts'
 
-/** 全空输入（无结果、无 invoke、健康面 unknown）。 */
+/** Entrée toute vide (sans résultat, sans invoke, face santé unknown). */
 const IDLE = { hasResult: false, resultIsError: false, invokePhase: 'idle' }
 
 test('四态之 idle：无结果、无 invoke、健康面 unknown', () => {
@@ -26,7 +26,7 @@ test('四态之 calling：invoke 发起中（C2 表第一行：mcp invoke() 发�
     deriveExecutionState({ ...IDLE, invokePhase: 'calling' }),
     { state: 'calling' },
   )
-  // 发起段优先于健康面：同一时刻两者都在场，呈现发起段（骨架 + 可取消）。
+  // le segment de lancement prime sur la face santé : les deux présents au même instant, présenter le segment de lancement (squelette + annulable).
   assert.deepEqual(
     deriveExecutionState({ ...IDLE, invokePhase: 'calling', healthStatus: 'healthy' }),
     { state: 'calling' },
@@ -45,7 +45,7 @@ test('执行中 + degraded：附「有点慢」信息（degraded:true）', () =>
     deriveExecutionState({ ...IDLE, healthStatus: 'degraded' }),
     { state: 'executing', degraded: true },
   )
-  // 非 executing 态不携带 degraded 标记。
+  // un état non executing ne porte pas le marqueur degraded.
   assert.equal(deriveExecutionState({ ...IDLE, healthStatus: 'degraded', hasResult: true, resultIsError: false }).degraded, undefined)
   assert.equal(deriveExecutionState({ ...IDLE, healthStatus: 'degraded', invokePhase: 'calling' }).degraded, undefined)
 })
@@ -84,7 +84,7 @@ test('异常阻断优先级：authzDenied > quotaExceeded > pdpUnreachable > bre
     healthStatus: 'down',
     bindingInvalid: true,
   }
-  // 全量在场 → 取最高优先级；随后逐个摘除，验证整条优先级链。
+  // tout présent → prendre la priorité la plus haute ; puis retirer un à un, vérifier toute la chaîne de priorité.
   const chain = [
     [{}, 'nas-authz-deny'],
     [{ authzDenied: false }, 'quota-exhausted'],
@@ -114,7 +114,7 @@ test('结果级异常：isError 且无平台侧阻断标志 → blocked + 兜底
     deriveExecutionState({ hasResult: true, resultIsError: true, invokePhase: 'idle' }),
     { state: 'blocked', reason: 'invoke-error' },
   )
-  // 平台侧标志在场时仍按平台优先级（不落到兜底码）。
+  // marqueurs côté plateforme présents → priorité plateforme maintenue (pas de chute sur le code de repli).
   assert.deepEqual(
     deriveExecutionState({ hasResult: true, resultIsError: true, invokePhase: 'idle', quotaExceeded: true }),
     { state: 'blocked', reason: 'quota-exhausted' },

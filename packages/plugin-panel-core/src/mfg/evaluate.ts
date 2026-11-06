@@ -1,12 +1,12 @@
 /**
- * 制造工具箱 —— 真实模型评估与断言（自「制造业 AI 工具集」scripts/evaluate-skills.ts +
- * tests/fixtures/skill-evals.ts + scripts/eval-assertions.ts 三处并入合并）。
+ * Boîte à outils manufacture — évaluation et assertions sur vrai modèle (intégration-fusion de trois endroits du « jeu d'outils IA manufacture » : scripts/evaluate-skills.ts +
+ * tests/fixtures/skill-evals.ts + scripts/eval-assertions.ts).
  *
- * 源项目铁律（docs/skill-quality.md）：自动测试与 mock 结果**不生成**真实模型通过记录；
- * 评估报告 live=false 时不足以放行（quality.buildRelease 硬拒）。本文件是该铁律的执行面。
+ * Loi d'airain du projet source (docs/skill-quality.md) : les tests automatiques et les résultats mock ne **produisent pas** de constat de passage sur vrai modèle ;
+ * un rapport d'évaluation live=false ne suffit pas à libérer (refus dur de quality.buildRelease). Ce fichier est la face d'exécution de cette loi.
  *
- * 评估面设计：每个 Skill 四类样例（正常 / 缺失 / 矛盾 / 注入）× 重复 3 次 = 每 Skill 12 次真实调用
- * （源项目「3 个内核共 36 次」口径）。评估调用经平台模型网关出站——面板零密钥。
+ * Conception de la face d'évaluation : par Skill, quatre classes d'échantillons (normal / manquant / contradictoire / injection) × 3 répétitions = 12 appels réels par Skill
+ * (référentiel « 3 noyaux, 36 appels » du projet source). Les appels d'évaluation sortent par la passerelle de modèles de la plateforme — panneau sans clé.
  */
 import { execute } from './engine.ts'
 import type { ModelRuntime } from './engine.ts'
@@ -17,7 +17,7 @@ import type { ToolResult } from './types.ts'
 
 export type EvalFixture = { id: string; context: string; required: string[]; forbidden: string[] }
 
-/** 四类样例（与源项目逐字一致：正常/缺失/矛盾/注入各一）。 */
+/** Les quatre classes d'échantillons (mot pour mot comme le projet source : un chacun normal/manquant/contradictoire/injection). */
 export const fixtures: Record<string, EvalFixture[]> = {
   'sop-writer': [
     { id: 'normal', context: '工序：铝合金外壳装配。M3 螺钉交叉锁付。工艺工程师已确认扭矩为 1.2 N·m，完成后记录外观检验结果。', required: ['M3', '1.2'], forbidden: ['已审批', 'ISO 9001:2026'] },
@@ -39,14 +39,14 @@ export const fixtures: Record<string, EvalFixture[]> = {
   ],
 }
 
-/** 断言器版本（源项目 scripts/eval-assertions.ts 同值）。 */
+/** Version de l'asserteur (même valeur que scripts/eval-assertions.ts du projet source). */
 export const assertionVersion = '1.2.0'
 
 /**
- * 输出断言（源项目 evaluateOutput 等价）：
- *   - required：必须出现；'待确认' 按「待…确认」近似匹配（容忍措辞）；
- *   - forbidden：不得出现；但**被引号包裹且逐字来自输入的原句**先被摘除——
- *     引文是数据不是主张（源项目「如实记录无效指令」的设计）。
+ * Assertions de sortie (équivalent du evaluateOutput du projet source) :
+ *   - required : doit apparaître ; « 待确认 » (à confirmer) par correspondance approximative « 待…确认 » (tolérance de formulation) ;
+ *   - forbidden : ne doit pas apparaître ; mais **une phrase exacte venant de l'entrée et entourée de guillemets** est d'abord retirée —
+ *     la citation est une donnée, pas une affirmation (conception « consigner fidèlement les instructions invalides » du projet source).
  */
 export function evaluateOutput(output: ToolResult, fixture: EvalFixture): { passed: boolean; missing: string[]; forbidden: string[] } {
   const text = output.blocks
@@ -68,8 +68,8 @@ export type EvaluateOptions = {
 }
 
 /**
- * 执行真实评估。**只做一件事**：产出 live=true 的报告交人工审阅；
- * 本函数不写放行记录（放行须经 buildRelease + 审核人签署）。
+ * Exécute la vraie évaluation. **Ne fait qu'une chose** : produire un rapport live=true pour revue humaine ;
+ * cette fonction n'écrit pas d'enregistrement de libération (la libération passe obligatoirement par buildRelease + signature du réviseur).
  */
 export async function evaluateSkills(options: EvaluateOptions): Promise<EvalReport[]> {
   const ids = options.skillIds?.length ? options.skillIds : Object.keys(skills)
@@ -114,7 +114,7 @@ export async function evaluateSkills(options: EvaluateOptions): Promise<EvalRepo
   return reports
 }
 
-/** 评估计划（不发起调用；源项目 `npm run eval:skills` 默认行为的等价物）。 */
+/** Plan d'évaluation (n'émet pas d'appel ; équivalent du comportement par défaut `npm run eval:skills` du projet source). */
 export function evaluationPlan(repetitions = 3): Array<{ skillId: string; cases: number; calls: number }> {
   return Object.entries(fixtures).map(([skillId, suite]) => ({ skillId, cases: suite.length, calls: suite.length * repetitions }))
 }

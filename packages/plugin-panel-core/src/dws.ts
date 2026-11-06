@@ -1,23 +1,23 @@
 /**
- * dws 钉钉 CLI 桥（01门装态钉钉连接兜底）：钉钉官方命令行工具（dingtalk-workspace-cli，
- * 命令前缀 dws）作为 01门 装态的消息出向通道——宿主面钉钉连接器/桥（plugin-dingtalk-bridge）
- * 缺席时，面板「钉钉同步」经本桥落 dws chat 命令投递；CLI 未安装时提供一键安装与诚实状态。
+ * Pont dws vers le CLI DingTalk (repli de connexion DingTalk en forme installée porte 01) : l'outil officiel en ligne de commande DingTalk (dingtalk-workspace-cli,
+ * préfixe de commande dws) sert de canal sortant de messages en forme installée porte 01 — quand le connecteur/pont DingTalk de la face hôte
+ * (plugin-dingtalk-bridge) est absent, la « synchronisation DingTalk » du panneau passe par ce pont en commandes dws chat ; CLI non installé = installation en un clic et état honnête.
  *
- * 动机（2026-09-11 用户需求）：面板钉钉连接直接使用 dws CLI；客户机器没装时默认帮装；
- * 面板支持 CLI 调用-消息交互。设计边界：
- *   - 本桥零凭证：钉钉侧授权态归 dws CLI 自身；面板可「代发起」登录（dws auth login --device
- *     设备流，2026-09-11 补环）——激活指令（授权链接+用户码）弹给用户，授权完成即本机登录态生效；
- *   - plugin-dingtalk-bridge 在场（全量形态）→ 路由/事件全归桥，本模块不注册不订阅；
- *   - 发送失败如实回传（stdout/stderr 尾部），绝不造假成功；
- *   - 入向（钉钉→面板）：dws chat +chat-messages 拉取绑定群最新消息（按 messageId 幂等去重落库）。
+ * Motivation (besoin utilisateur 2026-09-11) : la connexion DingTalk du panneau utilise directement le CLI dws ; s'il n'est pas installé sur la machine du client, installation par défaut ;
+ * le panneau prend en charge l'interaction CLI-appel-messages. Frontières de conception :
+ *   - ce pont est sans identifiants : l'état d'autorisation côté DingTalk appartient au CLI dws lui-même ; le panneau peut « initier pour le compte de » la connexion (dws auth login --device
+ *     flux d'appareil, boucle bouclée 2026-09-11) — l'instruction d'activation (lien d'autorisation + code utilisateur) est montrée à l'utilisateur, l'autorisation faite = état de connexion local effectif ;
+ *   - plugin-dingtalk-bridge présent (forme complète) → routage/événements entièrement au pont, ce module ne s'enregistre ni ne souscrit ;
+ *   - un échec d'envoi est renvoyé tel quel (fin de stdout/stderr), jamais de succès fabriqué ;
+ *   - entrant (DingTalk→panneau) : dws chat +chat-messages tire les derniers messages du groupe lié (déduplication idempotente par messageId à l'inscription).
  */
 import { spawn } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
 
-/** dws 绑定配置（opsStorage 单记录集合）。 */
+/** Configuration de liaison dws (collection opsStorage à enregistrement unique). */
 export interface DwsBindingRecord {
   id: string
-  /** 目标钉钉群（群名或 openConversationId，交由 dws CLI 解析）。 */
+  /** Groupe DingTalk cible (nom de groupe ou openConversationId, résolu par le CLI dws). */
   group?: string
   boundAt?: string
   boundBy?: string
@@ -29,7 +29,7 @@ export interface DwsAuthSummary {
   userName?: string
   userId?: string
   expiresAt?: string
-  /** 探测失败/未登录时的原始输出尾部（诚实呈现，绝不臆造登录态）。 */
+  /** Fin de sortie brute en cas d'échec de sonde/non connecté (présentation honnête, jamais d'état de connexion inventé). */
   raw?: string
 }
 
@@ -44,12 +44,12 @@ export interface DwsStatus {
   auth: DwsAuthSummary
 }
 
-/** 设备流激活指令（dws auth login --device stdout 解析产物，弹窗直出）。 */
+/** Instruction d'activation du flux d'appareil (produit de l'analyse du stdout d'dws auth login --device, sortie directe en pop-up). */
 export interface DeviceFlowInfo {
-  /** 基础验证页（不含用户码）。 */
+  /** Page de vérification de base (sans code utilisateur). */
   link?: string
   userCode?: string
-  /** 带 user_code 的一步直达链接（弹窗主按钮指向它）。 */
+  /** Lien direct en une étape avec user_code (le bouton principal de la pop-up pointe dessus). */
   verifyUrl?: string
   expiresInSeconds?: number
 }
@@ -59,14 +59,14 @@ const INSTALL_HINT = `未检测到 dws CLI（钉钉官方命令行）。一键�
 const SPAWN_TIMEOUT_MS = 20_000
 const INSTALL_TIMEOUT_MS = 240_000
 const OUTPUT_CAP = 8_000
-/** 设备流授权码有效期 900s（CLI 输出声明）；进程超时给足余量，超时即杀防悬挂。 */
+/** Validité du code d'autorisation du flux d'appareil : 900 s (déclaré par la sortie du CLI) ; le timeout du processus laisse large marge, expiration = kill anti-suspension. */
 const LOGIN_TIMEOUT_MS = 960_000
-/** 发起登录后等待激活指令（链接+用户码）出现在 stdout 的上限。 */
+/** Après lancement de la connexion, plafond d'attente de l'apparition de l'instruction d'activation (lien+code utilisateur) dans le stdout. */
 const LOGIN_INFO_WAIT_MS = 25_000
-/** dws auth status 探测缓存：正值防高频 spawn；轮询终态一律 force。 */
+/** Cache de sonde dws auth status : le positif prévient les spawns à haute fréquence ; le scrutin d'état terminal force toujours. */
 const AUTH_CACHE_MS = 15_000
 
-/** 设备流登录会话（进程句柄 + 渐进输出缓冲；授权态本身仍归 dws CLI，面板只观测）。 */
+/** Session de connexion par flux d'appareil (handle de processus + tampon de sortie progressif ; l'état d'autorisation reste au CLI dws, le panneau n'observe que). */
 interface LoginSession {
   child?: ReturnType<typeof spawn>
   stdout: string
@@ -77,7 +77,7 @@ interface LoginSession {
   timer?: ReturnType<typeof setTimeout>
 }
 
-/** dws 绑定存储（单记录，id 固定 'dws'）。 */
+/** Stockage de liaison dws (enregistrement unique, id fixe 'dws'). */
 export function dwsBinding(ctx: Context) {
   return ctx.opsStorage.collection<DwsBindingRecord>('panel:dingtalk')
 }
@@ -86,7 +86,7 @@ function readBinding(ctx: Context): DwsBindingRecord | undefined {
   return dwsBinding(ctx).get('dws')
 }
 
-/** 引用安全的命令行拼接（Windows cmd 引号规则：内容不含引号时双引号包裹足够）。 */
+/** Assemblage de ligne de commande sûr par référence (règles de guillemets cmd Windows : envelopper de guillemets doubles suffit quand le contenu n'en contient pas). */
 const quote = (value: string): string => (/[^\w@%+=:,./-]/.test(value) ? `"${value.replace(/"/g, '')}"` : value)
 
 function exec(command: string, args: string[], timeoutMs: number): Promise<{ ok: boolean; stdout: string; stderr: string }> {
@@ -107,7 +107,7 @@ function exec(command: string, args: string[], timeoutMs: number): Promise<{ ok:
       resolve({ ok, stdout: stdout.slice(-OUTPUT_CAP), stderr: stderr.slice(-OUTPUT_CAP) })
     }
     const timer = setTimeout(() => {
-      try { child.kill() } catch { /* 进程已退出 */ }
+      try { child.kill() } catch { /* processus déjà terminé */ }
       finish(false)
     }, timeoutMs)
     child.stdout?.on('data', (chunk) => { stdout += String(chunk) })
@@ -121,8 +121,8 @@ function exec(command: string, args: string[], timeoutMs: number): Promise<{ ok:
 }
 
 /**
- * dws auth login --device 输出解析（纯函数，selftest 直测）：从渐进式人类可读输出中提取
- * 激活指令。实测形态（dws v1.0.61）：
+ * Analyse de la sortie d'dws auth login --device (fonction pure, testée directement par selftest) : extrait l'instruction
+ * d'activation d'une sortie progressive lisible par l'humain. Forme constatée (dws v1.0.61) :
  *   link: https://login.dingtalk.com/oauth2/device/verify.htm
  *   authorization code: VSGN-KGWV
  *   https://login.dingtalk.com/oauth2/device/verify.htm?user_code=VSGN-KGWV
@@ -135,7 +135,7 @@ export function parseDeviceFlowOutput(text: string): DeviceFlowInfo {
   const expiresInSeconds = Number(text.match(/expire in (\d+) seconds/i)?.[1] ?? 0) || undefined
   const combined = text.match(/https?:\/\/\S*user_code=[A-Za-z0-9-]+/)?.[0]
   if (link && userCode) return { link, userCode, verifyUrl: `${link}?user_code=${userCode}`, ...(expiresInSeconds ? { expiresInSeconds } : {}) }
-  // 兜底：某些版本只给一条带 user_code 的完整链接
+  // Repli : certaines versions ne donnent qu'un lien complet avec user_code
   if (combined) return { verifyUrl: combined, ...(userCode ? { userCode } : {}), ...(expiresInSeconds ? { expiresInSeconds } : {}) }
   return {
     ...(link ? { link } : {}),
@@ -144,7 +144,7 @@ export function parseDeviceFlowOutput(text: string): DeviceFlowInfo {
   }
 }
 
-/** dws auth status --format json 输出 → 授权摘要（失败/未登录一律 authenticated:false + raw 尾部）。 */
+/** Sortie dws auth status --format json → résumé d'autorisation (échec/non connecté = toujours authenticated:false + fin de raw). */
 export function parseAuthStatus(text: string): DwsAuthSummary {
   try {
     const parsed = JSON.parse(text) as {
@@ -167,11 +167,11 @@ export function parseAuthStatus(text: string): DwsAuthSummary {
   }
 }
 
-/** dws CLI 是否可用（版本探测，结果缓存 30s——探测是毫秒级但避免高频 spawn）。 */
+/** Disponibilité du CLI dws (sonde de version, résultat en cache 30 s — la sonde est en millisecondes mais évite les spawns à haute fréquence). */
 export class DwsCli {
   private versionCache: { at: number; installed: boolean; version?: string } | undefined
   private authCache: { at: number; auth: DwsAuthSummary } | undefined
-  /** 进行中的设备流登录会话（同机同时至多一个；重发即顶掉旧会话）。 */
+  /** Session de login par flux d'appareil en cours (au plus une à la fois sur la machine ; relancer évince l'ancienne). */
   private loginSession: LoginSession | undefined
 
   private readonly ctx: Context
@@ -191,20 +191,20 @@ export class DwsCli {
   }
 
   /**
-   * 授权态探测（dws auth status）。未装/未登录/输出异常一律 authenticated:false + raw 尾部，
-   * 绝不把「探测失败」粉饰成「已登录」或反之。结果缓存 15s；登录终态判定走 force。
+   * Sonde d'état d'autorisation (dws auth status). Non installé/non connecté/sortie anormale = toujours authenticated:false + fin de raw,
+   * jamais « échec de sonde » maquillé en « connecté » ni l'inverse. Résultat en cache 15 s ; le jugement d'état terminal de connexion force.
    */
   async authStatus(force = false): Promise<DwsAuthSummary> {
     const cached = this.authCache
     if (!force && cached && Date.now() - cached.at < AUTH_CACHE_MS) return cached.auth
     const result = await exec('dws', ['auth', 'status', '--format', 'json', '--timeout', '15'], 20_000)
-    // 未登录时 CLI 可能以非零码退出但 JSON 照常输出——stdout 无条件解析，退出码仅作参考
+    // Non connecté, le CLI peut sortir en code non nul mais émettre quand même le JSON — stdout analysé inconditionnellement, code de sortie purement indicatif
     const auth = parseAuthStatus(result.stdout || result.stderr)
     this.authCache = { at: Date.now(), auth }
     return auth
   }
 
-  /** 状态面（面板 pill/绑定弹窗消费）。 */
+  /** Face état (consommée par la pastille du panneau/la pop-up de liaison). */
   async status(): Promise<DwsStatus> {
     const { installed, version } = await this.probe()
     const binding = readBinding(this.ctx)
@@ -222,7 +222,7 @@ export class DwsCli {
     }
   }
 
-  /** 一键安装（npm 全局装官方 CLI）；已装则直接返回成功。耗时长，调用面须放行 panel.config.write。 */
+  /** Installation en un clic (npm -g pour le CLI officiel) ; déjà installé = succès direct. Long, la face appelante doit exiger panel.config.write. */
   async install(): Promise<{ ok: boolean; message: string }> {
     const { installed, version } = await this.probe(true)
     if (installed) return { ok: true, message: `dws CLI 已安装（${version}），无需重复安装` }
@@ -238,12 +238,12 @@ export class DwsCli {
     }
   }
 
-  // -- 登录授权面（2026-09-11 用户需求：面板代发起 dws 登录，未登录弹激活指令） ---------------
+  // -- Face connexion-autorisation (besoin utilisateur 2026-09-11 : le panneau initie la connexion dws, non connecté = pop-up de l'instruction d'activation) ---------------
 
   /**
-   * 代发起登录（dws auth login --device 设备流）：CLI 在本机起轮询、打印激活指令（授权链接 +
-   * 用户码），面板把指令弹给用户；用户任意设备上完成授权后 CLI 轮询拿到 token，本机登录态生效。
-   * 已登录 → already:true 幂等短路；已有进行中会话 → 直接复用（幂等，不重复起进程）。
+   * Connexion initiée pour le compte de (dws auth login --device flux d'appareil) : le CLI monte un scrutin local et imprime l'instruction d'activation (lien d'autorisation +
+   * code utilisateur), le panneau la montre à l'utilisateur ; dès que l'utilisateur autorise sur un appareil quelconque, le scrutin du CLI obtient le token, l'état de connexion local prend effet.
+   * Déjà connecté → already:true court-circuit idempotent ; session déjà en cours → réutilisation directe (idempotent, pas de double processus).
    */
   async startLogin(): Promise<
     | { started: true; verifyUrl: string; userCode?: string; expiresInSeconds?: number }
@@ -251,14 +251,14 @@ export class DwsCli {
   > {
     const auth = await this.authStatus(true)
     if (auth.authenticated) return { started: false, already: true, auth }
-    // 已有会话且激活指令已出 → 幂等复用（前端轮询按钮连点安全）
+    // Session existante avec instruction d'activation déjà sortie → réutilisation idempotente (clics répétés du bouton de scrutin front sûrs)
     const existing = this.loginSession
     if (existing && !existing.exited) {
       const info = parseDeviceFlowOutput(existing.stdout)
       if (info.verifyUrl) {
         return { started: true, verifyUrl: info.verifyUrl, ...(info.userCode ? { userCode: info.userCode } : {}), ...(info.expiresInSeconds ? { expiresInSeconds: info.expiresInSeconds } : {}) }
       }
-      // 指令还没出来：继续等（不重复起进程）
+      // L'instruction n'est pas encore sortie : continuer à attendre (pas de double processus)
       const waited = await this.waitForLoginInfo(existing)
       if (waited.verifyUrl) return { started: true, verifyUrl: waited.verifyUrl, ...(waited.userCode ? { userCode: waited.userCode } : {}), ...(waited.expiresInSeconds ? { expiresInSeconds: waited.expiresInSeconds } : {}) }
       if (!existing.exited) return { started: false, message: 'dws 登录进程在位但激活指令未就绪，请稍后在状态轮询中重试' }
@@ -275,7 +275,7 @@ export class DwsCli {
     child.on('error', (error) => { session.stderr += String(error); session.exited = true })
     child.on('close', (code) => { session.exited = true; session.exitOk = code === 0 })
     session.timer = setTimeout(() => {
-      try { child.kill() } catch { /* 进程已退出 */ }
+      try { child.kill() } catch { /* processus déjà terminé */ }
       session.exited = true
     }, LOGIN_TIMEOUT_MS)
     this.loginSession = session
@@ -291,7 +291,7 @@ export class DwsCli {
     return { started: false, message: 'dws 登录进程已启动但激活指令迟迟未输出（请检查 dws 版本 ≥1.0），稍后可在状态面重试' }
   }
 
-  /** 等激活指令出现在输出缓冲（300ms 步进，至多 LOGIN_INFO_WAIT_MS）。 */
+  /** Attend l'instruction d'activation dans le tampon de sortie (pas de 300 ms, plafond LOGIN_INFO_WAIT_MS). */
   private waitForLoginInfo(session: LoginSession): Promise<DeviceFlowInfo> {
     return new Promise((resolve) => {
       const deadline = Date.now() + LOGIN_INFO_WAIT_MS
@@ -306,8 +306,8 @@ export class DwsCli {
   }
 
   /**
-   * 登录会话状态（前端 3s 轮询）：进程在位 → active + 激活指令；进程退出 → force 复核授权态
-   * 并就地消费会话（成功/失败都给终态，不悬挂）。
+   * État de la session de connexion (scrutin front 3 s) : processus en place → active + instruction d'activation ; processus sorti → re-contrôle forcé de l'autorisation
+   * et consommation de la session sur place (succès/échec tous deux terminaux, pas de suspension).
    */
   async loginState(): Promise<{ active: boolean; authenticated: boolean; verifyUrl?: string; userCode?: string; expiresInSeconds?: number; message?: string; auth?: DwsAuthSummary }> {
     const session = this.loginSession
@@ -317,7 +317,7 @@ export class DwsCli {
     if (!session.exited) {
       return { active: true, authenticated: auth.authenticated, ...(info.verifyUrl ? { verifyUrl: info.verifyUrl } : {}), ...(info.userCode ? { userCode: info.userCode } : {}), ...(info.expiresInSeconds ? { expiresInSeconds: info.expiresInSeconds } : {}), auth }
     }
-    // 进程已退出：复核终态并消费会话
+    // Processus déjà sorti : re-contrôler l'état terminal et consommer la session
     this.loginSession = undefined
     clearTimeout(session.timer)
     if (auth.authenticated) return { active: false, authenticated: true, auth }
@@ -325,16 +325,16 @@ export class DwsCli {
     return { active: false, authenticated: false, auth, message: session.exitOk ? 'dws 登录进程已结束但授权态未生效（可能授权码过期），请重新发起' : `dws 登录未完成：${tail || '进程非正常退出，请重新发起'}` }
   }
 
-  /** 取消进行中的登录（杀进程 + 清理；无会话为幂等 no-op）。 */
+  /** Annule la connexion en cours (kill du processus + nettoyage ; sans session = no-op idempotent). */
   cancelLogin(): void {
     const session = this.loginSession
     if (!session) return
     this.loginSession = undefined
     clearTimeout(session.timer)
-    try { session.child?.kill() } catch { /* 进程已退出 */ }
+    try { session.child?.kill() } catch { /* processus déjà terminé */ }
   }
 
-  /** 绑定/换绑目标群（存群名或会话 ID，投递时由 dws 解析）。 */
+  /** Lie/re-lie le groupe cible (nom de groupe ou ID de conversation stocké, résolu par dws à la livraison). */
   bind(group: string, boundBy: string): DwsBindingRecord {
     const trimmed = group.trim()
     if (!trimmed) throw new Error('群名/会话 ID 必填')
@@ -352,13 +352,13 @@ export class DwsCli {
   }
 
   /**
-   * 出向投递：dws chat +send-to-group --group <群> --content <文本>（--format json 结构化判果）。
-   * 失败抛错（调用方落 audit/事件留痕），绝不静默。
+   * Livraison sortante : dws chat +send-to-group --group <groupe> --content <texte> (--format json pour juger structuré du résultat).
+   * Échec = erreur levée (l'appelant inscrit audit/événement pour trace), jamais silencieux.
    */
   async sendToGroup(text: string, group?: string): Promise<{ group: string; version?: string }> {
-    // 绑定前置校验（零成本同步读）先于 probe 子进程探测：本方法被 panel.message.created
-    // 事件钩子以 fire-and-forget 调用，回执时延直接决定面板 ddSync 终态回写速度——
-    // 未绑群是最常见失败态，不该为它白付一次 dws --version spawn（负载下可达数秒，QA T-04 竞态根源）。
+    // Le contrôle préalable de liaison (lecture synchrone sans coût) précède la sonde par sous-processus probe : cette méthode est appelée en fire-and-forget
+    // par le crochet d'événement panel.message.created, la latence du reçu détermine directement la vitesse d'écriture de l'état terminal ddSync du panneau —
+    // groupe non lié est l'état d'échec le plus fréquent, il ne mérite pas un spawn dws --version gratuit (plusieurs secondes sous charge, racine de la course QA T-04).
     const target = group?.trim() || readBinding(this.ctx)?.group
     if (!target) throw new Error('未绑定钉钉群：请先在面板「钉钉」绑定目标群')
     const { installed, version } = await this.probe()
@@ -368,7 +368,7 @@ export class DwsCli {
       const tail = (result.stderr || result.stdout).trim().split(/\r?\n/).slice(-4).join('；')
       throw new Error(`dws 投递失败：${tail || 'dws 命令退出码非 0（请检查 dws login 授权态与群名）'}`)
     }
-    // dws --format json 输出 {ok:false} 形态时命令退出码可能仍为 0——按真实返回判果
+    // Quand dws --format json produit {ok:false}, le code de sortie de la commande peut rester 0 — juger sur le retour réel
     try {
       const parsed = JSON.parse(result.stdout) as { ok?: boolean; error?: { message?: string } | string }
       if (parsed && parsed.ok === false) {
@@ -376,14 +376,14 @@ export class DwsCli {
         throw new Error(`dws 投递失败：${reason ?? 'CLI 返回 ok:false'}`)
       }
     } catch (error) {
-      if (error instanceof SyntaxError) { /* 非 JSON 输出（旧版 CLI）→ 以退出码为准，视为成功 */ } else { throw error }
+      if (error instanceof SyntaxError) { /* sortie non JSON (ancienne CLI) → on s'en tient au code de sortie, considéré comme succès */ } else { throw error }
     }
     return { group: target, ...(version ? { version } : {}) }
   }
 
   /**
-   * 入向拉取：dws chat +chat-messages 读绑定群最新消息（默认当前时间向前 --limit 条）。
-   * 返回归一化消息（createTime 按 dws 输出的本地时区解析为 ISO）；失败抛错，绝不静默。
+   * Tirage entrant : dws chat +chat-messages lit les derniers messages du groupe lié (par défaut --limit messages en remontant depuis maintenant).
+   * Renvoie des messages normalisés (createTime analysé du fuseau local de la sortie dws en ISO) ; échec = erreur levée, jamais silencieux.
    */
   async pullLatestMessages(limit = 20, group?: string): Promise<Array<{ messageId: string; sender: string; text: string; createdAt: string }>> {
     const { installed } = await this.probe()
@@ -416,7 +416,7 @@ export class DwsCli {
         messageId: String(m.messageId),
         sender: String(m.sender ?? '钉钉成员'),
         text: String(m.text ?? '').trim(),
-        // dws createTime 为 "YYYY-MM-DD HH:mm:ss" 本地时区形态 → 按本地时区解析
+        // dws createTime est de la forme "YYYY-MM-DD HH:mm:ss" en fuseau local → analyse en fuseau local
         createdAt: new Date(String(m.createTime ?? '').replace(' ', 'T')).toISOString(),
       }))
   }

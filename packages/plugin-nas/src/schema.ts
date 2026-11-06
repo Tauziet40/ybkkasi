@@ -1,9 +1,9 @@
 /**
- * NAS 存储资产属性表与生命周期声明（FS 文件存储类资产）。
+ * Table d'attributs et déclaration de cycle de vie des actifs de stockage NAS (classe d'actifs FS stockage de fichiers).
  *
- * 访问模型：NAS 资产通过「MCP 文件网关」访问（参考 synology-filestation-mcp）——
- * 网关地址 + Bearer 令牌 + X-NAS-IP 设备路由，全部文件操作经网关 tools/call 完成。
- * schema 同时驱动：控制台注册表单（基本/接入/治理三组）、属性校验、详情页展示。
+ * Modèle d'accès : les actifs NAS sont accédés via « passerelle de fichiers MCP » (voir synology-filestation-mcp) —
+ * adresse de passerelle + jeton Bearer + routage d'appareil X-NAS-IP, toutes les opérations de fichiers passent par tools/call de la passerelle.
+ * Le schéma pilote à la fois : formulaire d'enregistrement de console (trois groupes base/accès/gouvernance), validation d'attributs, page de détail.
  */
 import type { ResourceTypeSpec } from '../../plugin-resource-core/src/index.ts'
 

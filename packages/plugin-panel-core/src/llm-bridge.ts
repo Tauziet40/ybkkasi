@@ -1,19 +1,19 @@
 /**
- * dsh 模型桥（01门装态模型面兜底）：modelgw 缺席但 dsh 宿主在（提供 ctx.llm LlmRuntime）时，
- * 把面板模型面/Agent 调用落到 dsh 已配置的模型（settings.yaml agent-default-model + llm 适配器路由）。
+ * Pont de modèles dsh (repli de la face modèle en forme installée porte 01) : quand modelgw est absent mais l'hôte dsh présent (fournissant ctx.llm LlmRuntime),
+ * la face modèle du panneau/les appels d'Agent tombent sur les modèles déjà configurés de dsh (settings.yaml agent-default-model + routage de l'adaptateur llm).
  *
- * 动机（2026-09-11 用户实测）：01门 4-entry 装态无 modelgw，「更多-模型配置」永远 503 降级、
- * @Agent 永远转人工——用户在 dsh 默认配置里配好的模型（dsh 原生对话可用）面板却用不上。
- * 本桥让「dsh 配置 = 面板模型目录」同源：目录只读（增删改诚实拒绝，配置事实源在 dsh），
- * 测试/调用走 ctx.llm.stream 真实出站，绝不造假回复。
+ * Motivation (retour utilisateur 2026-09-11) : en forme installée 4-entry porte 01 sans modelgw, « plus - configuration des modèles » restait à 503 dégradé,
+ * @Agent toujours escaladé à l'humain — les modèles configurés dans la configuration par défaut de dsh (utilisables en dialogue natif dsh) restaient inaccessibles au panneau.
+ * Ce pont rend « configuration dsh = catalogue de modèles du panneau » homogène : catalogue en lecture seule (ajout/suppression/modification honnêtement refusés, la source de fait de la configuration est dans dsh),
+ * tests/appels via ctx.llm.stream en vraie sortie, jamais de réponse fabriquée.
  *
- * 边界：ctx.llm 缺席（纯独立平台形态）→ createDshModelGateway 返回 null，行为与旧版完全一致；
- * modelgw 在场（全量形态）→ 优先用 modelgw，本桥不参与。目录条目 slug 形态 provider:model，
- * 另有合成 slug 'default' 跟随 dsh 默认模型选择（agentDefaultModel.read()，缺席时取首个可用路由）。
+ * Frontière : ctx.llm absent (forme plateforme purement autonome) → createDshModelGateway renvoie null, comportement strictement identique à l'ancienne version ;
+ * modelgw présent (forme complète) → modelgw prioritaire, ce pont ne participe pas. Les entrées de catalogue ont un slug de forme provider:model,
+ * avec en plus un slug synthétique 'default' qui suit le choix du modèle par défaut de dsh (agentDefaultModel.read(), sinon le premier routage disponible).
  */
 import type { Context } from '@deepseek-ai/cordis'
 
-/** dsh LlmRuntime 最小结构（不依赖 dsh 包；运行期形状断言）。 */
+/** Structure minimale du LlmRuntime dsh (sans dépendre du paquet dsh ; assertion de forme à l'exécution). */
 interface DshLlmLike {
   listProviders(): Array<{ id: string; name: string }>
   listModels(provider: string): Promise<Array<{ id: string; name: string; description?: string }>>
@@ -36,7 +36,7 @@ interface DshDefaultModelLike {
   read(): { provider: string; model: string }
 }
 
-/** 桥目录条目（与 modelgw ModelRecord 字面对齐，面板/服务零特判消费）。 */
+/** Entrée du catalogue du pont (alignée littéralement sur ModelRecord de modelgw, consommation sans cas particulier par panneau/service). */
 export interface BridgedModelRecord {
   id: string
   slug: string
@@ -65,7 +65,7 @@ export interface BridgedInvokeResult {
 
 const BRIDGE_PLUGIN_ID = '@ybkk/gate-01/panel-core'
 
-/** 软读 dsh 宿主服务（与 service.ts soft 同规；缺席 = undefined）。 */
+/** Lecture douce du service hôte dsh (même règle que soft de service.ts ; absent = undefined). */
 const soft = (ctx: Context, key: string): any => {
   try {
     return ctx.reflect.get(key, false)
@@ -74,7 +74,7 @@ const soft = (ctx: Context, key: string): any => {
   }
 }
 
-/** 形状断言：ctx.llm 必须长出 listProviders/stream 才算 dsh 模型面在场。 */
+/** Assertion de forme : ctx.llm doit exposer listProviders/stream pour que la face modèle dsh soit considérée présente. */
 const asDshLlm = (value: unknown): DshLlmLike | undefined => {
   const candidate = value as DshLlmLike | undefined
   if (!candidate || typeof candidate.listProviders !== 'function' || typeof candidate.stream !== 'function') return undefined
@@ -82,7 +82,7 @@ const asDshLlm = (value: unknown): DshLlmLike | undefined => {
 }
 
 export class DshModelGateway {
-  /** modelgw 同款集合面：all/findOne/get——桥目录按需惰性发现，findone 走缓存快照。 */
+  /** Face de collection identique à modelgw : all/findOne/get — le catalogue du pont découvre paresseusement à la demande, findOne passe par un instantané en cache. */
   private cache = new Map<string, BridgedModelRecord>()
   private cacheAt = 0
   private readonly ttlMs = 30_000
@@ -101,11 +101,11 @@ export class DshModelGateway {
     try {
       const read = adm?.read?.()
       if (read?.provider && read?.model) return { provider: read.provider, model: read.model }
-    } catch { /* 默认模型服务缺席/读取失败 → 回落首个可用路由 */ }
+    } catch { /* service de modèle par défaut absent/échec de lecture → repli sur la première route disponible */ }
     return undefined
   }
 
-  /** 目录快照：default（若可解析）+ 全部 provider 的已发现模型。发现失败的路由诚实跳过。 */
+  /** Instantané du catalogue : default (si résoluble) + tous les modèles découverts de tous les providers. Les routages en échec de découverte sont honnêtement sautés. */
   private async refresh(): Promise<void> {
     if (Date.now() - this.cacheAt < this.ttlMs) return
     if (this.inflight) return this.inflight
@@ -132,12 +132,12 @@ export class DshModelGateway {
       let providers: Array<{ id: string; name: string }> = []
       try {
         providers = this.llm.listProviders() ?? []
-      } catch { /* 注册表读取失败 → 目录为空，诚实呈现 */ }
+      } catch { /* échec de lecture du registre → catalogue vide, rendu honnête */ }
       for (const provider of providers) {
         try {
           const models = await this.llm.listModels(provider.id)
           for (const model of models ?? []) put(provider.id, model.id, model.name)
-        } catch { /* 单路由发现失败不拖垮目录 */ }
+        } catch { /* l'échec de découverte d'une seule route n'entraîne pas le catalogue */ }
       }
       this.cache = next
       this.cacheAt = Date.now()
@@ -151,7 +151,7 @@ export class DshModelGateway {
     return [...this.cache.values()]
   }
 
-  /** modelgw models() 同构：同步集合面（读的是最近一次快照；目录面先 await ensureCatalog）。 */
+  /** Isomorphe à modelgw models() : face de collection synchrone (lit l'instantané le plus récent ; la face catalogue fait d'abord await ensureCatalog). */
   models() {
     const self = this
     return {
@@ -162,7 +162,7 @@ export class DshModelGateway {
     }
   }
 
-  /** 目录面预拉取（GET /models 用；调用面可跳过——直接按 slug 解析）。 */
+  /** Pré-tirage de la face catalogue (pour GET /models ; la face appel peut sauter — résolution directe par slug). */
   async ensureCatalog(): Promise<BridgedModelRecord[]> {
     await this.refresh()
     return this.snapshot()
@@ -172,7 +172,7 @@ export class DshModelGateway {
     if (slug === 'default') {
       const preferred = this.defaultSelection()
       if (preferred) return preferred
-      // 默认模型未配置/不可解析 → 回落目录首个条目（目录序：已配置默认优先，其后按 provider 枚举序）
+      // Modèle par défaut non configuré/irrésoluble → repli sur la première entrée du catalogue (ordre du catalogue : défaut configuré d'abord, puis ordre d'énumération des providers)
       await this.refresh()
       const first = this.snapshot()[0]
       if (first) {
@@ -190,7 +190,7 @@ export class DshModelGateway {
     throw new Error(`模型不在 dsh 模型目录中：${slug}（可在 dsh 侧配置后重试；面板模型目录由 dsh 配置托管）`)
   }
 
-  /** 真实单轮调用：走 ctx.llm.stream 全链（适配器/重试/计量归 dsh），失败如实抛出。 */
+  /** Vrai appel en tour unique : toute la chaîne via ctx.llm.stream (adaptateur/retries/metering côté dsh), l'échec est levé tel quel. */
   async invoke(input: BridgedInvokeInput): Promise<BridgedInvokeResult> {
     let content = ''
     let outputTokens = 0
@@ -204,9 +204,9 @@ export class DshModelGateway {
   }
 
   /**
-   * 流式原语（2026-09-11 面板流式应答卡）：逐块转发模型 text-delta；结束块携带
-   * finish 信息与最终 model/outputTokens。失败在迭代期如实抛出（调用方已输出的
-   * 增量按失败处理：不落库、不发 done——诚实降级语义与 invoke 同规）。
+   * Primitive de streaming (carte de réponse en flux du panneau 2026-09-11) : transmet bloc par bloc les text-delta du modèle ; le bloc de fin porte
+   * l'information finish et les model/outputTokens finaux. Un échec est levé tel quel pendant l'itération (l'incrément déjà émis par l'appelant est
+   * traité comme un échec : pas d'inscription, pas de done — sémantique de dégradation honnête identique à invoke).
    */
   async *streamEvents(input: BridgedInvokeInput): AsyncIterable<{ delta?: string; model?: string; outputTokens?: number }> {
     const target = await this.resolveTarget(input.model)
@@ -254,7 +254,7 @@ export class DshModelGateway {
     yield { model: input.model === 'default' ? `${target.provider}:${target.model}` : input.model, outputTokens }
   }
 
-  /** 目录只读：写操作诚实拒绝（配置事实源在 dsh）。 */
+  /** Catalogue en lecture seule : les écritures sont honnêtement refusées (la source de fait de la configuration est dans dsh). */
   private static readonly READ_ONLY_MESSAGE =
     '模型目录由 dsh 配置托管（settings.yaml agent-default-model 与 llm 适配器配置）——01门面板只读，请在 dsh 侧增删改模型'
 
@@ -268,8 +268,8 @@ export class DshModelGateway {
 }
 
 /**
- * 解析面板模型网关：modelgw 在场优先（全量形态语义不变）；否则 dsh llm 在场时落桥；
- * 两者皆缺席（纯独立演示态）返回 null——调用方走既有 503 诚实降级。
+ * Résout la passerelle de modèles du panneau : modelgw présent prioritaire (sémantique de la forme complète inchangée) ; sinon, si llm dsh est présent, passage par le pont ;
+ * les deux absents (forme démo purement autonome) renvoient null — l'appelant suit la dégradation honnête 503 existante.
  */
 export function resolvePanelModelGateway(ctx: Context): { kind: 'modelgw' | 'dsh'; gateway: any } | undefined {
   const modelgw = soft(ctx, 'modelGateway')

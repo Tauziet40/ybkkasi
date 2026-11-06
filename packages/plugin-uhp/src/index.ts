@@ -1,24 +1,24 @@
 /**
- * @dsh-ops/plugin-uhp —— UHP（Unified Harness Protocol）执行驱动层（企业数字员工内网协作方案 §7）。
+ * @dsh-ops/plugin-uhp — couche d'exécution UHP (Unified Harness Protocol) (plan de collaboration intranet des employés numériques d'entreprise §7).
  *
- * 定位：v1 的 `a2a/invoke` 是「平台拿员工登记的模型直接回一句话」，没有任务生命周期；
- * 数字员工要真正被驱动执行，需要一个统一的执行面。本插件实现 UHP Server 协议面：
+ * Positionnement : le `a2a/invoke` v1 était « la plateforme prend le modèle enregistré de l'employé et renvoie une phrase », sans cycle de vie de tâche ;
+ * pour que l'employé numérique soit réellement piloté en exécution, il faut une face d'exécution unifiée. Cette extension implémente la face protocole UHP Server :
  *
- *   平台（A2A / 编排）── UHP Client ──▶ plugin-uhp（Server）──▶ configured harness 执行体
+ *   plateforme (A2A / orchestration) ── UHP Client ──▶ plugin-uhp (Server) ──▶ corps d'exécution configured harness
  *
- * 诚实边界（v1 口径，不做假实现）：
- *   - 内置 harness（runtime=dsh）= 单步真实模型执行：经 modelgw 分级路由与预算熔断真实调用模型，
- *     会话续接（previous_response_id）真实多轮；不做虚构的「工具执行循环」——工具面继续走 MCP 网关
- *     （受管数字员工的工具执行由 workforce 受控调用承担，见协作方案 §3 分工）；
- *   - 请求级 `tools` / 动态挂 MCP server 一律接受但不生效并记入 metadata.ignored_fields
- *     （越权原语封堵，协作方案 §7.2）——员工工具面只能由 configured harness 白名单声明；
- *   - 未配置模型端点时诚实报错，绝不生成假 completion（延续 modelgw 诚实边界）。
+ * Frontières honnêtes (référentiel v1, pas de fausse implémentation) :
+ *   - harness intégré (runtime=dsh) = exécution réelle du modèle en un pas : appel réel du modèle via le routage par gradation et le disjoncteur de budget de modelgw,
+ *     reprise de session (previous_response_id) réellement multi-tours ; pas de « boucle d'exécution d'outils » fictive — la face outils continue de passer par la passerelle MCP
+ *     (l'exécution d'outils de l'employé numérique géré relève des appels contrôlés workforce, voir la répartition §3 du plan de collaboration) ;
+ *   - `tools` au niveau requête / montage dynamique d'un serveur MCP : acceptés mais sans effet, consignés dans metadata.ignored_fields
+ *     (blocage des primitives d'élévation, plan de collaboration §7.2) — la face outils de l'employé ne peut être déclarée que par la liste blanche du configured harness ;
+ *   - sans endpoint de modèle configuré, erreur honnête, jamais de faux completion (prolonge la frontière d'honnêteté de modelgw).
  *
- * 与 plugin-a2a 的联动纪律：只走 ctx.platformBus（a2a.task.dispatch / a2a.task.progress /
- * a2a.task.cancel），禁止直连对方插件数据（协作方案 §11 铁律）。
+ * Discipline de couplage avec plugin-a2a : ne passer que par ctx.platformBus (a2a.task.dispatch / a2a.task.progress /
+ * a2a.task.cancel), interdiction de se connecter directement aux données de l'autre plugin (ligne d'airain §11 du plan de collaboration).
  *
- * 幂等对齐（协作方案 §7.2）：UHP Idempotency-Key 与 A2A Task 对齐，编织进既有计量幂等键模式
- * `a2a:<agentId>:<principal>:<taskId>`——同键重放返回原事件，跨节点重试不重复执行不双计。
+ * Alignement idempotent (plan de collaboration §7.2) : l'Idempotency-Key UHP s'aligne sur la tâche A2A, tissé dans le motif existant de clé idempotente de metering
+ * `a2a:<agentId>:<principal>:<taskId>` — un rejeu de même clé renvoie les événements d'origine, une retry inter-nœuds ne ré-exécute ni ne compte deux fois.
  */
 import { readFileSync as readTextFile, writeFileSync as writeTextFile } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
@@ -36,58 +36,58 @@ import type { VerifiedPrincipal } from '../../plugin-authn/src/index.ts'
 import { DATA_CLASS_RANK, type DataClass } from '../../plugin-modelgw/src/index.ts'
 
 // ---------------------------------------------------------------------------
-// 协议常量
+// Constantes de protocole
 // ---------------------------------------------------------------------------
 
-/** 锁定的 UHP 协议版本（协作方案 §7.2：平台锁定一个已验证版本，/v1/uhp 响应即协商依据）。 */
+/** Version verrouillée du protocole UHP (plan de collaboration §7.2 : la plateforme verrouille une version vérifiée, la réponse /v1/uhp fait foi de la négociation). */
 export const UHP_VERSION = '2026-08-11'
-/** 一致性等级目标：Core（任务/会话/取消）；Extended 的文件输入输出 v1 不声明、不做假实现。 */
+/** Objectif de niveau de cohérence : Core (tâches/sessions/annulation) ; les entrées-sorties de fichiers d'Extended ne sont ni déclarées ni faussement implémentées en v1. */
 export const UHP_CONFORMANCE_CLASS = 'core'
 
 export type UhpResponseStatus = 'queued' | 'in_progress' | 'completed' | 'failed' | 'canceled'
 
-/** P0（Q-1）：外部调用试图绑定 A2A 任务时的专属错误（协议面以 400 TASK_BINDING_FORBIDDEN 下发）。 */
+/** P0 (Q-1) : erreur dédiée quand un appel externe tente de lier une tâche A2A (la face protocole la délivre en 400 TASK_BINDING_FORBIDDEN). */
 export class UhpBindingError extends Error {}
-/** 归属校验失败（403）。 */
+/** Échec de vérification d'appartenance (403). */
 export class ForbiddenError extends Error {}
 
 // ---------------------------------------------------------------------------
-// 数据模型
+// Modèle de données
 // ---------------------------------------------------------------------------
 
-/** configured harness（协作方案 §7.2）：uhpHarnessRef 指向的注册项——模型渠道、提示词、工具白名单与预算。 */
+/** configured harness (plan de collaboration §7.2) : entrée du registre pointée par uhpHarnessRef — canal de modèle, prompt, liste blanche d'outils et budget. */
 export interface UhpHarnessRecord extends RecordBase {
-  /** harness id（对外稳定标识，Agent attrs.uhpHarnessRef 引用）。 */
+  /** id du harness (identifiant externe stable, référencé par Agent attrs.uhpHarnessRef). */
   id: string
-  /** 绑定的 Agent 资产 id。 */
+  /** id de l'actif Agent lié. */
   agentId: string
-  /** 模型 slug（模型渠道组走 modelgw 分级路由与预算熔断）。 */
+  /** slug du modèle (le groupe de canaux de modèle passe par le routage par gradation et le disjoncteur de budget de modelgw). */
   model: string
-  /** 可选渠道组 slug（配置则走 invokeWithFallback 降级链）。 */
+  /** slug optionnel de groupe de canaux (configuré = passe par la chaîne de repli invokeWithFallback). */
   channelGroup?: string
-  /** MCP 权限组白名单（工具面授权投影声明；v1 内置 harness 不执行工具，见文件头诚实边界）。 */
+  /** Liste blanche de groupes de permissions MCP (déclaration de projection de l'autorisation de la face outils ; v1, le harness intégré n'exécute pas d'outils, voir la frontière d'honnêteté en tête de fichier). */
   toolPermGroupIds: string[]
-  /** 步数预算（v1 单步执行，此为上限声明与巡检展示口径）。 */
+  /** Budget de pas (exécution v1 en un pas ; ceci est une déclaration de plafond et un référentiel d'affichage d'inspection). */
   stepBudget: number
-  /** 单任务时间预算（毫秒）。 */
+  /** Budget temporel par tâche (millisecondes). */
   timeBudgetMs: number
-  /** 该 harness 可接收的最高数据密级（modelgw 渠道分级之外的 harness 侧天花板）。 */
+  /** Plus haute classe de données que ce harness peut recevoir (plafond côté harness en plus de la gradation de canaux modelgw). */
   dataClassCeiling: DataClass
   enabled: boolean
   createdBy: string
 }
 
-/** UHP 执行记录（Responses 兼容子集的 response 对象 + ybk metadata 扩展）。 */
+/** Enregistrement d'exécution UHP (objet response du sous-ensemble compatible Responses + extensions metadata ybk). */
 export interface UhpResponseRecord extends RecordBase {
   id: string
   harnessId: string
   agentId: string
-  /** 会话 id：task-bound=<a2a taskId>；employee-bound=`emp:<agentId>:<principalId>`；直调=独立生成。 */
+  /** id de session : task-bound=<taskId a2a> ; employee-bound=`emp:<agentId>:<principalId>` ; appel direct = généré indépendamment. */
   sessionId: string
   sessionPolicy: 'task-bound' | 'employee-bound'
   previousResponseId?: string
   status: UhpResponseStatus
-  /** 全量对话快照（会话续接的数据源）。 */
+  /** Instantané complet de la conversation (source de données de la reprise de session). */
   messagesJson: string
   outputText: string
   inputTokens: number
@@ -96,28 +96,28 @@ export interface UhpResponseRecord extends RecordBase {
   dataClass: DataClass
   error?: string
   canceledAt?: string
-  /** A2A 任务关联（仅平台内部 dispatch 路径可写，见 dispatchedByPlatform）。 */
+  /** Liaison de tâche A2A (écrivable seulement par le chemin de dispatch interne de la plateforme, voir dispatchedByPlatform). */
   taskId?: string
   contextId?: string
   idempotencyKey?: string
   /**
-   * P0（Q-1）执行归属：本次执行的真实调用主体。
-   * 外部直调 = 持有 uhp.invoke 的 principal；平台派发 = a2a 任务的 callerPrincipalId。
-   * response 读/取消按此判定归属（Q-3），审计按此记录真实主体（审计栽赃修复面）。
+   * P0 (Q-1) Attribution d'exécution : principal appelant réel de cette exécution.
+   * Appel direct externe = principal détenteur de uhp.invoke ; dispatch de la plateforme = callerPrincipalId de la tâche a2a.
+   * La lecture/annulation de response juge l'appartenance là-dessus (Q-3), l'audit enregistre le vrai principal (correctif d'accusation d'audit à tort).
    */
   callerPrincipalId: string
   callerName: string
   callerKind: 'machine' | 'human' | 'system'
-  /** OBO 身份链（act 链 JSON）——审计按真实发起人留痕，不允许调用方自述（Q-6）。 */
+  /** Chaîne d'identité OBO (chaîne act en JSON) — l'audit trace le vrai initiateur, aucune autobiographie de l'appelant (Q-6). */
   actChainJson: string
-  /** OBO 代表用户（平台内部派发路径从任务透传；外部直调经校验后写入，伪造值不入账）。 */
+  /** Utilisateur représenté OBO (transmis par le chemin de dispatch interne de la plateforme ; écrit après vérification sur l'appel direct externe, valeur forgée non comptabilisée). */
   onBehalfUser?: string
   /**
-   * P0（Q-1）是否由平台 A2A 派发路径产生：仅 true 的记录允许携带 taskId 并驱动
-   * `a2a.task.progress` 回传状态机——外部直调永远为 false，从协议面无法伪造。
+   * P0 (Q-1) si produit par le chemin de dispatch A2A de la plateforme : seuls les enregistrements à true peuvent porter un taskId et entraîner
+   * la machine à états de retour `a2a.task.progress` — l'appel direct externe est toujours false, infalsifiable depuis la face protocole.
    */
   dispatchedByPlatform: boolean
-  /** 扩展元数据：ybk_* 绑定 + ignored_fields（越权原语封堵留痕）。 */
+  /** Métadonnées étendues : liaisons ybk_* + ignored_fields (trace du blocage des primitives d'élévation). */
   metadataJson: string
 }
 
@@ -131,7 +131,7 @@ export interface UhpDispatchPayload {
   idempotencyKey: string
   sessionPolicy?: 'task-bound' | 'employee-bound'
   callerPrincipalId: string
-  /** OBO 身份链（平台内部透传，真实发起人；不采信任何请求体自述）。 */
+  /** Chaîne d'identité OBO (transmise en interne par la plateforme, vrai initiateur ; aucune autobiographie du corps de requête n'est crue). */
   onBehalfUser?: string
   actChain?: Array<{ principalId: string; name: string; type: string }>
   negotiationNote?: string
@@ -149,28 +149,28 @@ export interface UhpProgressPayload {
 }
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 export class UhpGatewayService extends Service {
   static readonly provide = 'uhpGateway'
 
-  /** 执行中任务的取消登记（taskId → responseId）。 */
+  /** Enregistrement des annulations de tâches en exécution (taskId → responseId). */
   private inflight = new Map<string, string>()
-  /** 取消标记（responseId → true）：模型调用返回后据此丢弃结果（协作取消语义）。 */
+  /** Marques d'annulation (responseId → true) : au retour de l'appel de modèle, le résultat est jeté accordingly (sémantique d'annulation collaborative). */
   private cancelRequested = new Set<string>()
 
   constructor(ctx: Context) {
     super(ctx, 'uhpGateway')
-    // A2A 派发联动（只走事件总线纪律）：收到派发事件后异步启动执行——
-    // 监听器本身立即返回（总线监听器 5s 超时），长任务在独立 Promise 中推进。
+    // Couplage au dispatch A2A (discipline du seul bus d'événements) : après réception de l'événement de dispatch, démarrage asynchrone de l'exécution —
+    // l'écouteur retourne immédiatement (écouteur de bus timeout 5 s), la tâche longue progresse dans une Promise indépendante.
     ctx.platformBus.on('a2a.task.dispatch', (payload) => {
       const p = payload as UhpDispatchPayload
       void this.executeForTask(p).catch((error) => {
         this.ctx.logger('uhp').error('UHP 执行派发处理异常', error)
       })
     })
-    // 取消联动：A2A tasks/cancel → UHP cancel（协议面）+ 响应作废标记
+    // Couplage d'annulation : A2A tasks/cancel → UHP cancel (face protocole) + marque d'invalidation de la réponse
     ctx.platformBus.on('a2a.task.cancel', (payload) => {
       const p = payload as { taskId: string; reason?: string }
       const responseId = this.inflight.get(p.taskId)
@@ -178,7 +178,7 @@ export class UhpGatewayService extends Service {
         this.cancelRequested.add(responseId)
         this.responses().update(responseId, { status: 'canceled', canceledAt: new Date().toISOString() })
       } else {
-        // 无在途执行：找最近一条该任务的 response 标记取消（诚实幂等：已终态不覆盖）
+        // Sans exécution en vol : trouve la dernière response de la tâche et marque l'annulation (idempotence honnête : l'état terminal n'est pas écrasé)
         const existing = [...this.responses().find((item) => item.taskId === p.taskId)].pop()
         if (existing && (existing.status === 'queued' || existing.status === 'in_progress')) {
           this.responses().update(existing.id, { status: 'canceled', canceledAt: new Date().toISOString() })
@@ -187,7 +187,7 @@ export class UhpGatewayService extends Service {
     })
   }
 
-  // -- 集合 -----------------------------------------------------------------
+  // -- Collections -----------------------------------------------------------------
 
   harnesses(): Collection<UhpHarnessRecord> {
     return this.ctx.opsStorage.collection<UhpHarnessRecord>('uhp:harnesses', { durability: 'durable' })
@@ -197,7 +197,7 @@ export class UhpGatewayService extends Service {
     return this.ctx.opsStorage.collection<UhpResponseRecord>('uhp:responses', { durability: 'durable' })
   }
 
-  // -- harness 注册表 --------------------------------------------------------
+  // -- Registre de harness --------------------------------------------------------
 
   upsertHarness(input: {
     id?: string
@@ -253,7 +253,7 @@ export class UhpGatewayService extends Service {
     return this.harnesses().remove(id)
   }
 
-  /** 能力发现（GET /v1/uhp）：configured harness 清单按 runtime 视角呈现。 */
+  /** Découverte de capacités (GET /v1/uhp) : la liste des configured harness présentée selon le point de vue runtime. */
   discovery(): {
     uhp_version: string
     conformance_class: string
@@ -282,14 +282,14 @@ export class UhpGatewayService extends Service {
     }
   }
 
-  // -- 任务面 ---------------------------------------------------------------
+  // -- Face tâches ---------------------------------------------------------------
 
   /**
-   * 创建并启动一次 UHP 执行（幂等）：同 Idempotency-Key 的既有终态记录原样重放，
-   * 在途记录直接返回（不重复执行）。返回 response 记录。
+   * Crée et démarre une exécution UHP (idempotent) : un enregistrement terminal existant de même Idempotency-Key est rejoué tel quel,
+   * un enregistrement en vol est renvoyé directement (pas de double exécution). Renvoie l'enregistrement response.
    *
-   * P0（Q-1）任务绑定收口：`taskId` 仅接受平台 A2A 派发路径（`dispatchedByPlatform: true`）传入，
-   * 服务层 fail-closed 兜底——即便未来有人从协议面误传 taskId，也不会建立任务归属。
+   * P0 (Q-1) fermeture de la liaison de tâche : `taskId` n'est accepté que du chemin de dispatch A2A de la plateforme (`dispatchedByPlatform: true`),
+   * rattrapage fail-closed en couche service — même si quelqu'un transmet un taskId par erreur depuis la face protocole, aucune appartenance de tâche ne se crée.
    */
   async createResponse(input: {
     harnessRef?: string
@@ -314,11 +314,11 @@ export class UhpGatewayService extends Service {
   }): Promise<UhpResponseRecord> {
     if (!input.inputText?.trim()) throw new Error(t('input 必填（UHP 任务输入不能为空）'))
     const dispatched = input.dispatchedByPlatform === true
-    // P0（Q-1）：任务绑定只认平台派发路径——非派发调用携带 taskId 一律拒绝（fail-closed）
+    // P0 (Q-1) : la liaison de tâche ne reconnaît que le chemin de dispatch de la plateforme — un appel non dispatché portant taskId est toujours refusé (fail-closed)
     if (input.taskId && !dispatched) {
       throw new UhpBindingError(t('外部调用不得绑定 A2A 任务：ybk_a2a_task_id 仅允许由平台内部派发通道注入'))
     }
-    // 幂等：同键重放返回原记录（协作方案 §7.2——跨节点重试不会重复执行也不会双计）
+    // Idempotence : un rejeu de même clé renvoie l'enregistrement d'origine (plan de collaboration §7.2 — une retry inter-nœuds ne ré-exécute pas et ne compte pas deux fois)
     if (input.idempotencyKey) {
       const existing = this.responses().find((item) => item.idempotencyKey === input.idempotencyKey)
       const latest = existing.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
@@ -332,20 +332,20 @@ export class UhpGatewayService extends Service {
     if (DATA_CLASS_RANK[requested] > DATA_CLASS_RANK[harness.dataClassCeiling]) {
       throw new Error(t('数据密级越级：请求 {requested} 高于 harness 天花板 {ceiling}（渠道锁死拒绝口径）', { requested, ceiling: harness.dataClassCeiling }))
     }
-    // 越权原语封堵：请求级 tools/functions/mcp_servers 一律接受但不生效，留痕 ignored_fields（协作方案 §7.2）
+    // Blocage des primitives d'élévation de privilèges : tools/functions/mcp_servers au niveau requête sont toujours acceptés mais sans effet, trace dans ignored_fields (plan de collaboration §7.2)
     const ignoredFields: string[] = []
     if (input.requestTools !== undefined) ignoredFields.push('tools')
     if (input.requestFunctions !== undefined) ignoredFields.push('functions')
     if (input.requestMcpServers !== undefined) ignoredFields.push('mcp_servers')
-    // 会话续接（Q-23）：继承上一响应的 sessionId（使 session_id 成为可靠归组键），
-    // 并把上一轮 assistant 回答回填进上下文——否则被调方「不知道自己上一轮说了什么」
+    // Reprise de session (Q-23) : hérite le sessionId de la réponse précédente (fait de session_id une clé de regroupement fiable),
+    // et réinjecte la réponse assistant du tour précédent dans le contexte — sinon l'appelé « ne sait pas ce qu'il a dit au tour précédent »
     let messages: Array<{ role: string; content: string }> = []
     let inheritedSessionId = ''
     if (input.previousResponseId) {
       const prev = this.responses().get(input.previousResponseId)
       if (!prev) throw new Error(t('previous_response_id 不存在：{id}', { id: input.previousResponseId }))
       if (prev.agentId !== agent.id) throw new Error(t('previous_response_id 属于其他执行体，拒绝跨 harness 会话续接'))
-      // 归属校验（Q-3 纵深）：会话续接仅限记录属主或其组织内持 uhp.read 的治理视图
+      // Contrôle d'appartenance (Q-3, en profondeur) : la reprise de session est réservée au propriétaire de l'enregistrement ou à la vue de gouvernance tenant uhp.read dans son organisation
       this.assertResponseAccess(prev, input.callerPrincipalId, ['uhp.read'])
       inheritedSessionId = prev.sessionId
       messages = JSON.parse(prev.messagesJson) as Array<{ role: string; content: string }>
@@ -396,13 +396,13 @@ export class UhpGatewayService extends Service {
   }
 
   /**
-   * 执行记录归属校验（Q-3）：属主本人、`*`，或持列出的治理读权限点者方可读/取消。
-   * 同层外部集成之间不得互相读取输入输出内容或取消在途执行（DoS + 数据泄露防护）。
+   * Contrôle d'appartenance des enregistrements d'exécution (Q-3) : seul le propriétaire, `*`, ou un détenteur des points de permission de lecture de gouvernance listés peut lire/annuler.
+   * Les intégrations externes d'une même couche ne peuvent ni lire mutuellement leurs entrées/sorties ni annuler les exécutions en cours (protection DoS + fuite de données).
    */
   private assertResponseAccess(record: UhpResponseRecord, principalId: string, overridePoints: string[]): void {
     if (record.callerPrincipalId === principalId) return
     throw new ForbiddenError(t('无权访问该执行记录（仅属主或持治理读权限者可访问）'))
-    void overridePoints // 治理读权限点在 HTTP 层校验（CallerInfo.scopes 可见），服务层只认归属
+    void overridePoints // points de permission de lecture de gouvernance vérifiés à la couche HTTP (visibles via CallerInfo.scopes), la couche service ne reconnaît que l'appartenance
   }
 
   response(id: string): UhpResponseRecord | undefined {
@@ -410,8 +410,8 @@ export class UhpGatewayService extends Service {
   }
 
   /**
-   * 取消：终态诚实拒绝；在途执行标记取消，模型返回后结果不交付。
-   * 归属校验（Q-3）：非属主不得取消他人执行记录（同层凭证间互不干扰）。
+   * Annulation : refus honnête sur état terminal ; l'exécution en cours est marquée annulée, le résultat n'est pas livré au retour du modèle.
+   * Contrôle d'appartenance (Q-3) : un non-propriétaire ne peut pas annuler l'enregistrement d'exécution d'autrui (les identifiants d'une même couche ne s'interfèrent pas).
    */
   cancelResponse(id: string, reason: string, callerPrincipalId: string): UhpResponseRecord {
     const record = this.responses().get(id)
@@ -424,7 +424,7 @@ export class UhpGatewayService extends Service {
     return this.responses().update(id, { status: 'canceled', canceledAt: new Date().toISOString(), error: reason })
   }
 
-  /** 解析 harness：显式引用 → 注册表；未注册 → 从 Agent attrs 投影的临时配置（不改协作面行为）。 */
+  /** Résolution du harness : référence explicite → registre ; non enregistré → configuration temporaire projetée depuis les attrs de l'Agent (sans changer le comportement de la face collaboration). */
   private resolveHarness(agent: { id: string; attrs: Record<string, unknown> }, harnessRef?: string): UhpHarnessRecord {
     const ref = String(harnessRef ?? agent.attrs['uhpHarnessRef'] ?? '').trim()
     if (ref) {
@@ -458,7 +458,7 @@ export class UhpGatewayService extends Service {
     return t('你是企业数字同事「{name}」。{description}', { name: agent.name, description: String(agent.attrs['description'] ?? '') })
   }
 
-  /** A2A 派发入口：包装 createResponse（唯一允许绑定 taskId 的通道），终态经总线回传（a2a.task.progress）。 */
+  /** Entrée de délégation A2A : enveloppe createResponse (seul canal autorisant le lien taskId), l'état terminal est renvoyé via le bus (a2a.task.progress). */
   private async executeForTask(payload: UhpDispatchPayload): Promise<void> {
     try {
       const record = await this.createResponse({
@@ -474,16 +474,16 @@ export class UhpGatewayService extends Service {
         callerKind: 'system',
         callerName: payload.callerPrincipalId,
         ...(payload.actChain ? { actChain: payload.actChain } : {}),
-        // P0（Q-1）：仅平台派发路径置 true——这是外部调用无法伪造的绑定凭据
+        // P0 (Q-1) : true uniquement sur le chemin de délégation plateforme — c'est le justificatif de liaison infalsifiable par les appels externes
         dispatchedByPlatform: true,
         onBehalfUser: payload.onBehalfUser,
         negotiationNote: payload.negotiationNote,
       })
       if (record.status === 'queued' || record.status === 'in_progress') {
-        // 等待终态（run 里的 promise 不在这里 await——由 progress 事件驱动 A2A 侧状态机）
+        // Attend l'état terminal (la promise du run n'est pas awaitée ici — la machine à états A2A est pilotée par les événements progress)
         await this.awaitTerminal(record.id, payload.taskId)
       } else {
-        // 幂等重放：把既有终态原样回传（A2A 侧据此收敛状态）
+        // Rejeu idempotent : renvoie l'état terminal existant tel quel (la face A2A converge son état sur cette base)
         this.emitProgress(record, record.status === 'completed' ? 'completed' : record.status === 'canceled' ? 'canceled' : 'failed')
       }
     } catch (error) {
@@ -497,7 +497,7 @@ export class UhpGatewayService extends Service {
     }
   }
 
-  /** 等待单条 response 终态（轮询轻量实现——执行体同进程，300ms 粒度足够）。 */
+  /** Attend l'état terminal d'une response (implémentation légère par sondage — l'exécutant est dans le même processus, une granularité de 300 ms suffit). */
   private async awaitTerminal(responseId: string, taskId?: string): Promise<void> {
     for (let i = 0; i < 4000; i++) {
       const record = this.responses().get(responseId)
@@ -508,7 +508,7 @@ export class UhpGatewayService extends Service {
       }
       await new Promise((resolve) => setTimeout(resolve, 300))
     }
-    // 兜底超时：标记失败（时间预算守卫，不悬挂调用方）
+    // Timeout de rattrapage : marque en échec (garde-fou du budget temps, ne laisse pas l'appelant en suspens)
     if (taskId) {
       this.responses().update(responseId, { status: 'failed', error: t('执行超时（时间预算耗尽）') })
       this.emitProgress(this.responses().get(responseId)!, 'failed')
@@ -516,10 +516,10 @@ export class UhpGatewayService extends Service {
   }
 
   /**
-   * 进度回传：所有执行记录都发 `uhp.response.progress`（SSE 订阅面，P2-03 闭合外部直调流），
-   * 但只有「平台 A2A 派发」记录才额外发 `a2a.task.progress` 驱动 A2A 状态机（P0 Q-1 核心闸门）。
-   * 外部直调（dispatchedByPlatform=false）永不发出 a2a.task.progress——
-   * 从根上杜绝「外部凭证借执行结果把他人任务推到终态」的劫持路径。
+   * Renvoi de progression : tout enregistrement d'exécution émet `uhp.response.progress` (face d'abonnement SSE, P2-03 ferme le flux d'appel direct externe),
+   * mais seuls les enregistrements « délégués A2A par la plateforme » émettent en plus `a2a.task.progress` pour piloter la machine à états A2A (barrière centrale P0 Q-1).
+   * L'appel direct externe (dispatchedByPlatform=false) n'émet jamais a2a.task.progress —
+   * ce qui supprime à la racine le chemin de détournement « un identifiant externe pousse la tâche d'autrui à l'état terminal via un résultat d'exécution ».
    */
   private emitProgress(record: UhpResponseRecord | undefined, phase: UhpProgressPayload['phase']): void {
     if (!record) return
@@ -534,14 +534,14 @@ export class UhpGatewayService extends Service {
       outputTokens: record.outputTokens,
       model: record.model,
     } satisfies UhpProgressPayload
-    // 执行记录事件（与任务事件分离）：内部直调/外部直调/平台派发统一可订阅——
-    // 它不驱动任何 A2A 状态，因此不扩大 P0 攻击面（a2a.task.progress 的闸门保持不变）。
+    // Événement d'enregistrement d'exécution (séparé des événements de tâche) : appel direct interne/externe/délégation plateforme uniformément souscriptibles —
+    // il ne pilote aucun état A2A et n'élargit donc pas la surface d'attaque P0 (la barrière de a2a.task.progress reste inchangée).
     this.ctx.platformBus.emit('uhp.response.progress', payload)
     if (!record.dispatchedByPlatform) return
     this.ctx.platformBus.emit('a2a.task.progress', payload)
   }
 
-  /** 真实执行体（内置 dsh harness）：单步真实模型调用（modelgw 分级路由 + 预算熔断）。 */
+  /** Exécutant réel (harness dsh intégré) : appel réel au modèle en une étape (routage par niveaux modelgw + disjoncteur de budget). */
   private async run(responseId: string): Promise<void> {
     const record = this.responses().get(responseId)
     if (!record) return
@@ -570,7 +570,7 @@ export class UhpGatewayService extends Service {
         messages,
       })
       if (this.cancelRequested.has(record.id)) {
-        // 协作取消语义：结果不交付、不回写输出（取消方已收到 canceled 终态）
+        // Sémantique d'annulation coopérative : résultat non livré, sortie non réécrite (l'annulateur a déjà reçu l'état terminal canceled)
         this.cancelRequested.delete(record.id)
         this.auditExecution(this.responses().get(record.id)!, agent, 'uhp.invoke.canceled_after_completion', 'ok',
           t('模型已返回但任务已取消，结果不交付（取消语义）'))
@@ -584,8 +584,8 @@ export class UhpGatewayService extends Service {
         outputTokens: result.outputTokens,
         model: result.model,
       })
-      // Q-1 面③：审计记真实调用主体（外部直调=持证 principal；平台派发=任务发起方），
-      // detail 带 responseId/taskId 使「谁执行了哪一次」可按 id 反查（Q-25）
+      // Q-1 face ③ : l'audit enregistre le véritable appelant (appel direct externe = principal titulaire du certificat ; délégation plateforme = initiateur de la tâche),
+      // detail embarque responseId/taskId pour que « qui a exécuté quelle occurrence » soit retrouvable par id (Q-25)
       this.auditExecution(this.responses().get(record.id)!, agent, 'uhp.invoke', 'ok',
         `harness=${record.harnessId} model=${result.model} tokens=${result.inputTokens}/${result.outputTokens} response=${record.id}${record.taskId ? ` task=${record.taskId}` : ''}${record.contextId ? ` context=${record.contextId}` : ''}`)
       this.emitProgress(this.responses().get(record.id), 'completed')
@@ -614,8 +614,8 @@ export class UhpGatewayService extends Service {
   }
 
   /**
-   * 执行审计：主体取执行记录的真实调用方（Q-1 面③ 审计栽赃修复）。
-   * 平台派发路径带回 A2A 任务的发起 principal + OBO 身份链，使「人类代员工发起」在审计可还原。
+   * Audit d'exécution : le sujet est le véritable appelant de l'enregistrement d'exécution (Q-1 face ③, correctif de l'audit falsifiable).
+   * Le chemin de délégation plateforme ramène le principal initiateur de la tâche A2A + la chaîne d'identité OBO, pour que « initié par un humain au nom d'un employé » soit reconstituable dans l'audit.
    */
   private auditExecution(
     record: UhpResponseRecord,
@@ -642,7 +642,7 @@ export class UhpGatewayService extends Service {
 }
 
 // ---------------------------------------------------------------------------
-// 插件
+// Extension
 // ---------------------------------------------------------------------------
 
 declare module '@deepseek-ai/cordis' {
@@ -652,16 +652,16 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export const name = 'uhp'
-// iam + agentRegistry：OBO 代表用户真实性校验（Q-6：声明代表某人时校验该用户存在且由令牌可代表）
+// iam + agentRegistry : vérification d'authenticité de l'utilisateur représenté en OBO (Q-6 : quand on déclare agir pour quelqu'un, vérifier que cet utilisateur existe et est représentable par le jeton)
 export const inject = ['opsStorage', 'platformBus', 'httpServer', 'resourceCore', 'authn', 'iam', 'agentRegistry', 'audit', 'usage', 'modelGateway']
 
 export function apply(ctx: Context) {
   const gateway = new UhpGatewayService(ctx)
   const gate = createRestGate(ctx)
-  // 命名约定：http 别名让 contract-lint 的路由字面量扫描器识别 http.register 声明面
+  // Convention de nommage : l'alias http permet au scanner de littéraux de routes de contract-lint de reconnaître la face déclarée http.register
   const http = ctx.httpServer
 
-  // 启动期向 iam 的 PermissionCatalog 幂等补录 UHP 权限点（先例：plugin-agent exec.read/exec.write 补录）
+  // Au démarrage, complétion idempotente du PermissionCatalog de l'iam avec les points de permission UHP (précédent : complétion exec.read/exec.write de plugin-agent)
   for (const entry of [
     { point: 'uhp.read', label: '读取 UHP harness 注册表与执行记录', group: 'UHP 执行驱动' },
     { point: 'uhp.admin', label: '管理 UHP harness 配置', group: 'UHP 执行驱动' },
@@ -670,17 +670,17 @@ export function apply(ctx: Context) {
     if (!PermissionCatalog.some((item) => item.point === entry.point)) PermissionCatalog.push(entry)
   }
 
-  // -- UHP 能力发现（规范要求免鉴权；/v1/* 不在 /api 鉴权域，天然匿名） --------------------
-  // P2-02：发现面返回规范裸体（与 Agent Card well-known 同口径）——外部 UHP 客户端
-  // 直接消费响应体，不再需要先剥平台 {ok,data} 信封。
+  // -- Découverte des capacités UHP (la norme exige l'absence d'authentification ; /v1/* hors du domaine d'authentification /api, anonyme par construction) --------------------
+  // P2-02 : la face découverte renvoie le corps nu de la norme (même référence que l'Agent Card well-known) — les clients UHP externes
+  // consomment directement le corps de réponse, sans devoir d'abord dépouiller l'enveloppe plateforme {ok,data}.
   http.register('GET', '/v1/uhp', (exchange) => {
     if (exchange.res.headersSent) return
     exchange.res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
     exchange.res.end(JSON.stringify(gateway.discovery()))
   })
 
-  // -- UHP 任务面（Responses 兼容子集；自校验 Bearer + uhp.invoke 权限，fail-closed） -------
-  // 拒绝路径一律审计留痕（Q-27）：/v1 协议面不在控制台鉴权中间件覆盖范围，自校验需自带埋点。
+  // -- Face tâches UHP (sous-ensemble compatible Responses ; auto-vérification Bearer + permission uhp.invoke, fail-closed) -------
+  // Tout chemin de refus laisse une trace d'audit (Q-27) : la face protocole /v1 n'est pas couverte par le middleware d'authentification de la console, l'auto-vérification doit embarquer ses propres sondes.
   const denyAudit = (exchange: { path: string; headers: Record<string, unknown> }, verified: VerifiedPrincipal | undefined, point: string, detail: string): void => {
     ctx.platformBus.emit('audit.authz.denied', {
       actorId: verified?.principal.id ?? '(anon)',
@@ -730,10 +730,10 @@ export function apply(ctx: Context) {
       taskId?: unknown
     }
     const metadata = body.metadata ?? {}
-    // P0（Q-1）：外部调用携带任务绑定字段一律拒绝——该字段仅平台内部派发通道可注入。
-    // 拒绝而非忽略：让攻击者的注入尝试成为可观测的审计事件，而不是静默生效。
-    // P2-04：变体矩阵（metadata.ybk_a2a_task_id / 顶层 task_id / 顶层 taskId）统一同一拒绝口径
-    // ——此前顶层变体被静默丢弃，注入尝试不可观测，与「拒绝而非忽略」声明不一致。
+    // P0 (Q-1) : tout appel externe porteur d'un champ de liaison de tâche est refusé — ce champ ne peut être injecté que par le canal interne de délégation de la plateforme.
+    // Refuser plutôt qu'ignorer : faire de la tentative d'injection de l'attaquant un événement d'audit observable, et non une prise d'effet silencieuse.
+    // P2-04 : la matrice de variantes (metadata.ybk_a2a_task_id / task_id au sommet / taskId au sommet) relève d'un même régime de refus
+    // — auparavant les variantes au sommet étaient silencieusement abandonnées, la tentative d'injection était invisible, en désaccord avec la déclaration « refuser plutôt qu'ignorer ».
     const bindingProbes: Array<{ field: string; value: unknown }> = []
     if (metadata['ybk_a2a_task_id'] !== undefined) bindingProbes.push({ field: 'metadata.ybk_a2a_task_id', value: metadata['ybk_a2a_task_id'] })
     if (body.task_id !== undefined) bindingProbes.push({ field: 'task_id', value: body.task_id })
@@ -765,8 +765,8 @@ export function apply(ctx: Context) {
       exchange.fail(400, 'BAD_REQUEST', t('缺少执行体：model 须为 harness/<id>（发现面公布的 harness id）或 metadata.ybk_agent_id 必填'))
       return
     }
-    // 寻址（Q-7）：发现面公布的是 harness id，调用面必须能按 harness id 寻址——
-    // 先按 Agent（id/slug）解析，未命中则回落 configured harness 注册表反查绑定员工。
+    // Adressage (Q-7) : la face découverte publie des harness id, la face d'appel doit pouvoir adresser par harness id —
+    // résolution d'abord par Agent (id/slug), à défaut repli sur le registre des harness configurés pour retrouver l'employé lié.
     let agent = ctx.resourceCore.get('agent', ref) ?? ctx.resourceCore.bySlug('agent', ref)
     let harnessRef: string | undefined
     if (!agent) {
@@ -782,8 +782,8 @@ export function apply(ctx: Context) {
     }
     const dataClassRaw = String(metadata['ybk_data_class'] ?? 'internal')
     const dataClass: DataClass = dataClassRaw === 'public' || dataClassRaw === 'secret' ? dataClassRaw : 'internal'
-    // OBO 校验（Q-6）：外部直调声称代表某人时，该 userId 必须真实存在且由令牌可代表——
-    // OBO 链（act）里出现真实人类，或调用主体为 '*' / 绑定了该用户；否则不采信、不入账。
+    // Vérification OBO (Q-6) : quand un appel direct externe déclare représenter quelqu'un, ce userId doit réellement exister et être représentable par le jeton —
+    // un humain réel apparaît dans la chaîne OBO (act), ou le sujet appelant est '*' / lié à cet utilisateur ; sinon la déclaration n'est pas retenue, pas de comptabilisation.
     let onBehalfUser: string | undefined
     if (typeof metadata['ybk_on_behalf_user'] === 'string' && metadata['ybk_on_behalf_user'].trim()) {
       const claimed = metadata['ybk_on_behalf_user'].trim()
@@ -809,13 +809,13 @@ export function apply(ctx: Context) {
         callerKind: verified.principal.type === 'human' ? 'human' : 'machine',
         ...(verified.actChain.length > 0 ? { actChain: verified.actChain.map((e) => ({ principalId: '', name: e.name, type: e.type })) } : {}),
         ...(onBehalfUser ? { onBehalfUser } : {}),
-        // 越权原语封堵：请求级 tools/functions/mcp_servers（顶层或 metadata 携带）一律接受不生效
+        // Blocage des primitives d'élévation de privilèges : tools/functions/mcp_servers au niveau requête (au sommet ou dans metadata) toujours acceptés sans effet
         requestTools: body.tools !== undefined ? body.tools : metadata['tools'],
         ...(body.functions !== undefined || metadata['functions'] !== undefined ? { requestFunctions: body.functions ?? metadata['functions'] } : {}),
         ...(body.mcp_servers !== undefined || metadata['mcp_servers'] !== undefined ? { requestMcpServers: body.mcp_servers ?? metadata['mcp_servers'] } : {}),
       })
       if (body.stream === true) {
-        // SSE 进度流：文本增量以完整输出单帧下发（内置 harness 单步执行，诚实粒度）
+        // Flux de progression SSE : l'incrément textuel est envoyé en une seule trame avec la sortie complète (harness intégré mono-étape, granularité honnête)
         const res = exchange.res
         if (res.headersSent) return
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
@@ -834,7 +834,7 @@ export function apply(ctx: Context) {
           unsubscribe()
           if (!res.writableEnded) res.end()
         }
-        /** 终态收帧（幂等：SSE 只允许一个终止帧，避免竞态下重复 end）。 */
+        /** Clôture sur état terminal (idempotent : le SSE n'autorise qu'une trame terminale, évite un end répété en course). */
         const finishStream = (record: UhpResponseRecord) => {
           if (record.status === 'completed') {
             send('output_text.delta', { delta: record.outputText })
@@ -852,9 +852,9 @@ export function apply(ctx: Context) {
           finishStream(initial)
           return
         }
-        // P2-03：订阅执行记录事件（uhp.response.progress），不再订阅只对平台派发记录的
-        // a2a.task.progress——外部直调（dispatchedByPlatform=false）此前永远收不到完成帧，
-        // SSE 只下发 response.created 后悬挂到 15s 心跳。
+        // P2-03 : abonnement aux événements d'enregistrement d'exécution (uhp.response.progress), et non plus à
+        // a2a.task.progress qui ne concerne que les enregistrements délégués par la plateforme — l'appel direct externe (dispatchedByPlatform=false) ne recevait jamais la trame de fin,
+        // le SSE restait suspendu après response.created jusqu'au battement de cœur de 15 s.
         unsubscribe = ctx.platformBus.on('uhp.response.progress', (payload) => {
           const p = payload as UhpProgressPayload
           if (p.responseId !== record.id) return
@@ -869,7 +869,7 @@ export function apply(ctx: Context) {
             send('response.in_progress', { id: record.id })
           }
         })
-        // 订阅后再查一次终态：堵住「createResponse → 订阅」之间的完成竞态（否则永不闭合）
+        // Revérification de l'état terminal après abonnement : colmate la course d'achèvement entre « createResponse → abonnement » (sinon clôture jamais atteinte)
         const afterSubscribe = gateway.response(record.id)
         if (afterSubscribe && ['completed', 'failed', 'canceled'].includes(afterSubscribe.status)) {
           finishStream(afterSubscribe)
@@ -880,7 +880,7 @@ export function apply(ctx: Context) {
         exchange.raw.on('close', closeStream)
         return
       }
-      // 同步模式（stream≠true）：等待终态再返回（Responses API 同步语义；上限 60s 防悬挂）
+      // Mode synchrone (stream≠true) : attend l'état terminal avant de répondre (sémantique synchrone de l'API Responses ; plafond 60 s contre la suspension)
       let settled = gateway.response(record.id) ?? record
       for (let i = 0; i < 300 && !['completed', 'failed', 'canceled'].includes(settled.status); i++) {
         await new Promise((resolve) => setTimeout(resolve, 200))
@@ -900,8 +900,8 @@ export function apply(ctx: Context) {
     }
   })
 
-  // 读/取消：属主本人或平台管理员（治理读权限 uhp.read 经 /api/uhp/responses 面查询，
-  // 执行面 /v1 只认属主与 '*'——同层外部集成之间不得互读/互取消）
+  // Lecture/annulation : propriétaire lui-même ou administrateur de la plateforme (la permission de lecture de gouvernance uhp.read passe par la face de requête /api/uhp/responses,
+  // la face d'exécution /v1 ne reconnaît que le propriétaire et '*' — les intégrations externes d'une même couche ne peuvent ni lire ni annuler mutuellement)
   http.register('GET', '/v1/uhp/responses/:id', (exchange) => {
     const verified = verifyCaller(exchange)
     if (!verified) return
@@ -910,7 +910,7 @@ export function apply(ctx: Context) {
       exchange.fail(404, 'NOT_FOUND', t('response 不存在：{id}', { id: exchange.params['id'] ?? '' }))
       return
     }
-    // 存在性不泄露：非属主一律按「不存在」回应（避免探测他人执行记录 id）
+    // Pas de fuite d'existence : un non-propriétaire reçoit toujours « n'existe pas » (évite de sonder les id d'enregistrements d'exécution d'autrui)
     if (record.callerPrincipalId !== verified.principal.id && !verified.scopes.includes('*')) {
       denyAudit(exchange, verified, 'uhp.response.read', t('越权读取他人执行记录'))
       exchange.fail(404, 'NOT_FOUND', t('response 不存在：{id}', { id: exchange.params['id'] ?? '' }))
@@ -934,8 +934,8 @@ export function apply(ctx: Context) {
     }
   })
 
-  // -- harness 注册表管理（/api 域，guarded，进 RBAC 越权探针矩阵） -------------------------
-  // 组织隔离（Q-4）：与 /api/agents 的 R11 同口径——下级组织持 uhp.read 只见本组织子树
+  // -- Gestion du registre des harness (domaine /api, gardé, intégré à la matrice de sondes d'élévation RBAC) -------------------------
+  // Isolation organisationnelle (Q-4) : même référence que R11 de /api/agents — une organisation subordonnée titulaire de uhp.read ne voit que son sous-arbre organisationnel
   const visibleOrgScope = (info: { kind: string; userId?: string; refType?: string; refId?: string; permissions: string[] }): Set<string> | null => {
     if (info.permissions.includes('*')) return null
     let orgId = info.userId ? ctx.iam.users().get(info.userId)?.orgId : undefined
@@ -1018,7 +1018,7 @@ export function apply(ctx: Context) {
   })
 }
 
-/** 对外视图：Responses 兼容子集字段名（ASCII 协议键，中文释义见协议键对照总表）。 */
+/** Vue externe : noms de champs du sous-ensemble compatible Responses (clés de protocole ASCII ; pour les libellés chinois, voir le tableau général de correspondance des clés de protocole). */
 function uhpView(record: UhpResponseRecord) {
   return {
     id: record.id,

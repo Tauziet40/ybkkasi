@@ -1,25 +1,25 @@
 /**
- * 执行租约权威存储（LeaseStoreService）——exec_run_leases（SQLite txnStore）。
+ * Stockage d'autorité des baux d'exécution (LeaseStoreService) — exec_run_leases (txnStore SQLite).
  *
- * 附录 A 决策 3/7（冻结）：SQLite 为租约唯一权威；issue.executionRunId /
- * executionAgentKey / executionLockedAt 三字段降级为投影（由 ExecutionHubService
- * 写齐保持现状兼容，读取裁决一律以本表为准）。
+ * Décisions 3/7 de l'annexe A (gel) : SQLite est l'unique autorité des baux ; les trois champs issue.executionRunId /
+ * executionAgentKey / executionLockedAt sont rétrogradés en projection (écrite intégralement par ExecutionHubService
+ * pour compatibilité du statu quo, tout arbitrage de lecture fait foi sur la présente table).
  *
- * 事务语义（txnStore.txn 同步 BEGIN IMMEDIATE）：
- *   - acquire：检查-插入/续期在同一事务内完成（Node 单线程 + 同步事务＝无并发窗口）；
- *     同一 issue 至多一条 active 且未过期租约；leaseVersion 按 issue 内单调递增。
- *   - renew：同主体 + active + 未过期 → 续 renewedAt/expiresAt；否则 LEASE_STALE。
- *   - release / releaseForIssue：run/issue 级批量置 released（终态封存，不删行——审计链保留）。
+ * Sémantique transactionnelle (txnStore.txn BEGIN IMMEDIATE synchrone) :
+ *   - acquire : vérification-insertion/renouvellement dans la même transaction (Node monothread + transaction synchrone = aucune fenêtre de concurrence) ;
+ *     au plus un bail actif non expiré par issue ; leaseVersion croît de façon monotone au sein de l'issue.
+ *   - renew : même principal + actif + non expiré → renouvelle renewedAt/expiresAt ; sinon LEASE_STALE.
+ *   - release / releaseForIssue : passage en released par lots au niveau run/issue (scellé en état terminal, sans suppression de ligne — la chaîne d'audit est conservée).
  *
- * 本文件不 import plugin-workforce（防循环，§10.2）；RunLeaseRecord 为
- * plugin-workforce contract.ts 冻结形状的结构镜像，字段逐一对齐。
+ * Ce fichier n'importe pas plugin-workforce (anti-boucle, §10.2) ; RunLeaseRecord est un miroir structurel
+ * de la forme gelée de plugin-workforce contract.ts, champs alignés un à un.
  */
 import { newId } from '../../platform-core/src/ids.ts'
 import type { SqlValue } from '../../platform-core/src/sqlite.ts'
 import { decideLeaseClaim, decideLeaseRenewal, type LeaseStatusLite } from './domain.ts'
 import { t } from '../../platform-i18n/src/index.ts'
 
-/** 执行租约（结构镜像 plugin-workforce contract.ts RunLeaseRecord，冻结形状 V1.0）。 */
+/** Bail d'exécution (miroir structurel du RunLeaseRecord de plugin-workforce contract.ts, forme gelée V1.0). */
 export interface RunLeaseRecord {
   id: string
   issueId: string
@@ -36,7 +36,7 @@ export interface RunLeaseRecord {
   releaseReason: string
 }
 
-/** txnStore 最小结构面（SqliteTxnService 结构化满足；便于测试注入替身）。 */
+/** Surface minimale de txnStore (satisfaite structurellement par SqliteTxnService ; facilite l'injection de doublures de test). */
 export interface LeaseTxnStore {
   ensureTable(name: string, columns: Record<string, string>, options?: { primaryKey?: string[]; uniques?: string[][]; indexes?: string[][] }): void
   insert(table: string, row: Record<string, SqlValue>): void
@@ -51,7 +51,7 @@ export const EXEC_RUN_LEASES_TABLE = 'exec_run_leases'
 export interface AcquireLeaseInput {
   issueId: string
   runId: string
-  /** 受管员工 ID；legacy 机器直认领传空串（幂等判同退化为 agentKey）。 */
+  /** ID de l'employé géré ; la réclamation directe legacy par machine passe une chaîne vide (l'identité idempotente se réduit à agentKey). */
   employeeId: string
   agentKey: string
   principalId: string
@@ -67,10 +67,10 @@ export type RenewLeaseResult =
   | { ok: false; code: 'LEASE_STALE'; message: string }
 
 export interface RenewLeaseInput {
-  /** 二选一：leaseId 精确续租，或 runId 取该 run 最新租约。 */
+  /** L'un des deux : renouvellement exact par leaseId, ou dernier bail du run par runId. */
   leaseId?: string
   runId?: string
-  /** 提供时必须与租约主体一致（端口 renewLease 传）；缺省＝hub 内部幂等续期（裁决已在 claim 层完成）。 */
+  /** Fourni, doit coïncider avec le principal du bail (passé par le port renewLease) ; absent = renouvellement idempotent interne au hub (l'arbitrage a déjà eu lieu au niveau claim). */
   principalId?: string
   ttlMs?: number
 }
@@ -87,7 +87,7 @@ export class LeaseStoreService {
     this.nowMs = options.now ?? (() => Date.now())
   }
 
-  /** 建表（幂等）：列按 contract.RunLeaseRecord 冻结形状；索引 issueId+status、runId。 */
+  /** Création de table (idempotente) : colonnes selon la forme gelée contract.RunLeaseRecord ; index issueId+status, runId. */
   migrate(): void {
     this.txn.ensureTable(this.table, {
       id: 'TEXT NOT NULL',
@@ -107,10 +107,10 @@ export class LeaseStoreService {
   }
 
   /**
-   * 原子获得租约（事务内检查-置位）：
-   *   - 已有有效租约：同持有者（受管按 employeeId、legacy 按 agentKey）→ 幂等续期返回 created=false；
-   *     不同持有者 → LEASE_HELD_BY_OTHER + holder。
-   *   - 无有效租约（含 active 但已过期——先标 superseded 再新取）：leaseVersion = 该 issue max+1。
+   * Obtention atomique du bail (vérification-positionnement en transaction) :
+   *   - bail valide existant : même détenteur (géré par employeeId, legacy par agentKey) → renouvellement idempotent, renvoie created=false ;
+   *     détenteur différent → LEASE_HELD_BY_OTHER + holder.
+   *   - aucun bail valide (actif mais expiré compris — d'abord marqué superseded puis nouvelle prise) : leaseVersion = max de l'issue +1.
    */
   acquire(input: AcquireLeaseInput): AcquireLeaseResult {
     return this.txn.txn(() => {
@@ -138,7 +138,7 @@ export class LeaseStoreService {
         }
         return { ok: false, code: 'LEASE_HELD_BY_OTHER' as const, holder: decision.holder }
       }
-      // 过期未标脏的 active 租约：降级为被取代（权威口径：过期＝无人实际持有）
+      // Bail actif expiré non marqué sale : rétrogradé en remplacé (référentiel d'autorité : expiré = personne ne détient effectivement)
       for (const row of this.txn.all<LeaseRow>(this.table, { issueId: input.issueId, status: 'active' })) {
         if (new Date(String(row.expiresAt)).getTime() <= now) {
           this.markSettled(String(row.id), 'superseded', 'expired')
@@ -166,7 +166,7 @@ export class LeaseStoreService {
     })
   }
 
-  /** 续租：同主体 + active + 未过期才能续（principalId 缺省＝hub 内部裁决后续期，不重复校验）。 */
+  /** Renouvellement : même principal + actif + non expiré (principalId absent = renouvellement après arbitrage interne du hub, pas de revalidation). */
   renew(input: RenewLeaseInput): RenewLeaseResult {
     return this.txn.txn(() => {
       const now = this.nowMs()
@@ -194,12 +194,12 @@ export class LeaseStoreService {
     })
   }
 
-  /** run 级批量释放（终态收尾/停职联动），返回释放条数。 */
+  /** Libération par lots au niveau run (clôture d'état terminal/couplage suspension), renvoie le nombre libéré. */
   release(runId: string, reason: string): number {
     return this.releaseWhere({ runId }, reason)
   }
 
-  /** issue 级批量释放（任务取消/改派联动），返回释放条数。 */
+  /** Libération par lots au niveau issue (couplage annulation/réaffectation de tâche), renvoie le nombre libéré. */
   releaseForIssue(issueId: string, reason: string): number {
     return this.releaseWhere({ issueId }, reason)
   }
@@ -216,25 +216,25 @@ export class LeaseStoreService {
     })
   }
 
-  /** issue 当前有效租约（active 且未过期）；无则 undefined。 */
+  /** Bail valide courant de l'issue (actif et non expiré) ; sinon undefined. */
   activeForIssue(issueId: string, nowMs = this.nowMs()): RunLeaseRecord | undefined {
     const row = this.activeLeaseRow(issueId, nowMs)
     return row ? this.rowToLease(row) : undefined
   }
 
-  /** run 当前有效租约（active 且未过期）；无则 undefined。 */
+  /** Bail valide courant du run (actif et non expiré) ; sinon undefined. */
   activeForRun(runId: string, nowMs = this.nowMs()): RunLeaseRecord | undefined {
     const row = this.activeLeaseRowForRun(runId, nowMs)
     return row ? this.rowToLease(row) : undefined
   }
 
-  /** run 最新一条租约记录（任意状态，含 released/superseded——D07 旧租约判定依据）。 */
+  /** Dernier enregistrement de bail du run (tout état, released/superseded compris — base du jugement de bail périmé D07). */
   latestForRun(runId: string): RunLeaseRecord | undefined {
     const row = this.latestLeaseRowForRun(runId)
     return row ? this.rowToLease(row) : undefined
   }
 
-  // -- 内部 -------------------------------------------------------------------
+  // -- Interne -------------------------------------------------------------------
 
   private activeLeaseRow(issueId: string, nowMs: number): LeaseRow | undefined {
     for (const row of this.txn.all<LeaseRow>(this.table, { issueId, status: 'active' })) {
@@ -305,7 +305,7 @@ export class LeaseStoreService {
   }
 }
 
-/** exec_run_leases 行原貌（SqlValue 口径）。 */
+/** Ligne brute d'exec_run_leases (référentiel SqlValue). */
 interface LeaseRow extends Record<string, SqlValue> {
   id: string
   issueId: string

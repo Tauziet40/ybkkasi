@@ -1,4 +1,4 @@
-/** #17：真实面板服务 → 模型服务 → usage 回执；仅上游 HTTP 使用隔离模拟。 */
+/** #17 : vrai service panneau → service de modèles → reçu usage ; seule la couche HTTP amont utilise une simulation isolée. */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { PanelService } from './service.ts'
@@ -104,7 +104,7 @@ function fixture(t, { deptOrg = 'rd', assetOrg = 'ops', noOrgs = false } = {}) {
     },
     platformBus: { emit() {} },
   }
-  // 面板架构统一（2026-10-29）后服务端经 ctx.reflect 软读可选宿主服务——夹具同步接线。
+  // Après l'unification de l'architecture panneau (2026-10-29), le serveur lit en douceur les services d'hôte optionnels via ctx.reflect — la fixture câble pareil.
   ctx.reflect = { get: (key) => ctx[key] }
   const gateway = Object.create(ModelGatewayService.prototype)
   Object.defineProperty(gateway, 'ctx', { value: ctx })
@@ -143,7 +143,7 @@ test('机器主体 Agent 调用继承部门组织，用户组织仍优先 #17', 
 })
 test('无部门归属时回落平台根组织 #17', async (t) => {
   const f = fixture(t, { deptOrg: undefined })
-  // 参数缺省会使用 fixture 默认值，此处明确覆盖服务端部门记录。
+  // Les paramètres absents utiliseraient les valeurs par défaut de la fixture ; ici, remplacement explicite par l'enregistrement départemental côté serveur.
   f.panel.dept = () => ({
     id: 'rd',
     label: '研发',

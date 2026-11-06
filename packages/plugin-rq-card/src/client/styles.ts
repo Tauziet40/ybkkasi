@@ -1,24 +1,24 @@
 /**
- * 卡片/反馈条样式：一次注入一段 <style data-plugin>（与 dsh tsdown.client.ts
- * 预设对 CSS Modules 的处理同构——工厂执行时注入、loader 卸载时按 data-plugin
- * 回收；spike §3.1「CSS」行）。
+ * Styles carte/barre de feedback : injecte une seule fois un <style data-plugin> (isomorphe au traitement
+ * prédéfini de dsh tsdown.client.ts pour CSS Modules — injection à l'exécution de la fabrique, retrait par data-plugin au déchargement du loader
+ * recyclage ; ligne « CSS » du spike §3.1).
  *
- * 【为什么不用 x.module.css】dsh 预设经 lightningcss 编译 module.css，而本仓
- * 不带 lightningcss 依赖、build.mjs 的等价 esbuild 路径也刻意不引入它——
- * 手写类名 + 运行时注入是把构建面收敛到「零额外工具链」的降级友好选择。
+ * [Pourquoi pas x.module.css] le préréglage dsh compile module.css via lightningcss, or ce dépôt
+ * sans dépendance lightningcss, et le chemin esbuild équivalent de build.mjs ne l'introduit pas non plus délibérément —
+ * classes écrites à la main + injection à l'exécution sont le choix ami du repli qui converge la face build vers « zéro chaîne d'outils additionnelle ».
  *
- * 【R7 设计 token 三端统一】本插件浏览器半渲染在 dsh 宿主文档内，宿主页面
- * 加载不到 console 静态根的 packages/plugin-console/public/css/tokens.css
- * （变量不可达，调查结论）——因此每个值写 `var(--rq-*, fallback)` 双层：
- *   · fallback = 现值，与 tokens.css 文末「rq-card 内联变量」一节单源对齐
- *     （改色须两处同步，值一字不差），保证宿主未覆写时视觉不变；
- *   · 宿主页面/定制轨在 :root 覆写任一 --rq-*（或 --fs-*）即可换卡片皮肤。
+ * [Unification des tokens de design R7 sur les trois extrémités] le semi-rendu navigateur de cette extension vit dans le document hôte dsh, et la page hôte
+ * Ne charge pas le tokens.css de la racine statique console packages/plugin-console/public/css/tokens.css
+ * (variables inaccessibles, conclusion de l'enquête) — d'où chaque valeur écrite en deux couches `var(--rq-*, fallback)` :
+ *   · fallback = valeur actuelle, alignée en source unique avec la section « rq-card 内联变量 » en fin de tokens.css
+ *     (un changement de couleur doit être synchronisé aux deux endroits, valeur identique au caractère près), garantissant un rendu inchangé tant que l'hôte ne surcharge pas ;
+ *   · la page hôte/la piste de personnalisation peut changer l'apparence de la carte en surchargeant dans :root n'importe quel --rq-* (ou --fs-*).
  */
 
-/** 插件 id（style 标签的 data-plugin 值，loader 卸载凭它回收）。 */
+/** id de l'extension (valeur data-plugin de la balise style, le loader s'appuie dessus pour le recyclage au déchargement). */
 const PLUGIN_ID = '@dsh-ops/plugin-rq-card'
 
-/** 样式表文本（全部类名以 rq- 前缀隔离，避免与宿主/其他插件冲突）。 */
+/** Texte de la feuille de styles (toutes les classes isolées par le préfixe rq-, pour éviter les collisions avec l'hôte/d'autres extensions). */
 const SHEET = `
 .rq-ecard{border:1px solid var(--rq-edge,#e2e6ee);border-radius:10px;padding:8px 12px;
   margin:4px 0;font-size:var(--fs-13,13px);line-height:1.5;background:var(--rq-surface,#fff);max-width:640px}
@@ -65,11 +65,11 @@ const SHEET = `
   background:var(--rq-muted-fg,#5b6472);color:var(--rq-surface,#fff);font-size:var(--fs-11,11px);opacity:.75;pointer-events:none}
 `
 
-/** 已注入标记（幂等：重复调用不重复插入）。 */
+/** Marque d'injection effectuée (idempotent : des appels répétés ne réinsèrent pas). */
 let injected = false
 
 /**
- * 幂等注入插件样式表（apply 早期调用一次即可；SSR/无 document 环境安全跳过）。
+ * Injection idempotente de la feuille de style de l'extension (un appel tôt dans apply suffit ; SSR/environnement sans document sauté sans risque).
  */
 export function ensureStyles(): void {
   if (injected || typeof document === 'undefined') return

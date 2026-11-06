@@ -1,54 +1,54 @@
 /**
- * @dsh-ops/plugin-rq-card —— 通道常量与载荷类型（wire 层）。
+ * @dsh-ops/plugin-rq-card — constantes de canal et types de charge (couche wire).
  *
- * 【浏览器安全】本文件被宿主半与浏览器半共同消费：只允许常量与纯类型，
- * 零 Node 内建、零包依赖——可被任意一侧（含浏览器 bundle）内联而不泄漏
- * 运行时身份（对齐 dsh tsdown.client.ts 的 INLINE_SAFE 判据）。
+ * [Sécurité navigateur] ce fichier est consommé à la fois par la moitié hôte et la moitié navigateur : seules constantes et types purs,
+ * zéro natif Node, zéro dépendance de paquet — inlinable par n'importe quel côté (bundle navigateur compris) sans fuite
+ * d'identité d'exécution (aligné sur le critère INLINE_SAFE de dsh tsdown.client.ts).
  *
- * 【数据回流选型（spike §4.3 二选一）】走同源 REST：浏览器直接 fetch 到
- * plugin-dsh-bridge 已挂在 /rq 前缀的元冰可数据面，复用元冰可自身鉴权（rq_sid
- * Cookie）与审计；不新增宿主 RPC 通道（connection.rpc 的 loopback 判定在
- * 反代/远端访问场景有不确定性，spike 风险 R6）。
+ * [Choix du retour de données (spike §4.3, une option sur deux)] REST same-origin : le navigateur fetch directement
+ * le plan de données de method monté par plugin-dsh-bridge sur le préfixe /rq, réutilisant l'authentification propre de method (cookie
+ * rq_sid) et l'audit ; pas de nouveau canal RPC hôte (le jugement loopback de connection.rpc a des
+ * incertitudes en scénario reverse-proxy/accès distant, risque R6 du spike).
  */
 
-/** 元冰可数据面对外前缀（plugin-dsh-bridge mountPath，单进程单入口）。 */
+/** Préfixe externe du plan de données de method (mountPath de plugin-dsh-bridge, entrée unique en processus unique). */
 export const CONSOLE_BASE = '/rq'
 
-/** 👍/👎 反馈薄端点（同源 REST 相对路径）。端点本体由 WP-07 实现
- * （POST → usage.record 零价快照，主体经绑定身份归因）；端点未上线期间
- * 前端调用会得到 404，控制器按「失败静默」处理，不打扰会话。 */
+/** Endpoint léger de feedback 👍/👎 (chemin relatif REST same-origin). L'endpoint lui-même est implémenté par WP-07
+ * (POST → usage.record en instantané à prix zéro, attribution par l'identité liée) ; avant sa mise en ligne, l'appel
+ * front reçoit 404, le contrôleur traite en « échec silencieux », sans déranger la session. */
 export const FEEDBACK_ENDPOINT = `${CONSOLE_BASE}/api/usage/feedback`
 
-/** 反馈评分（WP-07 契约：score 只有两值）。 */
+/** Score de feedback (contrat WP-07 : score n'a que deux valeurs). */
 export type FeedbackScore = 'up' | 'down'
 
-/** POST /rq/api/usage/feedback 请求体（note 可选；不传即纯评分）。 */
+/** Corps de la requête POST /rq/api/usage/feedback (note optionnelle ; sans note = score pur). */
 export interface FeedbackPayload {
   messageId: string
   score: FeedbackScore
   note?: string
 }
 
-/** 反馈端点的最小应答形态（薄端点允许空体：空体按成功解释）。 */
+/** Forme de réponse minimale de l'endpoint de feedback (endpoint léger admet un corps vide : corps vide interprété comme succès). */
 export interface FeedbackReply {
   ok?: boolean
 }
 
-/** 反馈提交结果：传输层失败不抛出，折叠为 ok:false（调用方静默降级）。 */
+/** Résultat de soumission du feedback : l'échec de transport ne lève pas, replié en ok:false (dégradation silencieuse côté appelant). */
 export type FeedbackResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
 
-/** 本插件注册的 slot 名（与 dsh rc.7 SlotMap 对齐，spike §3.2 名录）。 */
+/** Noms de slots enregistrés par cette extension (alignés sur le SlotMap dsh rc.7, répertoire spike §3.2). */
 export const SLOT_TOOLVIEW = 'tool.call.toolview' as const
 export const SLOT_ASSISTANT_ACTIONS = 'conversation.chat.assistant-actions' as const
 export const SLOT_OVERLAY = 'shell.overlay' as const
 
-/** 反馈条在 assistant-actions list 槽的条目 id：与 dsh 自带 'feedback'（order 10）并存。 */
+/** Id d'entrée de la barre de feedback dans le slot list assistant-actions : coexiste avec le 'feedback' intégré de dsh (order 10). */
 export const FEEDBACK_ENTRY_ID = 'rq-feedback' as const
 
-/** 执行卡在 tool.call.toolview 键位槽的条目 id 前缀（实际条目 id = 前缀 + 工具名）。 */
+/** Préfixe d'id d'entrée de la carte d'exécution dans le slot clavier tool.call.toolview (id réel = préfixe + nom d'outil). */
 export const TOOLVIEW_ENTRY_PREFIX = 'rq-tool-' as const
 
-/** 降级角标在 shell.overlay list 槽的条目 id（spike §5 第 6 条）。 */
+/** Id d'entrée du coin de repli dans le slot list shell.overlay (spike §5 item 6). */
 export const DEGRADED_BADGE_ID = 'rq-card-degraded' as const

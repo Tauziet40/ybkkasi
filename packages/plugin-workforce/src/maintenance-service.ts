@@ -1,47 +1,47 @@
 /**
- * 台账维护服务（maintenance-service，W5 运维面，决策 D-③ three-in-one 最小集）。
+ * Service de maintenance du registre (maintenance-service, face opérationnelle W5, décision D-③ ensemble minimal trois-en-un).
  *
- * 职责（「定时器跑 + admin 手动跑同一函数」，与 plugin-usage 保留巡检、exec-hub tick 同款先例）：
- *   1. 过期 permit 落账：workforce_permits 内 status='active' 且 expiresAt<=now 的行
- *      逐个落 'expired'。调用校验（permit-service.verify / activeForRun）本就按 expiresAt
- *      即时拒绝，落账只是把「事实已发生」回写台账（「过期不落库」的历史口径自此收敛，
- *      诚实呈现）；本服务是仓库内唯一写 'expired' 的位置；不发事件、不动 exec-hub
- *      （过期不是撤销，无联动面）。
- *   2. 终态 run 台账盘点（只计数、不删行）：workforce_* 各表是审计账本（附录 A 决策 7），
- *      与租约「终态封存不删行」同口径——终态 run（exec-hub 结构化探测，
- *      status∈{completed,failed,timeout}）关联的 permit/invocation/deliverable 行
- *      只出计数报告，供运维评估归档策略，绝不就地删除历史事实。
+ * Responsabilités (« le minuteur et l'admin manuel exécutent la même fonction », mêmes précédents que l'inspection de rétention de plugin-usage et le tick d'exec-hub) :
+ *   1. Comptabilisation des permits expirés : dans workforce_permits, les lignes status='active' et expiresAt<=now
+ *      passent individuellement en 'expired'. La vérification d'appel (permit-service.verify / activeForRun) refuse déjà immédiatement selon expiresAt,
+ *      la comptabilisation ne fait que réécrire dans le registre « le fait déjà survenu » (l'ancien référentiel « expiration non comptabilisée » converge ainsi,
+ *      rendu honnête) ; ce service est le seul endroit du dépôt écrivant 'expired' ; pas d'événement émis, exec-hub non touché
+ *      (expirer n'est pas révoquer, aucune face de chaînage).
+ *   2. Inventaire du registre des runs à état terminal (compter seulement, ne jamais supprimer de ligne) : les tables workforce_* sont des registres d'audit (annexe A décision 7),
+ *      même référentiel que les baux « archivage à l'état terminal sans suppression » — les lignes permit/invocation/deliverable liées aux runs terminaux (sondage structuré exec-hub,
+ *      status∈{completed,failed,timeout}) ne donnent lieu qu'à un rapport de comptage,
+ *      pour que l'exploitation évalue la politique d'archivage, jamais de suppression sur place des faits historiques.
  *
- * 定时器纪律（lint-timers 硬门禁，照 plugin-usage retention 形态）：
- * 构造期 setTimeout 首跑（20s，避开装配热路径）+ setInterval 巡检 + `.unref?.()`
- * + `ctx.effect(clearInterval)` 生命周期登记。
- * env 开关 WORKFORCE_MAINTENANCE_INTERVAL_MS：默认 6h=21600000；0=停用定时仅手动。
+ * Discipline des minuteurs (verrou dur lint-timers, sur la forme de retention de plugin-usage) :
+ * premier passage setTimeout à la construction (20 s, hors du chemin chaud d'assemblage) + inspection setInterval + `.unref?.()`
+ * + enregistrement de cycle de vie `ctx.effect(clearInterval)`.
+ * Commutateur env WORKFORCE_MAINTENANCE_INTERVAL_MS : défaut 6 h=21600000 ; 0=désactive le minuteur, manuel uniquement.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
 import { t } from '../../platform-i18n/src/index.ts'
 import type { WorkforceStore } from './contract.ts'
 
-/** 默认巡检间隔：6 小时（与 usage 保留巡检同节奏）。 */
+/** Intervalle d'inspection par défaut : 6 heures (même cadence que l'inspection de rétention de usage). */
 const DEFAULT_INTERVAL_MS = 6 * 3_600_000
-/** 构造期首跑延迟（毫秒）：照 plugin-usage retention 的 20s。 */
+/** Délai du premier passage à la construction (millisecondes) : sur le modèle des 20 s de retention de plugin-usage. */
 const FIRST_SWEEP_DELAY_MS = 20_000
 
-/** exec-hub run 集合的结构化探测形状（缺席＝盘点能力缺失，过期落账不受影响；不反向 import）。 */
+/** Forme du sondage structuré de la collection de runs d'exec-hub (absence = capacité d'inventaire manquante, la comptabilisation des expirations n'est pas affectée ; pas d'import inverse). */
 interface ExecHubRunsProbe {
   runs?: () => { all(): Array<{ id: string; status: string }> }
 }
 
-/** run 终态全集（exec-hub RunStatus 除 running 外三态）；字面同步，结构化探测不产生依赖。 */
+/** Ensemble complet des états terminaux de run (les trois états de RunStatus d'exec-hub hors running) ; synchronisation littérale, le sondage structuré ne crée pas de dépendance. */
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'timeout'])
 
 export interface MaintenanceRunResult {
   ranAt: string
-  /** 本轮落 'expired' 的 permit ID（调用校验此前已即时拒绝，落账为事后回写）。 */
+  /** Permits passés en 'expired' ce tour (la vérification d'appel les avait déjà refusés immédiatement, la comptabilisation est une réécriture a posteriori). */
   expiredPermits: string[]
-  /** 终态 run 数（盘点基准）。 */
+  /** Nombre de runs à état terminal (référence de l'inventaire). */
   terminalRunCount: number
-  /** 挂在终态 run 上的台账行计数（只报告不删行）。 */
+  /** Comptage des lignes de registre portées par des runs terminaux (rapport seul, pas de suppression). */
   permitsOnTerminalRuns: number
   invocationsOnTerminalRuns: number
   deliverablesOnTerminalRuns: number
@@ -50,7 +50,7 @@ export interface MaintenanceRunResult {
 export class MaintenanceService extends Service {
   static readonly provide = 'workforceMaintenance'
 
-  /** 巡检间隔（毫秒）；0=定时停用，仅 admin 手动触发。 */
+  /** Intervalle d'inspection (millisecondes) ; 0 = minuteur désactivé, déclenchement manuel admin uniquement. */
   readonly intervalMs: number
 
   private timer: ReturnType<typeof setInterval> | undefined
@@ -65,7 +65,7 @@ export class MaintenanceService extends Service {
       const first = setTimeout(() => void this.sweep(), FIRST_SWEEP_DELAY_MS)
       ctx.effect(() => () => clearTimeout(first))
       this.timer = setInterval(() => void this.sweep(), this.intervalMs)
-      this.timer.unref?.() // OPT-P3-02：嵌入形态不挂起事件循环（lint-timers 硬门禁）
+      this.timer.unref?.() // OPT-P3-02 : la forme intégrée ne suspend pas la boucle d'événements (verrou dur lint-timers)
       ctx.effect(() => () => {
         if (this.timer) clearInterval(this.timer)
       })
@@ -74,7 +74,7 @@ export class MaintenanceService extends Service {
     }
   }
 
-  // -- 依赖（结构化探测，不反向依赖 exec-hub；store 缺席按可观测错误处理） ------------------
+  // -- Dépendances (sondage structuré, pas de dépendance inverse vers exec-hub ; store absent = erreur observable) ------------------
 
   private get store(): WorkforceStore {
     const store = (this.ctx as unknown as { workforceStore?: WorkforceStore }).workforceStore
@@ -88,11 +88,11 @@ export class MaintenanceService extends Service {
     return (this.ctx as unknown as { execHub?: ExecHubRunsProbe }).execHub
   }
 
-  // -- 巡检主体（定时器与 admin 手动口共用同一函数） -----------------------------------------
+  // -- Corps de l'inspection (le minuteur et l'entrée manuelle admin partagent la même fonction) -----------------------------------------
 
   run(): MaintenanceRunResult {
     const now = new Date().toISOString()
-    // 1. 过期 permit 落账：仓库内唯一写 'expired' 处（逐行短事务；不发事件、不动 exec-hub）
+    // 1. Comptabilisation des permits expirés : unique endroit du dépôt écrivant 'expired' (courte transaction ligne à ligne ; pas d'événement, exec-hub non touché)
     const expiredPermits: string[] = []
     for (const permit of this.store.permits.findWhere({ status: 'active' })) {
       if (!permit.expiresAt || permit.expiresAt > now) continue
@@ -101,7 +101,7 @@ export class MaintenanceService extends Service {
       })
       expiredPermits.push(permit.id)
     }
-    // 2. 终态 run 台账盘点（只计数不删行——审计账本「终态封存」，与租约同口径）
+    // 2. Inventaire du registre des runs terminaux (compter sans supprimer — « archivage à l'état terminal » du registre d'audit, même référentiel que les baux)
     const hub = this.execHub()
     const terminalRunIds = new Set<string>(
       (hub && typeof hub.runs === 'function' ? hub.runs().all() : [])

@@ -1,16 +1,16 @@
 /**
- * 任用域服务（appointment-service）—— 任用版本、资源授权期望、激活探针与撤销联动。
+ * Service du domaine des nominations (appointment-service) — versions de nomination, autorisations de ressources souhaitées, sondes d'activation et chaînage de révocation.
  *
- * 核心是 §D.4 状态机「准备中 → 生效 → 撤销中 → 已撤销/配置失败」的落地：
- *   - 任用只是一份「带版本的期望策略」，不等于真实权限：激活必须逐 grant 经适配器探针
- *     核验原资源网关中的授权已真实生效（MCP 权限组/Connector 策略/NAS 目录映射…）；
- *   - 全部探针通过 → 任用 effective 并同时装配能力清单（workforceCapabilities）；
- *     任一失败 → 该 grant failed、任用保持 preparing、整体不生效——绝不签发 permit；
- *   - 探针属只读核验（可能触达网关），一律在事务外执行；事务只写状态；
- *   - 撤销：先撤全部该任用 permit（工作策略层先失效），grant 与任用一期同步收敛 revoked
- *     （原资源网关侧的真实授权回收为运维项，见文件尾注）。
+ * Le cœur est la matérialisation de la machine à états §D.4 « préparation → en vigueur → révocation en cours → révoquée/échec de configuration » :
+ *   - une nomination n'est qu'une « politique souhaitée versionnée », pas une permission réelle : l'activation doit, grant par grant, vérifier via les sondes d'adaptateur
+ *     que l'autorisation a réellement pris effet dans la passerelle de ressources d'origine (groupe de permissions MCP/politique Connector/mapping de répertoires NAS…) ;
+ *   - toutes les sondes passent → nomination effective et assemblage simultané de l'inventaire de capacités (workforceCapabilities) ;
+ *     un seul échec → ce grant passe failed, la nomination reste preparing, l'ensemble ne prend pas effet — aucun permit n'est jamais émis ;
+ *   - les sondes sont des vérifications en lecture seule (pouvant toucher les passerelles), toujours exécutées hors transaction ; la transaction n'écrit que les états ;
+ *   - révocation : révoquer d'abord tous les permits de la nomination (la couche de politique de travail cesse la première), grant et nomination convergent simultanément en revoked en phase 1
+ *     (la récupération réelle des autorisations côté passerelle de ressources d'origine est un poste d'exploitation, voir la note en fin de fichier).
  *
- * 失败语义诚实：适配器缺席/探针异常/探针否决都落 failed + 中文 lastError，不以空实现冒充成功。
+ * Sémantique d'échec honnête : adaptateur absent/anomalie de sonde/refus de sonde retombent tous en failed + lastError en chinois, sans faire passer une implémentation vide pour un succès.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -54,7 +54,7 @@ function parseJsonObject(text: string): Record<string, unknown> {
   }
 }
 
-/** 授权记录 → 期望规格（探针入参；记录是存储形态，规格是契约形态）。 */
+/** Enregistrement d'autorisation → spécification souhaitée (paramètre de la sonde ; l'enregistrement est la forme stockée, la spécification la forme de contrat). */
 function grantSpecOf(row: ResourceGrantRecord): ResourceGrantSpec {
   return {
     kind: row.kind,
@@ -65,7 +65,7 @@ function grantSpecOf(row: ResourceGrantRecord): ResourceGrantSpec {
   }
 }
 
-/** 单个 grant 的探针裁决（事务外产出，事务内落库）。 */
+/** Verdict de la sonde pour un grant (produit hors transaction, écrit en base dans la transaction). */
 interface GrantProbeOutcome {
   grantId: string
   status: 'effective' | 'failed'
@@ -80,7 +80,7 @@ export class AppointmentService extends Service implements WorkforceAppointments
     super(ctx, 'workforceAppointments')
   }
 
-  // -- 内部取用（同插件服务经 ctx 运行时解析；结构化探测保持独立单测可运行） ----------
+  // -- Accès internes (services de la même extension résolus via ctx à l'exécution ; le sondage structéré garde l'exécution en test unitaire autonome possible) ----------
 
   private get store(): WorkforceStoreService {
     return this.ctx.workforceStore
@@ -103,7 +103,7 @@ export class AppointmentService extends Service implements WorkforceAppointments
       const bus = (this.ctx as unknown as { platformBus?: { emit(event: string, payload: unknown): unknown } }).platformBus
       bus?.emit(name, { ...payload, at: nowIso() })
     } catch {
-      /* 事件总线缺席时跳过通知：状态事实已落库 */
+      /* bus d'événements absent : notification sautée — le fait d'état est déjà en base */
     }
   }
 
@@ -111,7 +111,7 @@ export class AppointmentService extends Service implements WorkforceAppointments
     return caller?.userId ?? caller?.principalId ?? ''
   }
 
-  // -- 任用版本 ------------------------------------------------------------
+  // -- Versions de nomination ------------------------------------------------------------
 
   create(input: {
     employeeId: string
@@ -133,14 +133,14 @@ export class AppointmentService extends Service implements WorkforceAppointments
     if (!employee) throw new Error(t('数字员工不存在：{id}', { id: employeeId }))
     if (employee.status === 'offboarded') throw new Error(t('已离岗员工不接受新任用（如需重新任用请新建数字员工）'))
 
-    // 密级在登记口即校验：绝密任用会在每次模型/资源调用前被拒，与其发放一份「必然失败」的任用，
-    // 不如在此显式拒绝（D14：禁止 Agent 处理的密级必须在调用前拒绝）
+    // La classification est validée dès l'enregistrement : une nomination top secret serait refusée avant chaque appel de modèle/ressource ; plutôt que de délivrer une nomination « vouée à l'échec »,
+    // refuser explicitement ici (D14 : une classification interdite à l'Agent doit être refusée avant l'appel)
     const dataClass = validateWorkDataClass(input.dataClass)
     if (dataClass === 'topsecret') {
       throw new WorkforceError('ARGUMENT_SCOPE_DENIED', t('任用密级不得为绝密（绝密数据禁止数字员工处理）'))
     }
 
-    // 授权期望逐项校验并归一（kind/registryId/actions/risk；写动作必须显式列出）
+    // Les autorisations souhaitées sont validées et normalisées une à une (kind/registryId/actions/risk ; les actions d'écriture doivent être listées explicitement)
     const grants = (Array.isArray(input.grants) ? input.grants : []).map((spec) => validateGrantSpec(spec))
     if (grants.length === 0) throw new Error(t('任用必须至少登记一项资源授权期望（grants）——空授权的任用不具备工作边界'))
 
@@ -157,7 +157,7 @@ export class AppointmentService extends Service implements WorkforceAppointments
     const appointment: AppointmentRecord = {
       id: appointmentId,
       employeeId,
-      version: 0, // 事务内分配（该员工 max+1）
+      version: 0, // attribuée dans la transaction (max+1 de l'employé)
       position: String(input.position ?? '').trim(),
       orgId,
       dataClass,
@@ -172,8 +172,8 @@ export class AppointmentService extends Service implements WorkforceAppointments
       updatedAt: createdAt,
     }
 
-    // 同事务完成「版本分配唯一性校验 + 任用落库 + grant 全量 preparing 落库」
-    // 员工+版本唯一冲突 → 中文错误（路由层 400），不依赖 SQLite 原始报错
+    // Même transaction pour « validation d'unicité d'attribution de version + écriture de la nomination + écriture de tous les grants en preparing »
+    // Conflit d'unicité employé+version → erreur en chinois (400 par la couche routes), sans dépendre de l'erreur brute SQLite
     this.store.txn(() => {
       const existing = this.store.appointments.findWhere({ employeeId })
       const maxVersion = existing.reduce((max, row) => Math.max(max, row.version), 0)
@@ -219,7 +219,7 @@ export class AppointmentService extends Service implements WorkforceAppointments
     return rows.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))
   }
 
-  /** 员工当前生效任用：status=effective 且未出有效期窗口的最新版本（过期版本不返回）。 */
+  /** Nomination actuellement en vigueur pour l'employé : status=effective et dernière version dans la fenêtre de validité (les versions expirées ne sont pas renvoyées). */
   effectiveForEmployee(employeeId: string): AppointmentRecord | undefined {
     const rows = this.store.appointments
       .findWhere({ employeeId, status: 'effective' })
@@ -227,13 +227,13 @@ export class AppointmentService extends Service implements WorkforceAppointments
     return rows.find((row) => appointmentInEffect(row))
   }
 
-  // -- 激活（§D.4 状态机核心） ----------------------------------------------
+  // -- Activation (cœur de la machine à états §D.4) ----------------------------------------------
 
   /**
-   * 激活：逐 grant 探针核验真实授权。
-   * 事务纪律：探针可能触达网关（网络语义），全部在事务外执行；事务只负责写状态。
-   * 全部 effective → 装配能力清单 → 任用 effective；任一 failed → 任用保持 preparing（不签 permit）；
-   * 能力清单装配失败同样保持 preparing（诚实缺位，可重试激活）。
+   * Activation : vérification grant par grant de l'autorisation réelle par sondes.
+   * Discipline de transaction : les sondes peuvent toucher les passerelles (sémantique réseau), toutes exécutées hors transaction ; la transaction n'écrit que les états.
+   * Tout effective → assemblage de l'inventaire de capacités → nomination effective ; un seul failed → la nomination reste preparing (aucun permit émis) ;
+   * un échec d'assemblage de l'inventaire de capacités laisse aussi en preparing (absence honnête, activation retentable).
    */
   async activate(caller: WorkCallerRef, id: string): Promise<AppointmentRecord> {
     const appt = this.get(id)
@@ -253,19 +253,19 @@ export class AppointmentService extends Service implements WorkforceAppointments
     const grants = this.store.grants.findWhere({ appointmentId: id })
     if (grants.length === 0) throw new Error(t('任用未登记任何资源授权，禁止激活（create 已强制，此处为防御校验）'))
 
-    // 组装身份核验上下文（探针用它定位员工/绑定/任用版本）：任用激活由真人主管发起，
-    // resolution 必须取员工域记录而非调用者身份——调用者是审批人，不是被执行的员工
+    // Assemble le contexte d'identité vérifié (les sondes s'en servent pour localiser employé/liaison/version de nomination) : l'activation de nomination est initiée par un superviseur humain,
+    // resolution doit prendre l'enregistrement du domaine employé et non l'identité de l'appelant — l'appelant est l'approbateur, pas l'employé exécuté
     const binding = this.store.bindings.findWhere({ employeeId: appt.employeeId, status: 'active' })[0]
     const resolution: IdentityResolution = { employee, binding, appointment: appt }
 
-    // 1. 事务外逐 grant 探针（适配器缺席 → failed('未登记适配器')；异常 → failed(异常消息)）
+    // 1. Sondes grant par grant hors transaction (adaptateur absent → failed('adaptateur non enregistré') ; anomalie → failed(message d'anomalie))
     const registry = this.adapters()
     const outcomes: GrantProbeOutcome[] = []
     for (const grant of grants) {
       outcomes.push(await this.probeGrantRow(grant, registry, resolution))
     }
 
-    // 2. 事务落库 grant 状态（含 ref 回填——真实权限组/策略/目录映射引用，不是 UI 勾选项）
+    // 2. Écriture en base des états des grants dans la transaction (avec reconstitution du ref — référence du vrai groupe de permissions/politique/mapping de catalogue, pas une case cochée d'UI)
     const checkedAt = nowIso()
     this.store.txn(() => {
       for (const outcome of outcomes) {
@@ -297,7 +297,7 @@ export class AppointmentService extends Service implements WorkforceAppointments
       return updated
     }
 
-    // 3. 能力清单装配（同插件服务；装配自身管理事务，故在本事务之外调用）
+    // 3. Assemblage de l'inventaire de capacités (service de la même extension ; l'assemblage gère lui-même sa transaction, donc appelé hors de la présente transaction)
     let manifestError = ''
     try {
       const capabilities = this.capabilities()
@@ -307,7 +307,7 @@ export class AppointmentService extends Service implements WorkforceAppointments
       manifestError = error instanceof Error ? error.message : String(error)
     }
 
-    // 4. 任用生效（清单装配失败则保持 preparing——不允许「任用生效但清单缺失」的假就绪）
+    // 4. Nomination en vigueur (échec d'assemblage de l'inventaire = on reste en preparing — une « fausse disponibilité » du type nomination effective mais inventaire manquant est interdite)
     const statusReason = manifestError === ''
       ? t('资源授权探针全部通过，任用生效（能力清单已装配）')
       : t('能力清单装配失败：{message}；任用保持准备中，请重试激活', { message: manifestError })
@@ -324,7 +324,7 @@ export class AppointmentService extends Service implements WorkforceAppointments
     return updated
   }
 
-  /** 单 grant 探针：只读核验真实配置，不自动扩权（§D.4 第 3 条）。 */
+  /** Sonde d'un grant : vérification en lecture seule de la configuration réelle, pas d'élargissement automatique (§D.4 3e). */
   private async probeGrantRow(
     grant: ResourceGrantRecord,
     registry: AdapterRegistry | undefined,
@@ -344,18 +344,18 @@ export class AppointmentService extends Service implements WorkforceAppointments
     }
   }
 
-  // -- 撤销（§D.4 第 5 条） --------------------------------------------------
+  // -- Révocation (§D.4 5e) --------------------------------------------------
 
   /**
-   * 撤销：先撤全部该任用 permit（工作策略层先失效、发 workforce.permit.revoked），
-   * 再收敛 grant 与任用状态。
+   * Révocation : révoquer d'abord tous les permits de la nomination (la couche de politique de travail cesse la première, émission de workforce.permit.revoked),
+   * puis faire converger les états des grants et de la nomination.
    *
-   * 一期口径（诚实登记）：撤权语义本应「工作层拒新动作 → 异步收敛原资源网关与远端凭证」，
-   * 一期将 grant 置 revoking→revoked、任用置 revoked 同步收敛；**原资源网关侧的真实授权回收**
-   * （MCP 权限组摘除、Connector 策略解绑、NAS 目录映射清理）依赖各适配器补撤权通道，
-   * 一期未实现的按运维项登记（见施工报告），不冒充「网关已回收」。
+   * Référentiel de phase 1 (enregistrement honnête) : la sémantique de retrait de droits devrait être « la couche de travail refuse les nouvelles actions → convergence asynchrone des passerelles de ressources d'origine et des justificatifs distants »,
+   * en phase 1 les grants passent revoking→revoked et la nomination revoked de manière synchrone ; **la récupération réelle des autorisations côté passerelle de ressources d'origine**
+   * (retrait du groupe de permissions MCP, déliaison de la politique Connector, nettoyage du mapping de répertoires NAS) dépend de canaux de retrait à ajouter par chaque adaptateur,
+   * ce qui n'est pas implémenté en phase 1 est enregistré comme poste d'exploitation (voir le rapport de chantier), sans simuler « passerelle déjà récupérée ».
    *
-   * revoking 是可续办中间态：permit 撤销部分失败时停留在 revoking，可重试本方法收敛。
+   * revoking est un état intermédiaire reprenable : en cas d'échec partiel de révocation des permits, on demeure en revoking, la présente méthode peut être retentée pour converger.
    */
   async revoke(caller: WorkCallerRef, id: string, reason: string): Promise<AppointmentRecord> {
     const trimmedReason = String(reason ?? '').trim()
@@ -368,7 +368,7 @@ export class AppointmentService extends Service implements WorkforceAppointments
       throw new Error(t('任用状态不允许撤销：{status}', { status: appt.status }))
     }
 
-    // 未生效任用：无 permit 可撤，直接 preparing→revoked（状态机 preparing 分支已登记）
+    // Nomination non en vigueur : aucun permit à révoquer, passage direct preparing→revoked (la branche preparing de la machine à états est déjà enregistrée)
     if (appt.status === 'preparing') {
       appointmentStatusTransition(appt.status, 'revoked')
       const at = nowIso()
@@ -389,7 +389,7 @@ export class AppointmentService extends Service implements WorkforceAppointments
       return updated
     }
 
-    // 生效任用：effective → revoking（可续办）；续办时跳过重复流转
+    // Nomination en vigueur : effective → revoking (reprisable) ; lors de la reprise, on saute la transition dupliquée
     if (appt.status === 'effective') {
       appointmentStatusTransition(appt.status, 'revoking')
       this.store.txn(() => {
@@ -397,7 +397,7 @@ export class AppointmentService extends Service implements WorkforceAppointments
       })
     }
 
-    // 1. 撤全部该任用的 active permit（按 employeeId+appointmentVersion 定位，不误伤其他版本）
+    // 1. Révoquer tous les permits active de cette nomination (localisés par employeeId+appointmentVersion, sans toucher les autres versions par erreur)
     const permits = this.permits()
     const activePermits = permits
       ? this.store.permits.findWhere({ employeeId: appt.employeeId, appointmentVersion: appt.version, status: 'active' })
@@ -419,7 +419,7 @@ export class AppointmentService extends Service implements WorkforceAppointments
       failed: revokeFailures, reason: trimmedReason,
     })
 
-    // 2. permit 有未撤干净 → 停在 revoking 等待重试（不恢复已撤销工作资格，也不假装已收敛）
+    // 2. Permits non tous révoqués → on demeure en revoking en attente de nouvelle tentative (pas de restauration de qualifications de travail déjà révoquées, ni de convergence simulée)
     if (revokeFailures.length > 0) {
       const statusReason = t('撤销中：部分工作授权撤销失败待重试（{failures}）', {
         failures: revokeFailures.map((f) => `${f.permitId}: ${f.error}`).join('；'),
@@ -430,7 +430,7 @@ export class AppointmentService extends Service implements WorkforceAppointments
       return this.get(id)
     }
 
-    // 3. grant 一期同步收敛 revoking→revoked（网关侧真实授权回收为运维项，见方法注释）
+    // 3. Convergence synchrone des grants revoking→revoked en phase 1 (la récupération réelle des autorisations côté passerelle est un poste d'exploitation, voir le commentaire de la méthode)
     const at = nowIso()
     this.store.txn(() => {
       for (const grant of this.store.grants.findWhere({ appointmentId: id })) {
@@ -450,10 +450,10 @@ export class AppointmentService extends Service implements WorkforceAppointments
 }
 
 /*
- * 运维项登记（施工报告同步条目）：
- * 1. 原资源网关侧授权回收通道：各资源适配器（mcp/connector/model/skill/nas/app）需提供
- *    撤权调用（如 MCP 权限组摘除主体），当前 probeGrant 只读核验、无撤权动作——
- *    任用撤销后网关侧配置由运维按 grant.ref 引用人工清理，一期不冒充已回收。
- * 2. 撤销失败滞留 revoking 的任用：需人工重试 revoke 或经审计排查 permit 服务异常；
- *    revoking 期间 effectiveForEmployee 已不返回该任用，新动作天然被拒（fail-closed）。
+ * Registre des postes d'exploitation (entrées synchronisées du rapport de chantier) :
+ * 1. Canal de récupération des autorisations côté passerelle de ressources d'origine : chaque adaptateur de ressources (mcp/connector/model/skill/nas/app) doit fournir
+ *    un appel de retrait de droits (ex. retrait du sujet du groupe de permissions MCP) ; l'actuel probeGrant ne fait que vérifier en lecture seule, sans action de retrait —
+ *    après révocation d'une nomination, la configuration côté passerelle est nettoyée à la main par l'exploitation via la référence grant.ref, la phase 1 ne simule pas une récupération effectuée.
+ * 2. Nominations demeurées en revoking après échec de révocation : reprise manuelle de revoke requise, ou investigation via l'audit d'une anomalie du service de permits ;
+ *    pendant revoking, effectiveForEmployee ne renvoie déjà plus cette nomination, les nouvelles actions sont refusées par construction (fail-closed).
  */

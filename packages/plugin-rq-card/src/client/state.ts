@@ -1,74 +1,74 @@
 /**
- * 四态状态源映射 —— 纯函数（行动方案 §三 泳道 C 的 C2 表，WP-06 交付物 2）。
+ * Mise en correspondance des sources vers les quatre états — fonctions pures (table C2 du couloir C du plan d'action §3, livrable 2 de WP-06).
  *
- * 【零依赖铁律】本文件不 import 任何东西（react / 任何包 / Node 内建）——
- * 主仓 selftest 会直接 import 这个 TS 文件做单测（Node ≥22.18 原生加载 TS），
- * 自证脚本：node packages/plugin-rq-card/src/client/state.test.mjs
+ * [Ligne d'airain zéro dépendance] ce fichier n'importe rien (react / quelque paquet / natif Node) —
+ * le selftest du dépôt principal importe directement ce fichier TS pour test unitaire (Node ≥22.18 charge TS nativement),
+ * script d'auto-attestation : node packages/plugin-rq-card/src/client/state.test.mjs
  *
- * 与 C2 表的逐行对应：
+ * Correspondance ligne à ligne avec la table C2 :
  *   ┌────────┬────────────────────────────────────────────┬──────────────────────┐
- *   │ 用户四态 │ 状态源（C2 表原文）                          │ 本函数判定            │
+ *   │ quatre états utilisateur │ source d'état (texte original C2)            │ jugement de la présente fonction │
  *   ├────────┼────────────────────────────────────────────┼──────────────────────┤
- *   │ 调用中   │ mcp invoke() 发起中                          │ invokePhase='calling' │
- *   │ 执行中   │ online/gray 且 health∈{healthy,degraded}     │ health=healthy|       │
- *   │        │ （30s 轮询）                                 │ degraded，且无结果     │
- *   │ 已完成   │ 调用返回 + usage.recorded 落库               │ hasResult 且非错误     │
- *   │ 异常阻断 │ down / breakerOpen / nas-authz deny /        │ 任一阻断标志在场       │
- *   │        │ 额度耗尽                                     │ （见下方优先级）       │
+ *   │ en appel              │ invoke() mcp en cours de lancement           │ invokePhase='calling' │
+ *   │ en exécution          │ online/gray et health∈{healthy,degraded}     │ health=healthy|       │
+ *   │                       │ (scrutin 30 s)                               │ degraded, et sans résultat  │
+ *   │ terminé               │ retour d'appel + usage.recorded en base      │ hasResult et non-erreur   │
+ *   │ bloqué en anomalie    │ down / breakerOpen / nas-authz deny /        │ un marqueur de blocage quelconque │
+ *   │                       │ quota épuisé                                 │ (voir priorité ci-dessous) │
  *   └────────┴────────────────────────────────────────────┴──────────────────────┘
  *
- * 判定优先级（自上而下，命中即返回）：
- *   ① 异常阻断（平台侧标志，按既定优先级取首个命中）
+ * Priorité de jugement (de haut en bas, premier atteint = retour) :
+ *   ① bloqué en anomalie (marqueurs côté plateforme, premier atteint selon la priorité établie)
  *      authzDenied > quotaExceeded > pdpUnreachable > breakerOpen > down > bindingInvalid
- *      —— 阻断整体优先于调用生命周期：阻断标志描述「当前不允许/不可用」，fail-safe
- *      原则下呈现红边条永远不会误导；历史调用的完成信息以工具结果 markdown 兜底
- *      文本（宿主半 summarizeForToolResult 契约）与 usage 台账为准。
- *   ② 已完成：hasResult 且结果非错误 → 'done'（呈现结果 + 👍/👎）；
- *      结果为错误（spike §2.5 证据 E3：tool/result.isError → 异常）→ 'blocked' +
- *      兜底原因码 'invoke-error'（C2 表原因码为平台侧六码，工具自身报错补此码）。
- *   ③ 调用中：invokePhase='calling'（invoke 发起段，网关握手未落到资源执行段）
- *      → 'calling'（同一时刻健康面也在场时仍先呈现发起段：骨架 + 可取消）。
- *   ④ 执行中：health ∈ {healthy, degraded} 且无结果 → 'executing'；
- *      degraded 时附加 degraded:true（呈现「有点慢」提示，C2 表执行中行）。
- *   ⑤ 其余 → 'idle'（空闲基态：无结果、无 invoke、健康面 unknown）。
+ *      — le blocage prime globalement sur le cycle de vie de l'appel : les marqueurs décrivent « pas permis/indisponible en ce moment », fail-safe
+ *      en vertu du principe fail-safe, le bandeau rouge ne trompe jamais ; l'information d'achèvement des appels historiques fait foi sur le texte
+ *      de repli markdown du résultat d'outil (contrat summarizeForToolResult de la moitié hôte) et sur le registre usage.
+ *   ② terminé : hasResult et résultat non-erreur → 'done' (présentation du résultat + 👍/👎) ;
+ *      résultat en erreur (spike §2.5 preuve E3 : tool/result.isError → anomalie) → 'blocked' +
+ *      code de motif de repli 'invoke-error' (les codes de motif C2 sont les six codes côté plateforme, l'erreur de l'outil lui-même complète par ce code).
+ *   ③ en appel : invokePhase='calling' (segment de lancement d'invoke, la poignée de main de la passerelle non encore tombée sur le segment d'exécution de ressource)
+ *      → 'calling' (même si la face santé est aussi présente à cet instant, le segment de lancement est d'abord présenté : squelette + annulable).
+ *   ④ en exécution : health ∈ {healthy, degraded} et sans résultat → 'executing' ;
+ *      en degraded, ajouter degraded:true (présente l'astuce « un peu lent », ligne en exécution de C2).
+ *   ⑤ le reste → 'idle' (état de base au repos : sans résultat, sans invoke, face santé unknown).
  */
 
-/** invoke 发起相位（本插件当前能观测到的调用发起侧信息）。 */
+/** Phase de lancement d'invoke (informations observables du côté lancement par la présente extension). */
 export type InvokePhase = 'idle' | 'calling'
 
-/** 资源健康面（30s 轮询；unknown = 尚无健康数据）。 */
+/** Face santé de ressource (scrutin 30 s ; unknown = pas encore de données de santé). */
 export type HealthStatus = 'unknown' | 'healthy' | 'degraded' | 'down'
 
-/** 四态映射的输入快照（全部字段都是「当前观测」，无时序耦合）。 */
+/** Instantané d'entrée de la mise en correspondance des quatre états (tous les champs sont de « l'observation courante », sans couplage temporel). */
 export interface ExecutionStateInput {
-  /** 已收到工具结果（tool/result 已定稿）。 */
+  /** Résultat d'outil reçu (tool/result définitif). */
   hasResult: boolean
-  /** 结果是否为错误（ToolResultNode.isError）。 */
+  /** Si le résultat est une erreur (ToolResultNode.isError). */
   resultIsError: boolean
-  /** 资源健康面（缺省 unknown）。 */
+  /** Face santé de ressource (défaut unknown). */
   healthStatus?: HealthStatus
-  /** mcp 网关熔断器开启。 */
+  /** Disjoncteur de la passerelle mcp ouvert. */
   breakerOpen?: boolean
-  /** nas-authz 五步判定拒绝（fail-closed）。 */
+  /** Refus du jugement en cinq étapes nas-authz (fail-closed). */
   authzDenied?: boolean
-  /** 钱包额度耗尽。 */
+  /** Quota du portefeuille épuisé. */
   quotaExceeded?: boolean
-  /** 策略决策点（PDP）不可达——保护性阻断。 */
+  /** Point de décision de politique (PDP) injoignable — blocage protecteur. */
   pdpUnreachable?: boolean
-  /** dsh-bridge 身份绑定失效。 */
+  /** Liaison d'identité dsh-bridge expirée. */
   bindingInvalid?: boolean
-  /** invoke 发起相位。 */
+  /** Phase de lancement d'invoke. */
   invokePhase: InvokePhase
 }
 
-/** 用户可感知四态 + 空闲基态（C2 表「用户四态」列；idle 为无调用时的基态）。 */
+/** Quatre états perceptibles par l'utilisateur + état de base au repos (colonne « quatre états utilisateur » de C2 ; idle est l'état de base sans appel). */
 export type ExecutionUiState = 'idle' | 'calling' | 'executing' | 'done' | 'blocked'
 
 /**
- * 异常阻断原因码 —— C3 错误文案共享模块（console 侧 js/errors.js）的键。
- * 前六码与 C2 表/C3 初始清单一一对应；'invoke-error' 为工具自身报错的兜底码
- * （spike 证据 E3 判 isError 为异常，但 C2 平台侧六码不含它，故补一码，
- * 呈现通用错误文案 + 结果详情）。
+ * Codes de motif des blocages — clés du module partagé de libellés d'erreurs C3 (js/errors.js côté console).
+ * Les six premiers correspondent un à un à la table C3/C2 ; 'invoke-error' est le code de repli de l'erreur de l'outil lui-même
+ * (la preuve E3 du spike juge isError comme anomalie, mais les six codes côté plateforme de C2 ne le contiennent pas, d'où ce code ajouté,
+ * présentant le libellé d'erreur générique + le détail du résultat).
  */
 export type BlockedReason =
   | 'nas-authz-deny'
@@ -79,27 +79,27 @@ export type BlockedReason =
   | 'binding-invalid'
   | 'invoke-error'
 
-/** 四态映射输出：UI 态 + 阻断原因码 + degraded 附加信息。 */
+/** Sortie de la mise en correspondance : état UI + code de motif de blocage + information additionnelle degraded. */
 export interface ExecutionState {
-  /** UI 态。 */
+  /** État UI. */
   state: ExecutionUiState
-  /** 仅 state === 'blocked' 时存在：阻断原因码（错误文案/行动按钮的键）。 */
+  /** Présent seulement si state === 'blocked' : code de motif de blocage (clé du libellé d'erreur/bouton d'action). */
   reason?: BlockedReason
-  /** 仅 state === 'executing' 且 healthStatus === 'degraded' 时为 true（「有点慢」提示）。 */
+  /** true seulement si state === 'executing' et healthStatus === 'degraded' (astuce « un peu lent »). */
   degraded?: boolean
 }
 
-/** 组装阻断态（窄化输出形状：blocked 必带 reason）。 */
+/** Assemble l'état bloqué (forme de sortie resserrée : blocked porte toujours reason). */
 function blocked(reason: BlockedReason): ExecutionState {
   return { state: 'blocked', reason }
 }
 
 /**
- * 四态状态源映射纯函数（C2 表的代码化）。
- * 输入输出均为纯数据：不读时钟、不发请求、不改外部状态，同输入恒同输出。
+ * Fonction pure de mise en correspondance des quatre états (codification de la table C2).
+ * Entrées et sorties sont des données pures : pas de lecture d'horloge, pas de requête, pas de modification d'état externe, mêmes entrées = mêmes sorties.
  */
 export function deriveExecutionState(input: ExecutionStateInput): ExecutionState {
-  // ① 异常阻断：平台侧标志按既定优先级取首个命中（任务书顺序：
+  // ① blocage anomalie : marqueurs côté plateforme, premier atteint selon la priorité établie (ordre du cahier des charges :
   //    authzDenied > quotaExceeded > pdpUnreachable > breakerOpen > down > bindingInvalid）。
   if (input.authzDenied === true) return blocked('nas-authz-deny')
   if (input.quotaExceeded === true) return blocked('quota-exhausted')
@@ -108,19 +108,19 @@ export function deriveExecutionState(input: ExecutionStateInput): ExecutionState
   if (input.healthStatus === 'down') return blocked('down')
   if (input.bindingInvalid === true) return blocked('binding-invalid')
 
-  // ② 已完成 / 结果级异常：调用已返回，usage 落库由服务端保证（前端只认结果）。
+  // ② terminé / anomalie au niveau résultat : l'appel est revenu, l'inscription usage est garantie par le serveur (le front ne croit que le résultat).
   if (input.hasResult) {
     return input.resultIsError ? blocked('invoke-error') : { state: 'done' }
   }
 
-  // ③ 调用中：invoke 发起段（C2 表第一行的状态源）。
+  // ③ en appel : segment de lancement d'invoke (source d'état de la première ligne de la table C2).
   if (input.invokePhase === 'calling') return { state: 'calling' }
 
-  // ④ 执行中：资源 online/gray 且健康面健康/降级（30s 轮询）；
-  //    degraded 附带 degraded:true → 卡片呈现「有点慢」。
+  // ④ en exécution : ressource online/gray et face santé saine/dégradée (scrutin 30 s) ;
+  //    degraded ajoute degraded:true → la carte présente « un peu lent ».
   if (input.healthStatus === 'healthy') return { state: 'executing' }
   if (input.healthStatus === 'degraded') return { state: 'executing', degraded: true }
 
-  // ⑤ 空闲基态。
+  // ⑤ état de base au repos.
   return { state: 'idle' }
 }

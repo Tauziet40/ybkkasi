@@ -1,32 +1,32 @@
 /**
- * 资产使用凭证（2026-10-31）：Agent 使用平台资产（skill/MCP）后主动提报的使用事实。
+ * Justificatif d'utilisation d'actif (2026-10-31) : fait d'utilisation rapporté activement par l'Agent après usage d'un actif de la plateforme (skill/MCP).
  *
- * 定位（与计量事件的关系，接入指引 §4.4/§4.7 口径）：
- *   - usage_events 是计费管道（价格簿/成本口径）：经平台网关的调用由平台自动计量，禁止重复推送；
- *   - 本凭证是「使用事实」：skill.zip 下载到本地执行等平台无感知的使用，由 Agent 逐次提报，
- *     作为资产经营侧的使用凭证（台账 usageReports30d / 审计逐次落账）。
+ * Positionnement (rapport avec les événements de metering, référentiel du guide d'intégration §4.4/§4.7) :
+ *   - usage_events est le pipeline de facturation (référentiel tarif/coût) : les appels via les passerelles de la plateforme sont automatiquement mesurés par la plateforme, la double poussée est interdite ;
+ *   - le présent justificatif est un « fait d'utilisation » : des usages invisibles de la plateforme comme le téléchargement du skill.zip pour exécution locale sont rapportés par l'Agent à chaque fois,
+ *     comme justificatif d'utilisation côté exploitation d'actif (registre usageReports30d / inscription à chaque fois dans l'audit).
  *
- * 授权闭环（不新建授权原语，校验建立在既有「获取记录」上）：
- *   - skill：install 依赖边（resourceCore，agent→skill）∪ download 流水（skill~downloads.json，
- *     机器主体按 principalId 匹配——download 路由对机器调用者登记的就是 principalId）；
- *   - mcp：与数据面同口径——权限组 subjects 含该 agent 且 policies 覆盖目标服务。
- * 机器主体未获取先提报 → 403（先走获取链路）；human 持 usage.write 可代报（归因 human）。
+ * Boucle d'autorisation (pas de nouvelle primitive d'autorisation, la validation s'appuie sur les « enregistrements d'acquisition » existants) :
+ *   - skill : arête de dépendance d'install (resourceCore, agent→skill) ∪ flux de downloads (skill~downloads.json,
+ *     le principal machine apparie par principalId — la route download enregistre pour un appelant machine exactement le principalId) ;
+ *   - mcp : même référentiel que le plan de données — un groupe de permissions dont les subjects contiennent cet agent et dont les policies couvrent le service cible.
+ * Un principal machine qui rapporte sans avoir acquis → 403 (passer d'abord par la chaîne d'acquisition) ; un human tenant usage.write peut rapporter pour autrui (attribution human).
  *
- * 依赖方向：本模块只经 ctx 运行时访问 skillHub/mcpRegistry/resourceCore（不做插件级 inject）——
- * skillhub/mcp/agent 均注入 usage，UsageService 反向依赖会成环；REST 路由与 MCP 工具共用本编排。
+ * Direction des dépendances : ce module n'accède à skillHub/mcpRegistry/resourceCore qu'à l'exécution via ctx (pas d'inject au niveau extension) —
+ * skillhub/mcp/agent injectent tous usage, une dépendance inverse d'UsageService ferait une boucle ; les routes REST et l'outil MCP partagent cette orchestration.
  */
 import { t } from '../../platform-i18n/src/index.ts'
 import type { CallerInfo, Collection, RecordBase } from '../../platform-core/src/index.ts'
 
-/** 提报的资产域（v1：skill/MCP；additive 扩展新类型不改既有字段语义）。 */
+/** Domaine d'actif rapporté (v1 : skill/MCP ; étendre additive de nouveaux types sans changer la sémantique des champs existants). */
 export type AssetUsageAssetType = 'skill' | 'mcp'
 
-/** 凭证流水记录（usage:assetReports 集合，只追加；幂等键唯一）。 */
+/** Enregistrement de flux de justificatif (collection usage:assetReports, append-only ; unicité de la clé idempotente). */
 export interface AssetUsageReportRecord extends RecordBase {
   assetType: AssetUsageAssetType
-  /** 提报时的资产引用原样留存（id 或 slug）。 */
+  /** Référence d'actif au moment du rapport conservée telle quelle (id ou slug). */
   assetRef: string
-  /** 与台账 key 同键（skill:<id> / mcp:<slug>）——台账行与凭证流水直接互查。 */
+  /** Même clé que la clé de registre (skill:<id> / mcp:<slug>) — ligne de registre et flux de justificatif s'interrogent directement. */
   assetKey: string
   assetName: string
   assetVersion?: string
@@ -37,20 +37,20 @@ export interface AssetUsageReportRecord extends RecordBase {
   tokens?: number
   taskId?: string
   note?: string
-  /** 全局唯一幂等键（约定 <agent标识>:<业务单号>，同键同内容重放安全、同键异容拒绝）。 */
+  /** Clé idempotente globalement unique (convention <identifiant-agent>:<numéro de dossier métier>, rejeu de même clé même contenu sûr, même clé contenu différent refusé). */
   idempotencyKey: string
-  /** occurredAt 是否为调用方显式提供（隐式服务端生成的时间不参与幂等指纹，保证无 occurredAt 的重试重放安全）。 */
+  /** Si occurredAt a été explicitement fourni par l'appelant (l'heure générée implicitement côté serveur n'entre pas dans l'empreinte idempotente, garantissant le rejeu sûr des essais sans occurredAt). */
   occurredAtExplicit?: boolean
   reporterType: 'machine' | 'human'
   reporterPrincipalId: string
   reporterName: string
-  /** machine 且 refType=agent 时回填（经营侧按 Agent 归因）。 */
+  /** Renseigné quand machine et refType=agent (attribution par Agent côté exploitation). */
   agentId?: string
-  /** human 代报时回填。 */
+  /** Renseigné lors d'un rapport pour autrui par un human. */
   userId?: string
 }
 
-/** REST/工具入参（全部可选字段由 prepare 校验补全）。 */
+/** Entrées REST/outils (tout champ optionnel est complété par la validation de prepare). */
 export interface AssetUsageReportInput {
   assetType?: string
   assetRef?: string
@@ -65,7 +65,7 @@ export interface AssetUsageReportInput {
   idempotencyKey?: string
 }
 
-/** prepare 编排所需的最小跨域访问面（运行时经 ctx 传入，不做插件级 inject——防循环依赖）。 */
+/** Face d'accès inter-domaines minimale requise par l'orchestration prepare (passée à l'exécution via ctx, sans inject au niveau extension — contre la dépendance circulaire). */
 export interface AssetUsageCheckCtx {
   skillHub: {
     skills(): Collection<{ id: string; slug: string; name: string; currentVersion: string }>
@@ -80,7 +80,7 @@ export interface AssetUsageCheckCtx {
   }
 }
 
-/** 带状态码的提报错误：REST 路由按 status exchange.fail，工具面按 message 透出。 */
+/** Erreur de rapport avec code de statut : la route REST fait exchange.fail selon status, la face outils expose selon message. */
 export class AssetUsageError extends Error {
   status: number
   code: string
@@ -91,16 +91,16 @@ export class AssetUsageError extends Error {
   }
 }
 
-/** 补录窗口：凭证是使用事实，只允许补录近 30 天（防海量回填稀释经营口径）。 */
+/** Fenêtre de complément : le justificatif est un fait d'utilisation, le complément n'est permis que sur les 30 derniers jours (contre la dilution du référentiel d'exploitation par un rétroadage massif). */
 const BACKFILL_WINDOW_MS = 30 * 86_400_000
-/** occurredAt 允许的少量时钟偏移（未来 5 分钟内视为时钟漂移，不再严格拒绝）。 */
+/** Léger décalage d'horloge toléré sur occurredAt (dans les 5 minutes à venir = dérive d'horloge, plus de refus strict). */
 const CLOCK_SKEW_MS = 5 * 60_000
-/** action 白名单形态：小写字母开头，小写字母/数字/下划线，≤32 字符。 */
+/** Forme de la liste blanche d'action : lettre minuscule en tête, minuscules/chiffres/soulignés, ≤32 caractères. */
 const ACTION_PATTERN = /^[a-z][a-z0-9_]{0,31}$/
 
-/** 幂等指纹：语义字段归一化后比较（同键同内容重放 → deduped；同键异容 → 409）。
- *  occurredAt 只在调用方显式提供时参与——隐式「服务端当时时间」在重试时必然不同，
- *  计入指纹会让无 occurredAt 的合法重放被误判为异容（违背重放安全承诺）。 */
+/** Empreinte idempotente : comparaison après normalisation des champs sémantiques (même clé même contenu rejoué → deduped ; même clé contenu différent → 409).
+ *  occurredAt n'entre en compte que s'il est explicitement fourni par l'appelant — l'implicite « heure serveur du moment » diffère nécessairement à la retry,
+ *  l'inclure dans l'empreinte ferait juger « contenu différent » un rejeu légitime sans occurredAt (enfreignant la promesse de rejeu sûr). */
 export function reportFingerprint(report: Pick<AssetUsageReportRecord, 'assetType' | 'assetKey' | 'assetVersion' | 'action' | 'occurredAt' | 'occurredAtExplicit' | 'outcome' | 'durationMs' | 'tokens' | 'taskId' | 'note'>): string {
   return JSON.stringify([
     report.assetType, report.assetKey, report.assetVersion ?? '', report.action,
@@ -110,11 +110,11 @@ export function reportFingerprint(report: Pick<AssetUsageReportRecord, 'assetTyp
 }
 
 /**
- * 提报编排：字段校验 → 资产存在性（防编造）→ 授权关系（获取闭环）→ 归一化。
- * 通过后返回可直接落库的记录载荷（不含 id/createdAt/updatedAt——由 submitAssetUsageReport 落集合时补）。
+ * Orchestration du rapport : validation des champs → existence de l'actif (contre l'invention) → relation d'autorisation (boucle d'acquisition) → normalisation.
+ * Renvoie après passage une charge d'enregistrement directement inscriptible (sans id/createdAt/updatedAt — complétés par submitAssetUsageReport à l'inscription dans la collection).
  */
 export function prepareAssetUsageReport(ctx: AssetUsageCheckCtx, input: AssetUsageReportInput, caller: CallerInfo): Omit<AssetUsageReportRecord, 'id' | 'createdAt' | 'updatedAt'> {
-  // -- 1. 字段校验 -----------------------------------------------------------
+  // -- 1. validation des champs -----------------------------------------------------------
   const assetType = input.assetType
   if (assetType !== 'skill' && assetType !== 'mcp') {
     throw new AssetUsageError(400, 'INVALID_ASSET_TYPE', t('assetType 必须是 skill 或 mcp（收到：{value}）', { value: String(assetType ?? '') }))
@@ -164,7 +164,7 @@ export function prepareAssetUsageReport(ctx: AssetUsageCheckCtx, input: AssetUsa
   const taskId = textOf(input.taskId, 'taskId', 200)
   const note = textOf(input.note, 'note', 500)
 
-  // -- 2. 资产存在性（不存在的资产不得提报，防编造凭证） -----------------------
+  // -- 2. existence de l'actif (un actif inexistant ne peut être rapporté, contre les justificatifs inventés) -----------------------
   let assetKey: string
   let assetName: string
   let skillId: string | undefined
@@ -172,7 +172,7 @@ export function prepareAssetUsageReport(ctx: AssetUsageCheckCtx, input: AssetUsa
   if (assetType === 'skill') {
     const skill = ctx.skillHub.skills().all().find((item) => item.id === assetRef || item.slug === assetRef)
     if (!skill) throw new AssetUsageError(404, 'ASSET_NOT_FOUND', t('Skill 不存在：{ref}（先在 Skill 市场确认资产已上架，再走获取链路）', { ref: assetRef }))
-    // skill 计量与台账 key 一律用 ID（slug 含非 ASCII，见 plugin-skillhub meterSkillUsage 注释）
+    // la clé de metering/registre d'un skill emploie toujours l'ID (le slug contient du non-ASCII, voir la note meterSkillUsage de plugin-skillhub)
     assetKey = `skill:${skill.id}`
     assetName = skill.name
     skillId = skill.id
@@ -184,7 +184,7 @@ export function prepareAssetUsageReport(ctx: AssetUsageCheckCtx, input: AssetUsa
     mcpSlug = service.slug
   }
 
-  // -- 3. 授权关系（机器主体必须已获取该资产；human 持 usage.write 代报免校验） -----
+  // -- 3. relation d'autorisation (le principal machine doit avoir acquis l'actif ; le human tenant usage.write rapportant pour autrui est dispensé de validation) -----
   const base = {
     assetType, assetRef, assetKey, assetName,
     ...(assetVersion !== undefined ? { assetVersion } : {}),
@@ -214,7 +214,7 @@ export function prepareAssetUsageReport(ctx: AssetUsageCheckCtx, input: AssetUsa
   return { ...base, reporterType: 'machine', reporterPrincipalId: caller.principalId, reporterName: caller.name, agentId }
 }
 
-/** skill 授权：install 依赖边（agent→skill）∪ download 流水（机器主体按 principalId 匹配）。 */
+/** Autorisation skill : arête de dépendance d'install (agent→skill) ∪ flux de downloads (le principal machine apparie par principalId). */
 function skillGranted(ctx: AssetUsageCheckCtx, skillId: string, agentId: string, principalId: string): boolean {
   const installed = ctx.resourceCore.dependencies().all().some((edge) =>
     edge.kind === 'skill' && edge.fromType === 'agent' && edge.fromId === agentId && edge.toId === skillId)
@@ -222,8 +222,8 @@ function skillGranted(ctx: AssetUsageCheckCtx, skillId: string, agentId: string,
   return ctx.skillHub.downloads().all().some((record) => record.skillId === skillId && record.userId === principalId)
 }
 
-/** mcp 授权：与数据面同口径——存在权限组其 subjects 含该 agent 且 policies 覆盖目标服务。
- *  注意不读 attrs.mcpPermGroupIds（冗余展示字段，可与 subjects 漂移；网关判定也只认 subjects）。 */
+/** Autorisation mcp : même référentiel que le plan de données — il existe un groupe de permissions dont les subjects contiennent cet agent et dont les policies couvrent le service cible.
+ *  Note : ne pas lire attrs.mcpPermGroupIds (champ d'affichage redondant, pouvant dériver des subjects ; le jugement de la passerelle ne reconnaît aussi que les subjects). */
 function mcpGranted(ctx: AssetUsageCheckCtx, slug: string, agentId: string): boolean {
   const service = ctx.mcpRegistry.services().all().find((item) => item.slug === slug)
   if (!service) return false

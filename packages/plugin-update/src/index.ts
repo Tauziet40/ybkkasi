@@ -1,21 +1,21 @@
 /**
- * @dsh-ops/plugin-update —— 平台自更新插件（版本检查 / 更新通知 / 一键升级）。
+ * @dsh-ops/plugin-update — auto-mise à jour de la plateforme (vérification de version / notification de mise à jour / montée de version en un clic).
  *
- * 面向两类安装形态（上游均为 GitHub 仓库 01men/ybkkasi）：
- *   - source（git 源码检出）：版本比对 + GitHub compare API 给出「落后 N 个提交及摘要」；
- *     支持控制台/CLI/Agent 一键升级（git pull --ff-only + npm install + 提示重启），
- *     支持 dry-run 预演，全程审计留痕
- *   - bundle（dsh plugin add 安装）：版本比对同样可用；升级给出 dsh 侧命令指引
- *     （运行中的插件进程不回写宿主 profile，这是刻意的安全边界）
+ * Pour deux formes d'installation (l'amont est dans les deux cas le dépôt GitHub 01men/ybkkasi) :
+ *   - source (checkout git de sources) : comparaison de versions + GitHub compare API donnant « en retard de N commits et résumé » ;
+ *     montée de version en un clic depuis console/CLI/Agent prise en charge (git pull --ff-only + npm install + invitation à redémarrer),
+ *     dry-run de simulation pris en charge, audit de bout en bout
+ *   - bundle (installation dsh plugin add) : la comparaison de versions reste disponible ; la montée de version donne les consignes de commandes côté dsh
+ *     (le processus d'extension en cours d'exécution ne réécrit pas le profil de l'hôte, frontière de sécurité délibérée)
  *
- * 检查策略（对标 npm update-notifier / Gitea 的成熟做法）：
- *   - 自动检查：默认开启，每 24h 一次（启动 30s 后首查），结果持久化；
- *     发现新版本广播 platform.update.available（audit 联动留痕）+ 日志提醒
- *   - 手动检查：控制台抽屉 / dshctl update check / Agent 工具 update_check，
- *     60s 冷却防滥用（GitHub API 未认证限额 60 次/小时/IP）
- *   - 是否升级永远由管理员决定：自动检查只通知、不自动执行（数据型平台不冒进）
+ * Politique de vérification (alignée sur les pratiques matures de npm update-notifier / Gitea) :
+ *   - vérification automatique : ouverte par défaut, toutes les 24 h (première vérification 30 s après le démarrage), résultat persistant ;
+ *     nouvelle version détectée → diffusion platform.update.available (trace par couplage audit) + rappel dans les logs
+ *   - vérification manuelle : tiroir de console / dshctl update check / outil Agent update_check,
+ *     refroidissement 60 s contre l'abus (quota GitHub API non authentifié 60 fois/heure/IP)
+ *   - monter de version ou non reste toujours la décision de l'admin : la vérification automatique notifie, n'exécute jamais (une plateforme de données ne s'avance pas)
  *
- * 三端一致：REST（/api/update/*）· CLI（dshctl update）· Agent 工具（update_*）。
+ * Cohérence des trois bouts : REST (/api/update/*) · CLI (dshctl update) · outils Agent (update_*).
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -26,7 +26,7 @@ import {
 import { t as translate } from '../../platform-i18n/src/index.ts'
 import { readGitHead, runGit, runNpm } from './git.ts'
 
-/** 发布清单（scripts/release-manifest.mjs 产物，随仓库根发布）。 */
+/** Manifeste de publication (produit de scripts/release-manifest.mjs, publié avec la racine du dépôt). */
 interface ReleaseManifest {
   algorithm: string
   version: string
@@ -36,23 +36,23 @@ interface ReleaseManifest {
 }
 
 // ---------------------------------------------------------------------------
-// 配置与环境覆盖
+// Configuration et surcharges d'environnement
 // ---------------------------------------------------------------------------
 
 export interface UpdateConfig {
-  /** 自动检查（默认 true；运行期可经控制台/CLI 调整，持久化于 update:state）。 */
+  /** Vérification automatique (true par défaut ; ajustable à l'exécution via console/CLI, persisté dans update:state). */
   autoCheck?: boolean
-  /** 自动检查间隔小时数（默认 24；运行期可调，0 视为关闭自动检查）。 */
+  /** Intervalle de vérification automatique en heures (24 par défaut ; ajustable à l'exécution, 0 = vérification automatique fermée). */
   intervalHours?: number
-  /** 上游仓库 owner/name（默认 01men/ybkkasi，与 git remote / package.json.repository 一致）。 */
+  /** owner/name du dépôt amont (01men/ybkkasi par défaut, cohérent avec git remote / package.json.repository). */
   repo?: string
-  /** 上游默认分支（默认 main）。 */
+  /** Branche par défaut de l'amont (main par défaut). */
   branch?: string
-  /** GitHub API 基址（默认 https://api.github.com；内网镜像/代理可覆盖）。 */
+  /** URL de base de l'API GitHub (https://api.github.com par défaut ; surchargeable pour miroir intranet/proxy). */
   apiBase?: string
-  /** raw 文件基址（默认 https://raw.githubusercontent.com）。 */
+  /** URL de base des fichiers raw (https://raw.githubusercontent.com par défaut). */
   rawBase?: string
-  /** 单次检查的网络超时毫秒（默认 10000）。 */
+  /** Timeout réseau d'une vérification en millisecondes (10000 par défaut). */
   timeoutMs?: number
 }
 
@@ -69,11 +69,11 @@ const DEFAULT_BRANCH = 'main'
 const DEFAULT_API_BASE = 'https://api.github.com'
 const DEFAULT_RAW_BASE = 'https://raw.githubusercontent.com'
 const MANUAL_CHECK_COOLDOWN_MS = 60_000
-/** 构造后延迟初始化：等平台装载完（opsStorage 就绪）再种子状态与定时器。 */
+/** Initialisation différée après construction : attend la fin du chargement de la plateforme (opsStorage prêt) avant graines d'état et minuteurs. */
 const BOOTSTRAP_DELAY_MS = 15_000
 const AUTO_CHECK_TICK_MS = 60 * 60_000
 
-/** 环境变量覆盖（自测 stub / 私有镜像部署用）：DSH_UPDATE_REPO / _BRANCH / _API_BASE / _RAW_BASE。 */
+/** Surcharge par variables d'environnement (pour stubs d'auto-test / déploiement miroir privé) : DSH_UPDATE_REPO / _BRANCH / _API_BASE / _RAW_BASE. */
 export function resolveSource(config: UpdateConfig): ResolvedSource {
   return {
     repo: process.env.DSH_UPDATE_REPO ?? config.repo ?? DEFAULT_REPO,
@@ -84,12 +84,12 @@ export function resolveSource(config: UpdateConfig): ResolvedSource {
   }
 }
 
-/** contents 回退响应形态（GitHub contents API：base64 内容）。 */
+/** Forme de réponse de repli contents (GitHub contents API : contenu base64). */
 interface ContentsResponse { content?: string; encoding?: string; version?: string }
 
 /**
- * 远端版本号获取（导出供自测直测回退路径）：raw package.json 优先，失败回退
- * GitHub contents API（base64 解码）。返回实际命中的来源（github-raw / github-api-contents）。
+ * Obtention du numéro de version distant (exporté pour test direct du chemin de repli) : raw package.json prioritaire, à défaut repli
+ * GitHub contents API (décodage base64). Renvoie la source réellement atteinte (github-raw / github-api-contents).
  */
 export async function fetchUpstreamVersion(source: ResolvedSource, headers: Record<string, string>, signal?: AbortSignal): Promise<{ version: string; via: string }> {
   const rawUrl = `${source.rawBase}/${source.repo}/${source.branch}/package.json`
@@ -119,7 +119,7 @@ export async function fetchUpstreamVersion(source: ResolvedSource, headers: Reco
 }
 
 // ---------------------------------------------------------------------------
-// 状态持久化（opsStorage 单例记录）
+// Persistance de l'état (enregistrement unique opsStorage)
 // ---------------------------------------------------------------------------
 
 export interface UpstreamCommit {
@@ -133,7 +133,7 @@ export interface LatestSnapshot {
   version: string
   commit: string
   checkedAt: string
-  /** 数据来源标注（github-raw / github-api），排障用。 */
+  /** Annotation de la source de données (github-raw / github-api), pour le dépannage. */
   sources: string[]
 }
 
@@ -146,23 +146,23 @@ export interface UpdateStateRecord extends RecordBase {
   hasUpdate: boolean
   behindBy: number
   recentCommits: UpstreamCommit[]
-  /** 已忽略的版本（控制台「忽略此版本」后不再弹横幅，新版本出现自动恢复）。 */
+  /** Versions ignorées (après « ignorer cette version » en console, plus de bandeau ; une nouvelle version restaure automatiquement). */
   dismissedVersion: string | null
-  /** OPT-P2-03：签名策略——true 时升级目标提交必须通过 git verify-commit（默认关闭，仓库签署化后开启）。 */
+  /** OPT-P2-03 : politique de signature — true exige que le commit cible de la montée passe git verify-commit (fermée par défaut, ouverte quand le dépôt sera signé). */
   requireSignedCommits?: boolean
   /**
-   * T5（M2）：发布清单验签——平台发布方 Ed25519 公钥（SPKI DER base64）。
-   * 登记 + 提供脚本 scripts/release-manifest.mjs 生成的 release-manifest.json 后，升级按目标 commit
-   * 拉取清单验签；未登记时仅走 git verify-commit 路径（现状不变，显式增强而非静默降级）。
+   * T5 (M2) : vérification de signature du manifeste de publication — clé publique Ed25519 de l'éditeur de la plateforme (SPKI DER base64).
+   * Enregistrée + avec le release-manifest.json produit par scripts/release-manifest.mjs, la montée tire le manifeste selon le commit cible
+   * et vérifie la signature ; sans enregistrement, seul le chemin git verify-commit s'applique (statu quo, renforcement explicite et non dégradation silencieuse).
    */
   releasePublicKey?: string
-  /** T5（M2）：true 时发布清单验签失败/缺失即拒绝升级（fail-closed）；默认 false 只告警放行。 */
+  /** T5 (M2) : true = échec/absence de vérification du manifeste = refus de la montée (fail-closed) ; false par défaut = alerte seule et passage. */
   requireSignedManifests?: boolean
-  /** OPT-P2-03：最近一次 apply 的回滚锚点（升级前 HEAD）。 */
+  /** OPT-P2-03 : ancre de retour arrière du dernier apply (HEAD avant la montée). */
   lastApplySnapshot?: string
   lastApplyPin?: string
   lastApplyAt?: string
-  /** 最近一次广播过 platform.update.available 的版本（防重复通知）。 */
+  /** Dernière version pour laquelle platform.update.available a été diffusée (anti-notification en double). */
   announcedVersion: string
 }
 
@@ -196,7 +196,7 @@ export function ensureUpdateState(ctx: Context, init?: { autoCheck: boolean; int
 }
 
 // ---------------------------------------------------------------------------
-// 版本比较（semver 主三段；非标准版本号返回 0——宁可漏报不可误报）
+// Comparaison de versions (trois segments principaux semver ; numéro non standard = 0 — mieux vaut sous-signaler que faux positif)
 // ---------------------------------------------------------------------------
 
 export function compareVersions(a: string, b: string): number {
@@ -215,7 +215,7 @@ export function compareVersions(a: string, b: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// 更新服务
+// Service de mise à jour
 // ---------------------------------------------------------------------------
 
 export interface UpdateStatus {
@@ -227,7 +227,7 @@ export interface UpdateStatus {
   localBranch: string
   latest: LatestSnapshot | null
   hasUpdate: boolean
-  /** version=远端版本号更高；commits=版本号未变但上游提交领先（源码形态）；none。 */
+  /** version = numéro de version distant plus élevé ; commits = numéro inchangé mais commits amont en avance (forme source) ; none. */
   updateKind: 'version' | 'commits' | 'none'
   behindBy: number
   recentCommits: UpstreamCommit[]
@@ -239,7 +239,7 @@ export interface UpdateStatus {
   dismissed: boolean
   canApply: boolean
   nextCheckHint: string
-  /** T5（M2）：发布清单验签配置可见性（管理员判断供应链校验是否已启用）。 */
+  /** T5 (M2) : visibilité de la configuration de vérification du manifeste de publication (l'admin voit si la validation de chaîne d'approvisionnement est active). */
   releaseKeyConfigured: boolean
   requireSignedManifests: boolean
 }
@@ -261,14 +261,14 @@ export class UpdateService extends Service {
     const envAuto = process.env.DSH_UPDATE_AUTO_CHECK
     this.envAutoCheck = envAuto === undefined ? undefined : (envAuto === 'on' || envAuto === 'true' || envAuto === '1')
     this.source = resolveSource(config)
-    // 本 cordis 版本不驱动 Service.start 生命周期（对照 authn/mcp 均为构造期初始化）：
-    // 构造后短延迟完成一次 bootstrap（种子状态 + 启动定时器）；此后任意入口访问也会兜底触发。
+    // Cette version de cordis ne pilote pas le cycle de vie Service.start (comparer authn/mcp : initialisation à la construction) :
+    // un court délai après la construction boucle un bootstrap (graines d'état + démarrage des minuteurs) ; ensuite, toute entrée déclenche aussi le rattrapage.
     setTimeout(() => {
-      try { this.ensureBootstrapped() } catch { /* 平台仍在装载时静默，交由首次访问兜底 */ }
+      try { this.ensureBootstrapped() } catch { /* plateforme encore en cours de chargement : silencieux, le rattrapage se fait à la première visite */ }
     }, BOOTSTRAP_DELAY_MS)
   }
 
-  /** 幂等初始化：种子持久化状态 + 启动自动检查定时器（仅执行一次）。 */
+  /** Initialisation idempotente : graine de l'état persistant + démarrage du minuteur de vérification automatique (une seule exécution). */
   private ensureBootstrapped(): void {
     if (this.bootstrapped) return
     this.bootstrapped = true
@@ -284,7 +284,7 @@ export class UpdateService extends Service {
     if (!state.autoCheck) {
       this.ctx.logger('update').info('自动更新检查已关闭（update:state.autoCheck=false），仅手动检查')
     } else {
-      // 启动首查：上次检查时间超出间隔（含从未检查）立即执行
+      // Première vérification au démarrage : dernier contrôle au-delà de l'intervalle (jamais vérifié compris) = exécution immédiate
       void this.maybeAutoCheck()
     }
   }
@@ -302,7 +302,7 @@ export class UpdateService extends Service {
     return platformVersionInfo().installMode
   }
 
-  /** 手动检查冷却剩余毫秒（防滥用 GitHub 限额）。 */
+  /** Millisecondes restantes de refroidissement de la vérification manuelle (contre l'abus du quota GitHub). */
   cooldownRemainingMs(): number {
     return Math.max(0, MANUAL_CHECK_COOLDOWN_MS - (Date.now() - this.lastManualCheckAt))
   }
@@ -342,12 +342,12 @@ export class UpdateService extends Service {
     }
   }
 
-  /** 立即执行一次上游检查（自动/手动共用；manual=true 记录手动冷却）。 */
+  /** Exécute immédiatement une vérification amont (partagé auto/manuel ; manual=true enregistre le refroidissement manuel). */
   async checkNow(options: { manual?: boolean } = {}): Promise<UpdateStatus> {
     if (options.manual) {
       const cooldown = this.cooldownRemainingMs()
       if (cooldown > 0) {
-        // 协议键错误码由 REST 层判定（不再对译文做子串匹配）：附带 code 供路由精确映射 429
+        // Le code d'erreur de la clé de protocole est jugé par la couche REST (plus de correspondance de sous-chaîne sur la traduction) : code joint pour un mapping précis en 429
         const error = new Error(translate('检查过于频繁，请 {seconds} 秒后再试', { seconds: Math.ceil(cooldown / 1000) })) as Error & { code?: string }
         error.code = 'TOO_FREQUENT'
         throw error
@@ -373,8 +373,8 @@ export class UpdateService extends Service {
       let commits: UpstreamCommit[] = []
       const errors: string[] = []
 
-      // 1) 远端版本号（raw 优先；raw 不可达时回退 contents API——两个域名网络可达性常不一致，
-      //    2026-11-02 实测 raw 失败但 api.github.com 正常；两路都失败才记「版本获取失败」）
+      // 1) numéro de version distant (raw prioritaire ; raw injoignable → repli contents API — l'accessibilité réseau des deux domaines diverge souvent,
+      //    constat 2026-11-02 : raw en échec mais api.github.com normal ; « échec d'obtention de version » seulement si les deux voies échouent)
       try {
         const fetched = await fetchUpstreamVersion(this.source, headers, signal)
         latestVersion = fetched.version
@@ -383,7 +383,7 @@ export class UpdateService extends Service {
         errors.push(translate('版本获取失败：{message}', { message: error instanceof Error ? error.message : String(error) }))
       }
 
-      // 2) 提交差（GitHub compare API，仅源码形态且能定位本地 HEAD）
+      // 2) écart de commits (GitHub compare API, seulement en forme source et HEAD local localisable)
       if (head?.sha) {
         try {
           const apiUrl = `${this.source.apiBase}/repos/${this.source.repo}/compare/${head.sha}...${this.source.branch}`
@@ -432,7 +432,7 @@ export class UpdateService extends Service {
         recentCommits: commits.length > 0 ? commits : prev.recentCommits,
       })
 
-      // 新版本通知（同版本只广播一次；audit 插件订阅总线联动留痕）
+      // Notification de nouvelle version (une seule diffusion par version ; le plugin audit souscrit au bus et trace en couplage)
       if (hasUpdate && latest.version !== '' && latest.version !== prev.announcedVersion) {
         updateStateCollection(this.ctx).update(STATE_ID, { announcedVersion: latest.version })
         this.ctx.platformBus.emit(PlatformEvents.UpdateAvailable, {
@@ -462,10 +462,10 @@ export class UpdateService extends Service {
       void this.checkNow().catch((error) => {
         this.ctx.logger('update').warn(`自动更新检查失败：${error instanceof Error ? error.message : String(error)}`)
       })
-    } catch { /* 状态异常不致命 */ }
+    } catch { /* un état anomalique n'est pas fatal */ }
   }
 
-  /** OPT-P2-03：签名策略读取（默认关闭——仓库签署化 adoption 完成后经 settings 开启即全量强制）。 */
+  /** OPT-P2-03 : lecture de la politique de signature (fermée par défaut — l'adoption de la signature du dépôt faite, l'activation via settings la rend universellement forcée). */
   private requireSignedCommits(): boolean {
     try {
       return updateStateCollection(this.ctx).get(STATE_ID)?.requireSignedCommits === true
@@ -474,7 +474,7 @@ export class UpdateService extends Service {
     }
   }
 
-  /** T5（M2）：发布清单强制策略（true=验签失败/缺失即拒绝升级，fail-closed）。 */
+  /** T5 (M2) : politique forcée du manifeste de publication (true = échec/absence de vérification = refus de la montée, fail-closed). */
   private requireSignedManifests(): boolean {
     try {
       return updateStateCollection(this.ctx).get(STATE_ID)?.requireSignedManifests === true
@@ -484,15 +484,15 @@ export class UpdateService extends Service {
   }
 
   /**
-   * T5（M2）：按升级目标 commit 拉取发布清单并 Ed25519 验签（复用平台签名基建，与市场五面验签同源）。
-   * 未登记公钥 → checked=false（显式说明未启用，不算失败）；已登记时任何不通过都返回 verified=false，
-   * 由 applyUpdate 按requireSignedManifests 决定拒绝或告警放行（放行时 note 随结果上报，绝不静默）。
+   * T5 (M2) : tire le manifeste de publication selon le commit cible de la montée et vérifie la signature Ed25519 (réutilise l'infrastructure de signature de la plateforme, même source que la vérification des cinq faces du marché).
+   * Clé publique non enregistrée → checked=false (précise explicitement que la vérification n'est pas activée, sans compter comme un échec) ; clé enregistrée → tout contrôle non passé renvoie verified=false,
+   * applyUpdate décide alors du refus ou de l'acceptation avec avertissement selon requireSignedManifests (en cas d'acceptation, note remontée avec le résultat, jamais de silence).
    */
   async verifyReleaseManifest(targetResolved: string): Promise<{ checked: boolean; verified: boolean; note: string }> {
     let publicKey = ''
     try {
       publicKey = (updateStateCollection(this.ctx).get(STATE_ID)?.releasePublicKey ?? '').trim()
-    } catch { /* 状态未就绪按未配置 */ }
+    } catch { /* état non prêt : traité comme non configuré */ }
     if (!publicKey) {
       return { checked: false, verified: false, note: translate('未登记 releasePublicKey：发布清单验签未启用（生成密钥：node scripts/release-manifest.mjs --generate-key）') }
     }
@@ -516,8 +516,8 @@ export class UpdateService extends Service {
   }
 
   /**
-   * OPT-P2-03：一键回滚——git reset --hard 到最近一次 apply 登记的升级前 HEAD + npm install，
-   * 审计留痕 + platform.update.rolled_back 事件；需重启进程生效。无可回滚快照即拒绝。
+   * OPT-P2-03 : retour arrière en un clic — git reset --hard vers le HEAD d'avant montée enregistré par le dernier apply + npm install,
+   * traçabilité d'audit + événement platform.update.rolled_back ; un redémarrage du processus est nécessaire pour prendre effet. Refus s'il n'existe aucun instantané de retour.
    */
   async rollbackUpdate(options: { reason?: string; actor?: { id: string; name: string } } = {}): Promise<Record<string, unknown>> {
     const info = platformVersionInfo()
@@ -570,7 +570,7 @@ export class UpdateService extends Service {
         : String(patch.dismissedVersion)
     }
     if (typeof patch.requireSignedCommits === 'boolean') update.requireSignedCommits = patch.requireSignedCommits
-    // T5（M2）：发布清单验签设置——公钥写入口格式校验（防呆：贴错内容升级时才炸不如登记时即拒）
+    // T5 (M2) : réglage de la vérification de signature des manifestes de publication — contrôle de format à l'entrée d'écriture de la clé publique (garde-fou : plutôt refuser dès l'enregistrement qu'exploser à la montée parce qu'on a collé un mauvais contenu)
     if (patch.releasePublicKey !== undefined) {
       const key = String(patch.releasePublicKey).trim()
       if (key !== '' && !isValidEd25519PublicKeyBase64(key)) {
@@ -579,7 +579,7 @@ export class UpdateService extends Service {
       update.releasePublicKey = key
     }
     if (typeof patch.requireSignedManifests === 'boolean') {
-      // fail-closed 防呆：强制验签不能在没有公钥的情况下单独开启（开启即拒绝一切升级）
+      // garde-fou fail-closed : la vérification de signature forcée ne peut pas être activée seule sans clé publique (activée = tout refus de montée)
       if (patch.requireSignedManifests === true) {
         const existing = update.releasePublicKey ?? updateStateCollection(this.ctx).get(STATE_ID)?.releasePublicKey ?? ''
         if (!existing.trim()) throw new Error(translate('开启 requireSignedManifests 前必须先登记 releasePublicKey'))
@@ -591,14 +591,14 @@ export class UpdateService extends Service {
   }
 
   /**
-   * 一键升级（仅 source 形态）：
-   *   git pull --ff-only（脏工作区/分叉会安全失败而非强改）→ npm install → 提示重启。
-   * bundle 形态返回宿主侧升级指引（不支持进程内回写 dsh profile，安全边界）。
+   * Montée en un clic (forme source uniquement) :
+   *   git pull --ff-only (espace de travail sale/divergence = échec sécurisé plutôt que modification forcée) → npm install → invitation à redémarrer.
+   * La forme bundle renvoie les instructions de montée côté hôte (pas de réécriture in-process du profil dsh, frontière de sécurité).
    */
   async applyUpdate(options: { dryRun?: boolean; reason?: string; pin?: string; actor?: { id: string; name: string } } = {}): Promise<Record<string, unknown>> {
     const info = platformVersionInfo()
     const status = this.status()
-    // OPT-P2-03：pin 强制——禁止裸拉上游最新（版本钉扎是可回滚与可审计的前提）
+    // OPT-P2-03 : pin forcé — interdit de tirer nu le dernier amont (l'épinglage de version est le prérequis du retour arrière et de l'auditabilité)
     const pin = String(options.pin ?? '').trim()
     if (info.installMode === 'source' && !options.dryRun && !pin) {
       throw new Error(translate('必须显式 pin 升级目标（tag / commit / 分支名，如 v1.1.0），禁止裸拉 main 最新（OPT-P2-03）'))
@@ -609,8 +609,8 @@ export class UpdateService extends Service {
     let manifestCheck: Awaited<ReturnType<UpdateService['verifyReleaseManifest']>> | undefined
     if (info.installMode === 'source' && pin) {
       try {
-        // E-05：fetch 只在正式执行路径发生（外呼 + 变更 .git）——dryRun 不外呼不落 .git，
-        // pin 解析/签名核验基于本地既有 refs（上次 fetch 的远端追踪引用与 tags）完成
+        // E-05 : fetch n'a lieu que sur le chemin d'exécution réel (appel sortant + modification de .git) — dryRun ne sort pas et ne touche pas .git,
+        // la résolution du pin/la vérification de signature s'appuient sur les refs locaux existants (refs de suivi distant et tags du dernier fetch)
         if (!options.dryRun) await runGit(info.rootDir, ['fetch', 'origin', '--tags', '--prune'])
         targetResolved = (await runGit(info.rootDir, ['rev-parse', '--verify', `${pin}^{commit}`])).trim()
       } catch (error) {
@@ -626,7 +626,7 @@ export class UpdateService extends Service {
           throw new Error(translate('目标提交签名校验未通过（requireSignedCommits=true，OPT-P2-03）：{note}', { note: signatureNote }))
         }
       }
-      // T5（M2）：发布清单验签（Ed25519）——登记 releasePublicKey 后启用；强制策略开启时任何不通过即拒绝
+      // T5 (M2) : vérification de signature du manifeste de publication (Ed25519) — activée après enregistrement de releasePublicKey ; stratégie forcée activée = tout contrôle non passé est refusé
       manifestCheck = await this.verifyReleaseManifest(targetResolved)
       if (manifestCheck.checked && !manifestCheck.verified && this.requireSignedManifests()) {
         throw new Error(translate('发布清单验签未通过（requireSignedManifests=true，T5）：{note}', { note: manifestCheck.note }))
@@ -676,7 +676,7 @@ export class UpdateService extends Service {
     let gitOutput = ''
     let npmOutput = ''
     let npmFailed = false
-    // OPT-P2-03：升级前 HEAD 快照——健康检查失败可一键回退（POST /api/update/rollback）
+    // OPT-P2-03 : instantané du HEAD d'avant montée — échec du contrôle de santé permet un retour arrière en un clic (POST /api/update/rollback)
     const rollbackTo = (await runGit(info.rootDir, ['rev-parse', 'HEAD'])).trim()
     try {
       gitOutput = await runGit(info.rootDir, ['merge', '--ff-only', targetResolved])
@@ -689,9 +689,9 @@ export class UpdateService extends Service {
       })
       throw new Error(translate('git pull 失败（本地有未提交修改或分叉，请人工处理）：{message}', { message: message.slice(0, 300) }))
     }
-    // QA E-01：merge 成功即登记回滚快照——此前 lastApplySnapshot 全仓无写入点，
-    // rollback 恒报「无可回滚快照」，一键回滚是死路；先于 npm install 落库，
-    // 即使依赖同步失败也保留回退锚点
+    // QA E-01 : merge réussi = enregistrement immédiat de l'instantané de retour — auparavant lastApplySnapshot n'avait aucun point d'écriture dans tout le dépôt,
+    // rollback répondait invariablement « aucun instantané de retour disponible », le retour en un clic était une impasse ; écrit en base avant npm install,
+    // pour conserver l'ancre de retour même en cas d'échec de synchronisation des dépendances
     updateStateCollection(this.ctx).update(STATE_ID, {
       lastApplySnapshot: rollbackTo,
       lastApplyPin: pin,
@@ -740,7 +740,7 @@ function clampIntervalHours(value: number | undefined): number {
 }
 
 // ---------------------------------------------------------------------------
-// REST 装配（挂载在共享 httpServer；鉴权由 console 中间件统一完成）
+// Assemblage REST (monté sur le httpServer partagé ; authentification prise en charge uniformément par le middleware console)
 // ---------------------------------------------------------------------------
 
 interface PrincipalInfo {
@@ -776,7 +776,7 @@ export const updateApi = {
       return { id: info?.userId ?? info?.principalId ?? 'api', name: info?.name ?? 'api' }
     }
 
-    // 状态对全部已登录用户开放（顶栏更新横幅人人可见；不含敏感信息）
+    // État ouvert à tous les utilisateurs connectés (bandeau de montée visible par tous en barre supérieure ; sans information sensible)
     http.register('GET', '/api/update/status', (exchange) => {
       exchange.ok(service.status())
     }, { access: 'authenticated' })
@@ -787,7 +787,7 @@ export const updateApi = {
         exchange.ok(await service.checkNow({ manual: true }))
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        // TOO_FREQUENT 由 checkNow 以 error.code 标注（避免对本地化后的译文做子串匹配）
+        // TOO_FREQUENT est marqué par checkNow via error.code (évite toute correspondance de sous-chaîne sur la traduction localisée)
         if ((error as { code?: string }).code === 'TOO_FREQUENT') {
           exchange.fail(429, 'TOO_FREQUENT', message)
         } else {
@@ -830,7 +830,7 @@ export const updateApi = {
 }
 
 // ---------------------------------------------------------------------------
-// Agent 工具（dsh 会话里自然语言即可检查/升级平台）
+// Outils Agent (en session dsh, le langage naturel suffit pour vérifier/mettre à jour la plateforme)
 // ---------------------------------------------------------------------------
 
 export const updateTools = {
@@ -883,16 +883,16 @@ export const updateTools = {
 }
 
 // ---------------------------------------------------------------------------
-// 插件入口
+// Entrée de l'extension
 // ---------------------------------------------------------------------------
 
 export const name = 'update'
 export const inject = ['httpServer', 'opsStorage', 'platformBus', 'tools', 'audit']
 
 export function apply(ctx: Context, config: UpdateConfig = {}) {
-  // 服务本体（定时自动检查随服务启动）
+  // Le service lui-même (vérification automatique planifiée au démarrage du service)
   ctx.plugin(UpdateService, config)
-  // REST + Agent 工具（子插件经服务键 ctx.update 复用同一实例）
+  // REST + outils Agent (la sous-extension réutilise la même instance via la clé de service ctx.update)
   ctx.plugin(updateApi)
   ctx.plugin(updateTools)
 }

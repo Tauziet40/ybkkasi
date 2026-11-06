@@ -1,16 +1,16 @@
 /**
- * 制造工具箱 —— 面板装配面（自「制造业 AI 工具集」并入的接线层，2026-10-19）。
+ * Boîte à outils manufacture — face d'assemblage du panneau (couche de câblage intégrée depuis « jeu d'outils IA manufacture », 2026-10-19).
  *
- * 职责：把 mfg 域（工具目录 / 执行引擎 / 选题清单 / 放行门禁）挂进 01门 面板：
- *   1. /api/panel/mfg/* REST（guarded + 权限点；自注册路由进 routeMatrix 共享断言网）；
- *   2. panel_mfg_* 工具族（共享 tools 键 → dsh 下即原生 ToolRuntime，可被模型调用）；
- *   3. 模型面适配：把引擎的 ModelRuntime 接到平台模型网关（modelgw 优先 / dsh llm 桥兜底）；
- *   4. 放行存储：以 opsStorage 集合持久化 Skill 放行记录（替代源项目本机 .local 文件）。
+ * Responsabilités : monter le domaine mfg (catalogue d'outils / moteur d'exécution / liste des sujets / passe de libération) dans le panneau de la porte 01 :
+ *   1. REST /api/panel/mfg/* (guarded + point de permission ; routes auto-enregistrées dans routeMatrix, réseau d'assertions partagé) ;
+ *   2. famille d'outils panel_mfg_* (clé tools partagée → sous dsh, ToolRuntime natif, appelable par le modèle) ;
+ *   3. adaptation de la face modèle : raccorde le ModelRuntime du moteur à la passerelle de modèles de la plateforme (modelgw d'abord / pont llm dsh en repli) ;
+ *   4. stockage des libérations : persistance des enregistrements de libération Skill dans une collection opsStorage (remplace le fichier .local du projet source).
  *
- * 边界（登记 docs/plan-mfg-toolkit-fusion-20261019.md）：
- *   - 面板不持有任何模型密钥（密钥只在平台侧）；无网关时 AI 工具诚实 503，不冒充成功；
- *   - 放行门禁 fail-closed：未评估/未审阅/已过期的 Skill 一律不开放普通调用；
- *   - 评估面（evaluateSkills）不自动写放行记录——放行必须经人工审阅签署。
+ * Frontières (consignées dans docs/plan-mfg-toolkit-fusion-20261019.md) :
+ *   - le panneau ne détient aucune clé de modèle (les clés ne vivent que côté plateforme) ; sans passerelle, les outils IA répondent honnêtement 503, sans se faire passer pour un succès ;
+ *   - passe de libération fail-closed : tout Skill non évalué/non revu/expiré n'est jamais ouvert à l'appel ordinaire ;
+ *   - la face d'évaluation (evaluateSkills) n'écrit pas d'enregistrement de libération — la libération passe obligatoirement par revue et signature humaines.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { HttpExchange } from '../../../platform-core/src/index.ts'
@@ -24,7 +24,7 @@ import { buildRelease, releaseReady, MemoryReleaseStore, skillHash, type Release
 import { skills as mfgSkills } from './skills.ts'
 import { evaluateSkills, evaluationPlan, fixtures } from './evaluate.ts'
 
-/** 放行记录持久化形态（opsStorage 集合记录）。 */
+/** Forme persistante des enregistrements de libération (enregistrement de collection opsStorage). */
 type ReleaseRecord = {
   id: string
   createdAt: string
@@ -39,7 +39,7 @@ type ReleaseRecord = {
   expiresAt: string
 }
 
-/** 评估报告持久化形态（供人工审阅；报告本身不构成放行）。 */
+/** Forme persistante des rapports d'évaluation (pour revue humaine ; le rapport ne constitue pas en soi une libération). */
 type ReportRecord = {
   id: string
   createdAt: string
@@ -49,8 +49,8 @@ type ReportRecord = {
 }
 
 /**
- * 放行存储：opsStorage 集合实现（01门装态与全量形态共用；集合缺席时回落内存实现，
- * 保证「存储面不可用」不会把门禁变成 fail-open——内存实现同样只读已签署记录）。
+ * Stockage des libérations : implémentation par collection opsStorage (commune à la forme installée porte 01 et à la forme complète ; à défaut de collection, repli en mémoire,
+ * pour garantir qu'une « face de stockage indisponible » ne transforme pas la passe en fail-open — l'implémentation mémoire ne lit elle aussi que les enregistrements signés).
  */
 function createReleaseStore(ctx: Context): ReleaseStore {
   const soft = (key: string): any => { try { return ctx.reflect.get(key, false) } catch { return undefined } }
@@ -86,11 +86,11 @@ function createReleaseStore(ctx: Context): ReleaseStore {
 }
 
 /**
- * 模型运行时适配：引擎的 ModelRuntime ← 平台模型网关。
+ * Adaptation du runtime de modèle : ModelRuntime du moteur ← passerelle de modèles de la plateforme.
  *
- * identity()：网关目录首个在线模型的 slug（引擎用它算放行指纹——模型变化即放行失效）。
- * invoke()：走 gateway.invoke 真实出站（modelgw 的计量/预算/降级链，或 dsh llm 桥）。
- * 网关缺席 → identity()=null，引擎抛 MODEL_NOT_CONFIGURED（诚实降级）。
+ * identity() : slug du premier modèle en ligne du catalogue de la passerelle (le moteur s'en sert pour l'empreinte de libération — changer de modèle invalide la libération).
+ * invoke() : vraie sortie via gateway.invoke (metering/budget/chaîne de repli de modelgw, ou pont llm dsh).
+ * Passerelle absente → identity()=null, le moteur lève MODEL_NOT_CONFIGURED (dégradation honnête).
  */
 function createModelRuntime(ctx: Context, releases: ReleaseStore): ModelRuntime {
   const resolve = () => resolvePanelModelGateway(ctx)?.gateway as any
@@ -125,24 +125,24 @@ function createModelRuntime(ctx: Context, releases: ReleaseStore): ModelRuntime 
 }
 
 export interface MfgDeps {
-  /** guarded 路由包装（与 panel-core 同规：权限点 + 审计 + 演示态标记）。 */
+  /** Enveloppe de route guarded (même règle que panel-core : point de permission + audit + marque d'état démo). */
   guarded: (method: string, path: string, permission: string, handler: (exchange: HttpExchange) => unknown | Promise<unknown>) => void
-  /** 审计留痕（审计中心缺席时空操作）。 */
+  /** Trace d'audit (opération nulle si le centre d'audit est absent). */
   changeLog: (exchange: HttpExchange, action: string, resourceType: string, resourceId: string, resourceName: string, detail?: string) => void
-  /** 通用 JSON 渲染（工具输出面）。 */
+  /** Rendu JSON générique (face de sortie des outils). */
   renderJson: (args: unknown, value: unknown) => any
 }
 
-/** 制造工具箱装配：目录/执行/清单/放行四组路由 + 工具族。 */
+/** Assemblage de la boîte à outils manufacture : quatre groupes de routes catalogue/exécution/liste/libération + famille d'outils. */
 export function applyMfgModule(ctx: Context, deps: MfgDeps): void {
   const { guarded, changeLog, renderJson } = deps
-  // 工具注册直调 ctx.tools.register({...})：契约 lint 以字面量 `tools.register({` 前缀提取
-  // 工具名（scripts/contract-lint.mjs extractCodeSurface）——经中间函数转发会使 manifest
-  // 双向比对误判 tool_ghost（2026-10-19 实证），故调用点保持字面量写法。
+  // L'enregistrement d'outils appelle directement ctx.tools.register({...}) : le lint de contrat extrait le nom d'outil
+  // avec le préfixe littéral `tools.register({` (scripts/contract-lint.mjs extractCodeSurface) — un transfert via une fonction intermédiaire ferait
+  // juger à tort tool_ghost la comparaison bidirectionnelle du manifeste (constat 2026-10-19), les points d'appel gardent donc l'écriture littérale.
   const releases = createReleaseStore(ctx)
   const runtime = createModelRuntime(ctx, releases)
 
-  // ---- 目录面 -------------------------------------------------------------------
+  // ---- Face catalogue -------------------------------------------------------------------
 
   guarded('GET', '/api/panel/mfg/catalog', 'panel.read', () => {
     const identity = runtime.identity()
@@ -184,7 +184,7 @@ export function applyMfgModule(ctx: Context, deps: MfgDeps): void {
     }
   })
 
-  // ---- 执行面 -------------------------------------------------------------------
+  // ---- Face exécution -------------------------------------------------------------------
 
   guarded('POST', '/api/panel/mfg/tools/:id/run', 'panel.write', async (exchange) => {
     const id = String(exchange.params.id ?? '')
@@ -218,7 +218,7 @@ export function applyMfgModule(ctx: Context, deps: MfgDeps): void {
       : { filename: exportFileName(result, 'json'), content: JSON.stringify(result, null, 2), mime: 'application/json' }
   })
 
-  // ---- 放行与评估面（写动词需 config 权限：放行是治理动作，不是普通使用） -----------------
+  // ---- Face libération et évaluation (les verbes d'écriture exigent la permission config : libérer est un acte de gouvernance, pas un usage ordinaire) -----------------
 
   guarded('GET', '/api/panel/mfg/releases', 'panel.read', () => {
     const identity = runtime.identity()
@@ -289,7 +289,7 @@ export function applyMfgModule(ctx: Context, deps: MfgDeps): void {
     return { revoked: skillId }
   })
 
-  // ---- panel_mfg_* 工具族（共享 tools 键；dsh 下即原生 ToolRuntime） -----------------
+  // ---- Famille d'outils panel_mfg_* (clé tools partagée ; sous dsh, ToolRuntime natif) -----------------
 
   ctx.tools.register({
     name: 'panel_mfg_tools_list',

@@ -1,17 +1,17 @@
 /**
- * 制造工具箱 —— 表格类工具共用内核（自「制造业 AI 工具集」server/tabular.ts 并入）。
+ * Boîte à outils manufacture — noyau partagé des outils tabulaires (intégré depuis « jeu d'outils IA manufacture » server/tabular.ts).
  *
- * 为什么自写 CSV 解析而不引 csv-parse：随附包装机形态零运行时依赖（见 validate.ts 头注）。
- * 语义与源项目保持等价，且守住它刻意设计的严格面：
- *   - BOM 头剥离、空行跳过、字段 trim；
- *   - RFC4180 双引号包裹与 "" 转义（源项目断言「带逗号的供应商名」依赖此语义）；
- *   - 表头必须逐字匹配；行数 1–1000；列数不符或空值即拒；
- *   - 唯一键重复即拒（DUPLICATE_KEY）——防「先查后插」类静默错算。
+ * Pourquoi écrire son analyseur CSV plutôt qu'importer csv-parse : la forme installable du paquet impose zéro dépendance d'exécution (voir l'en-tête de validate.ts).
+ * Sémantique maintenue équivalente au projet source, en gardant ses faces strictes délibérées :
+ *   - retrait de l'en-tête BOM, saut des lignes vides, trim des champs ;
+ *   - enveloppe RFC4180 par guillemets doubles et échappement "" (l'assertion « nom de fournisseur avec virgule » du projet source dépend de cette sémantique) ;
+ *   - l'en-tête doit correspondre mot pour mot ; lignes 1–1000 ; nombre de colonnes divergent ou valeur vide = refus ;
+ *   - clé unique dupliquée = refus (DUPLICATE_KEY) — contre les calculs faux silencieux du type « chercher-puis-insérer ».
  */
 import type { Block } from './types.ts'
 import { fail, requireCondition } from './validate.ts'
 
-/** CSV 解析（RFC4180 子集）：支持引号包裹、内嵌逗号/换行、"" 转义、BOM 与 CRLF。 */
+/** Analyse CSV (sous-ensemble RFC4180) : enveloppe par guillemets, virgules/retours à la ligne intégrés, échappement "", BOM et CRLF pris en charge. */
 export function parseCsv(text: string): string[][] {
   const rows: string[][] = []
   let row: string[] = []
@@ -46,11 +46,11 @@ export function parseCsv(text: string): string[][] {
   if (quoted) fail('TABLE_INVALID', '表格引号未闭合，请检查 CSV 格式')
   row.push(field)
   rows.push(row)
-  // 空行（唯一空字段）跳过，与源项目 skip_empty_lines 同语义
+  // ligne vide (unique champ vide) sautée, même sémantique que skip_empty_lines du projet source
   return rows.filter((cells) => !(cells.length === 1 && cells[0]!.trim() === ''))
 }
 
-/** 读取并校验表格：表头逐字匹配、行数与列数、空值一律拒绝。 */
+/** Lit et valide le tableau : en-tête mot pour mot, nombre de lignes et de colonnes, valeur vide toujours refusée. */
 export function readTable(text: string, columns: string[]): Record<string, string>[] {
   let parsed: string[][]
   try {
@@ -85,7 +85,7 @@ const unique = (rows: Record<string, string>[], key: string): void => {
   }
 }
 
-/** 严格日期解析（YYYY-MM-DD，且必须是真实存在的日期）。 */
+/** Analyse de date stricte (YYYY-MM-DD, et ce doit être une date réellement existante). */
 function day(value: string): number {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) fail('INVALID_DATE', '日期必须使用 YYYY-MM-DD 格式')
   const parsed = Date.parse(`${value}T00:00:00Z`)
@@ -95,7 +95,7 @@ function day(value: string): number {
   return parsed
 }
 
-/** 表格类工具执行入口（bom-diff / shortage / aging / maintenance / quote-compare）。 */
+/** Entrée d'exécution des outils tabulaires (bom-diff / shortage / aging / maintenance / quote-compare). */
 export function runTabular(id: string, input: Record<string, unknown>): { blocks: Block[]; warnings: string[] } {
   const warnings: string[] = []
   let blocks: Block[] = []

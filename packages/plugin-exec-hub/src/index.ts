@@ -1,23 +1,23 @@
 /**
- * @dsh-ops/plugin-exec-hub —— 执行中枢（ybkk-MATRIX 目标四「干活中枢」，R8/R9/R10 落地）。
+ * @dsh-ops/plugin-exec-hub — centre d'exécution (objectif 4 « centre de travail » du ybkk-MATRIX, atterrissage R8/R9/R10).
  *
- * 机制移植自 Paperclip 执行编排（wake-queue），按平台形态裁剪：
- *   - 任务执行锁（E2）：issue 行上三字段（executionRunId / executionAgentKey / executionLockedAt）
- *     的 CAS 语义——「检查-置位」在同一同步段完成，Node 单线程 run-to-completion 保证原子性，
- *     决策（domain 纯函数）与 CAS 护栏分层（Paperclip 原设计）。释放是 run 级批量操作。
- *   - Agent 心跳唤醒（E3/R9）：exec:wakes 队列（幂等键去重）+ 30s 心跳循环：
- *     预算前置 → 权限校验 → 审批门禁（P0）→ 取锁/合并/延迟三态裁决 → 上下文装配 → 派发 run。
- *     状态枚举与 Paperclip 对齐（deferred_issue_execution 具名延迟态）。
- *   - 目标血缘（E4/R8）：exec:goals（支持父目标树）→ exec:projects → exec:issues，
- *     goalAncestry 写时物化，唤醒时上下文装配注入「为什么而干」。
- *   - 例行调度（E7）：interval / 5 段 cron / webhook 三源；webhook 端点公开但路径即凭证
- *     （未登记路径一律 404，不泄露存在性）。
- *   - 治理五联动（E6）：预算硬停（超限不唤醒 + 联动冻结 + L4 解冻审批）、权限校验
- *     （Agent 机器主体须持 exec.write）、审计留痕（唤醒/取锁/释放/回收全链 type=invoke/change）、
- *     数据密级注记（上下文包装载 dataClass 上限）、审批门禁（P0 任务执行前须 exec.issue.run 审批）。
+ * Mécanismes portés de l'orchestration Paperclip (wake-queue), taillés pour la forme de la plateforme :
+ *   - verrou d'exécution des tâches (E2) : sémantique CAS sur trois champs de la ligne issue (executionRunId / executionAgentKey / executionLockedAt)
+ *     — « vérifier-positionner » dans le même segment synchrone, l'atomicité est garantie par le run-to-completion monothread de Node,
+ *     décision (fonctions pures de domain) et garde CAS en couches (conception Paperclip d'origine). La libération est une opération par lot au niveau run.
+ *   - réveil par battement d'Agent (E3/R9) : file exec:wakes (déduplication par clé idempotente) + boucle de battement 30 s :
+ *     budget d'abord → vérification de permissions → barrière d'approbation (P0) → arbitrage trois états prise de verrou/fusion/différé → assemblage du contexte → dispatch du run.
+ *     Énumérations d'états alignées sur Paperclip (état différé nommé deferred_issue_execution).
+ *   - lignée d'objectifs (E4/R8) : exec:goals (arbre d'objectifs parents supporté) → exec:projects → exec:issues,
+ *     goalAncestry matérialisée à l'écriture, l'assemblage de contexte au réveil injecte le « pourquoi on le fait ».
+ *   - planification de routines (E7) : trois sources intervalle / cron 5 champs / webhook ; l'endpoint webhook est public mais le chemin sert d'identifiant
+ *     (tout chemin non enregistré renvoie 404, sans fuiter son existence).
+ *   - cinq couplages de gouvernance (E6) : arrêt dur sur budget (au-delà de la limite : pas de réveil + gel couplé + approbation L4 de dégel), vérification de permissions
+ *     (le principal machine de l'Agent doit porter exec.write), traçabilité d'audit (réveil/prise/libération/récupération, chaîne complète type=invoke/change),
+ *     annotation de classe de données (le paquet de contexte embarque le plafond dataClass), barrière d'approbation (P0 : approbation exec.issue.run requise avant exécution de tâche).
  *
- * 治理红线：唤醒派发永不虚构执行——run 只登记「已派发 + 上下文包」，执行由 Agent 经
- * exec_claim / exec_complete 工具或外部运行时回执；无回执的 run 由僵尸锁回收闭环。
+ * Ligne rouge de gouvernance : le dispatch de réveil n'invente jamais l'exécution — le run n'enregistre que « dispatché + paquet de contexte », l'exécution revient à l'Agent via
+ * les outils exec_claim / exec_complete ou un accusé de runtime externe ; un run sans accusé est bouclé par la récupération des verrous zombies.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -36,12 +36,12 @@ import { t } from '../../platform-i18n/src/index.ts'
 import { seedExecHub } from './seed.ts'
 
 // ---------------------------------------------------------------------------
-// 记录模型（exec:* 集合）
+// Modèle d'enregistrements (collections exec:*)
 // ---------------------------------------------------------------------------
 
 export type GoalStatus = 'active' | 'achieved' | 'dropped' | 'archived'
 
-/** 目标（R8）：支持父目标树；metric 三件套使「可量化」成为建模约束而非口头承诺。 */
+/** Objectif (R8) : arbre d'objectifs parents supporté ; le trio metric fait de « quantifiable » une contrainte de modélisation et non une promesse verbale. */
 export interface GoalRecord extends RecordBase {
   orgId: string
   title: string
@@ -59,7 +59,7 @@ export interface GoalRecord extends RecordBase {
 
 export type ProjectStatus = 'active' | 'done' | 'archived'
 
-/** 项目（E4）：目标与任务之间的中间层，挂代码仓与文档。 */
+/** Projet (E4) : couche intermédiaire entre objectif et tâche, porte dépôt de code et documentation. */
 export interface ProjectRecord extends RecordBase {
   orgId: string
   goalId?: string
@@ -73,8 +73,8 @@ export interface ProjectRecord extends RecordBase {
 export type IssuePriority = 'P0' | 'P1' | 'P2' | 'P3'
 
 /**
- * 任务（E2/E4）：执行锁三字段与 Paperclip 对齐（executionAgentKey=归一化名称键，
- * executionLockedAt=僵尸锁回收依据）；goalAncestry 写时物化；checkoutRunId 预留双锁位。
+ * Tâche (E2/E4) : les trois champs du verrou d'exécution alignés sur Paperclip (executionAgentKey = clé de nom normalisée,
+ * executionLockedAt = base de la récupération des verrous zombies) ; goalAncestry matérialisée à l'écriture ; checkoutRunId réservé pour un double verrouillage.
  */
 export interface IssueRecord extends RecordBase {
   orgId: string
@@ -91,7 +91,7 @@ export interface IssueRecord extends RecordBase {
   executionRunId?: string
   executionAgentKey?: string
   executionLockedAt?: string
-  /** 预留：检出锁（双锁语义，Paperclip checkout_run_id），首版不启用。 */
+  /** Réservé : verrou de checkout (sémantique de double verrou, checkout_run_id de Paperclip), non activé en première version. */
   checkoutRunId?: string
   goalAncestry: string[]
   createdBy: string
@@ -100,7 +100,7 @@ export interface IssueRecord extends RecordBase {
 export type WakeTrigger = 'assign' | 'comment' | 'dependency' | 'routine' | 'api' | 'webhook'
 export type WakeStatus = 'pending' | 'deferred_issue_execution' | 'run' | 'failed' | 'cancelled' | 'done'
 
-/** 唤醒请求（E3）：幂等键防重复投递（无它则重复唤醒白烧预算）。 */
+/** Requête de réveil (E3) : clé idempotente contre la livraison en double (sans elle, des réveils dupliqués brûlent le budget pour rien). */
 export interface WakeRecord extends RecordBase {
   orgId: string
   issueId?: string
@@ -119,7 +119,7 @@ export interface WakeRecord extends RecordBase {
 
 export type RunStatus = 'running' | 'completed' | 'failed' | 'timeout'
 
-/** 执行 run：一次派发的登记（含上下文包），完成/超时/失败由 Agent 回执或僵尸回收闭环。 */
+/** Run d'exécution : enregistrement d'un dispatch (paquet de contexte inclus) ; complétion/expiration/échec bouclés par accusé de l'Agent ou récupération zombie. */
 export interface RunRecord extends RecordBase {
   orgId: string
   agentId?: string
@@ -134,7 +134,7 @@ export interface RunRecord extends RecordBase {
 
 export type RoutineKind = 'interval' | 'cron' | 'webhook'
 
-/** 例行规则（E7）：三源——间隔分钟 / 5 段 cron / webhook 路径。 */
+/** Règle de routine (E7) : trois sources — minutes d'intervalle / cron 5 champs / chemin webhook. */
 export interface RoutineRecord extends RecordBase {
   orgId: string
   agentId: string
@@ -151,7 +151,7 @@ export interface RoutineRecord extends RecordBase {
 
 export type HeartbeatOutcome = 'woken' | 'skipped_no_todo' | 'skipped_budget' | 'skipped_permission' | 'skipped_frozen' | 'skipped_inactive' | 'deferred'
 
-/** 心跳留痕（R9）：Agent 健康度数据源，滚动保留 7 天。 */
+/** Traçabilité des battements (R9) : source des données de santé de l'Agent, conservation glissante de 7 jours. */
 export interface HeartbeatRecord extends RecordBase {
   agentId: string
   orgId: string
@@ -173,13 +173,13 @@ export interface TickResult {
 }
 
 // ---------------------------------------------------------------------------
-// 配置（env 可覆盖；selftest 用 TTL 压缩换确定性）
+// Configuration (surchargeable par env ; selftest compresse les TTL pour la déterminisme)
 // ---------------------------------------------------------------------------
 
 const TICK_MS = Number(process.env.EXEC_HUB_TICK_MS ?? 30_000)
 const FIRST_TICK_MS = Number(process.env.EXEC_HUB_FIRST_TICK_MS ?? Math.min(TICK_MS, 15_000))
 
-/** 定时器只在插件卸载时清理；Cordis effect 的返回值才是 disposer。 */
+/** Les minuteurs ne sont nettoyés qu'au déchargement de l'extension ; c'est la valeur de retour du effect Cordis qui est le disposer. */
 export function registerExecTimers(ctx: Pick<Context, 'effect'>, tick: () => void, metrics: () => void, tickMs = TICK_MS, firstMs = FIRST_TICK_MS): void {
   const tickTimer = setInterval(tick, tickMs)
   tickTimer.unref?.()
@@ -194,60 +194,60 @@ export function registerExecTimers(ctx: Pick<Context, 'effect'>, tick: () => voi
   })
 }
 const BATCH_SIZE = Number(process.env.EXEC_HUB_BATCH ?? 50)
-/** 僵尸锁阈值：Paperclip 建议约 2× 心跳周期，缺省 5 分钟。 */
+/** Seuil de verrou zombie : Paperclip conseille environ 2× la période de battement, 5 minutes par défaut. */
 const LOCK_TIMEOUT_MS = Number(process.env.EXEC_LOCK_TIMEOUT_MS ?? 300_000)
-/** 执行租约缺省 TTL（附录 A 决策 3：exec_run_leases 权威；运行时应在到期前 renewLease 心跳）。 */
+/** TTL par défaut des baux d'exécution (décision 3 de l'annexe A : exec_run_leases fait autorité ; le runtime doit renewLease avant expiration). */
 const DEFAULT_LEASE_TTL_MS = Number(process.env.EXEC_LEASE_TTL_MS ?? 15 * 60_000)
 const HEARTBEAT_RETENTION_MS = 7 * 86_400_000
 const METRICS_OVERDUE_MS = 24 * 3_600_000
 
 // ---------------------------------------------------------------------------
-// exec-hub 集成端口返回类型（结构镜像 plugin-workforce contract.ts 的
-// EmployeeClaimResult / EmployeeLeaseResult，冻结契约 V1.0——防循环不 import，
-// 结构逐字段对齐，Group 2 结构化消费）
+// Types de retour du port d'intégration exec-hub (le miroir structurel du contract.ts de plugin-workforce
+// EmployeeClaimResult / EmployeeLeaseResult, contrat gelé V1.0 — pas d'import pour éviter la boucle,
+// structures alignées champ à champ, consommation structurée du groupe 2)
 // ---------------------------------------------------------------------------
 
-/** 统一拒绝码（exec-hub 工作面口径；与 platform-core WorkDenyCode 同名子集）。 */
+/** Codes de refus unifiés (référentiel du plan de travail exec-hub ; sous-ensemble homonyme du WorkDenyCode de platform-core). */
 export type ExecHubWorkDenyCode =
   | 'ISSUE_NOT_FOUND' | 'ISSUE_CLOSED' | 'LEASE_HELD_BY_OTHER'
   | 'ADMISSION_DENIED' | 'BUDGET_EXCEEDED' | 'APPROVAL_REQUIRED'
   | 'RUN_NOT_OWNED' | 'LEASE_STALE' | 'EXEC_HUB_UNAVAILABLE' | 'POLICY_INTERNAL_ERROR'
 
-/** 员工认领结果（镜像 contract.EmployeeClaimResult）。 */
+/** Résultat de réclamation d'employé (miroir de contract.EmployeeClaimResult). */
 export type EmployeeClaimResult =
   | { ok: true; issueId: string; runId: string; lease: RunLeaseRecord; created: boolean }
   | { ok: false; code: ExecHubWorkDenyCode; message: string; holder?: string }
 
-/** 员工租约结果（镜像 contract.EmployeeLeaseResult）。 */
+/** Résultat de bail d'employé (miroir de contract.EmployeeLeaseResult). */
 export type EmployeeLeaseResult =
   | { ok: true; lease: RunLeaseRecord }
   | { ok: false; code: Extract<ExecHubWorkDenyCode, 'LEASE_STALE' | 'RUN_NOT_OWNED' | 'EXEC_HUB_UNAVAILABLE'>; message: string }
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 export class ExecutionHubService extends Service {
   static readonly provide = 'execHub'
 
   /**
-   * 执行租约权威存储（附录 A 决策 3：exec_run_leases 为唯一权威，issue 三字段为投影）。
-   * txnStore 由 platform-core 首位装配（exec-hub 之前），构造期即可迁移建表。
+   * Stockage d'autorité des baux d'exécution (décision 3 de l'annexe A : exec_run_leases est l'unique autorité, les trois champs d'issue sont une projection).
+   * txnStore est assemblé en premier par platform-core (avant exec-hub), la migration/création de table est possible dès la construction.
    */
   readonly leaseStore: LeaseStoreService
 
-  /** 纳管提报催办的日去重（进程内；重启重发一次可接受，告警不追求恰好一次）。 */
+  /** Déduplication quotidienne du rappel des rapports gérés (en processus ; un renvoi après redémarrage est acceptable, l'alerte ne vise pas exactement-une-fois). */
   private metricsReminderDayKeys = new Set<string>()
   private tickBusy = false
 
   constructor(ctx: Context) {
     super(ctx, 'execHub')
 
-    // 权威租约存储：建表幂等（exec_run_leases；索引 issueId+status、runId）
+    // Stockage de baux d'autorité : création de table idempotente (exec_run_leases ; index issueId+status, runId)
     this.leaseStore = new LeaseStoreService(ctx.txnStore, { ttlMs: DEFAULT_LEASE_TTL_MS })
     this.leaseStore.migrate()
 
-    // 审批通过（exec.issue.run）→ 重新入队被门禁挂起的唤醒
+    // Approbation accordée (exec.issue.run) → remise en file des réveils suspendus par la barrière
     ctx.platformBus.on(PlatformEvents.ApprovalDecided, (payload) => {
       try {
         const p = payload as { approvalId?: string }
@@ -260,19 +260,19 @@ export class ExecutionHubService extends Service {
           orgId: approval.orgId ?? '', issueId, trigger: 'api',
           triggerDetail: t('P0 审批通过放行'), idempotencyKey: wakeIdempotencyKey('p0-release', [issueId, approval.id]),
         })
-      } catch { /* 审批联动失败不阻塞事件链 */ }
+      } catch { /* échec du chaînage d'approbation ne bloque pas la chaîne d'événements */ }
     })
 
     if (process.env.EXEC_HUB_OFF === 'off') return
-    // 心跳循环（lint-timers：unref + effect 清理双保险）
+    // Boucle de battement (lint-timers : double assurance unref + nettoyage par effect)
     const tickTimer = setInterval(() => { void this.safeTick() }, TICK_MS)
     tickTimer.unref?.()
     const firstTick = setTimeout(() => { void this.safeTick() }, FIRST_TICK_MS)
     firstTick.unref?.()
-    // 纳管提报催办巡检：每小时一轮（R9：metrics-report 超 24h 自动催办）
+    // Inspection de rappel des rapports gérés : un tour par heure (R9 : rappel automatique si metrics-report > 24 h)
     const metricsTimer = setInterval(() => { void this.remindOverdueMetrics() }, 3_600_000)
     metricsTimer.unref?.()
-    // cordis ctx.effect(fn)：fn 在注册时立即执行，返回值才是清理函数——单层箭头会把定时器当场清掉（issue #10）
+    // cordis ctx.effect(fn) : fn s'exécute immédiatement à l'enregistrement, c'est la valeur de retour qui est la fonction de nettoyage — une flèche simple tuerait le minuteur sur place (issue #10)
     ctx.effect(() => () => {
       clearInterval(tickTimer)
       clearTimeout(firstTick)
@@ -292,7 +292,7 @@ export class ExecutionHubService extends Service {
     }
   }
 
-  // -- 集合 -----------------------------------------------------------------
+  // -- Collections -----------------------------------------------------------------
 
   goals(): Collection<GoalRecord> {
     return this.ctx.opsStorage.collection<GoalRecord>('exec:goals')
@@ -322,19 +322,19 @@ export class ExecutionHubService extends Service {
     return this.ctx.opsStorage.collection<HeartbeatRecord>('exec:heartbeats')
   }
 
-  // -- 组织血缘（#16，2026-10-29） ---------------------------------------------
+  // -- Lignée organisationnelle (#16, 2026-10-29) ---------------------------------------------
 
   /**
-   * 平台首个根组织（无父组织）；组织树未播种时为 undefined——缺省继承链的最后兜底与
-   * 存量空 orgId 迁移（migrateEmptyExecOrgId）都以它为归属依据。
+      * Première organisation racine de la plateforme (sans organisation parente) ; undefined si l'arbre d'organisations n'est pas ensemencé — dernier recours de la chaîne
+   * d'héritage par défaut et base de rattachement de la migration des orgId vides préexistants (migrateEmptyExecOrgId).
    */
   rootOrgId(): string | undefined {
     return this.ctx.iam.orgs().all().find((org) => !org.parentId)?.id
   }
 
   /**
-   * 显式 orgId 入参校验（#16）：空串/空白一律拒绝（防「空串落库 → 组织血缘断链」），
-   * 非空必须命中真实组织；undefined 表示未提供，交给继承链（principal → 血缘 → 根组织）。
+   * Validation du paramètre orgId explicite (#16) : chaîne vide/blancs toujours refusés (contre « chaîne vide en base → lignée organisationnelle rompue »),
+   * non vide doit atteindre une organisation réelle ; undefined signifie non fourni, laissé à la chaîne d'héritage (principal → lignée → organisation racine).
    */
   private assertOrgInput(orgId: string | undefined): void {
     if (orgId === undefined) return
@@ -342,9 +342,9 @@ export class ExecutionHubService extends Service {
     if (!this.ctx.iam.orgs().get(orgId)) throw new Error(t('组织不存在：{id}', { id: orgId }))
   }
 
-  // -- 目标（R8） -------------------------------------------------------------
+  // -- Objectifs (R8) -------------------------------------------------------------
 
-  /** 目标链（根→…→本目标）；无父即 [self]；成环/断链防御性截断。 */
+  /** Chaîne d'objectifs (racine→…→objectif courant) ; sans parent = [self] ; troncature défensive en cas de cycle/chaînon manquant. */
   goalChain(goalId?: string): string[] {
     if (!goalId) return []
     const chain: string[] = []
@@ -369,7 +369,7 @@ export class ExecutionHubService extends Service {
     }
     const record = this.goals().insert({
       id: newId('goal'),
-      // #16：显式 orgId 已过校验；缺省回落平台根组织（REST 层先按 principal/血缘解析）
+      // #16 : orgId explicite déjà validé ; par défaut repli sur l'organisation racine de la plateforme (la couche REST résout d'abord par principal/lignée)
       orgId: input.orgId ?? this.rootOrgId() ?? '',
       title: input.title.trim(),
       ...(input.description ? { description: input.description } : {}),
@@ -414,7 +414,7 @@ export class ExecutionHubService extends Service {
     return { deleted: true }
   }
 
-  // -- 项目（E4） ---------------------------------------------------------------
+  // -- Projets (E4) ---------------------------------------------------------------
 
   createProject(input: Omit<ProjectRecord, 'id' | 'createdAt' | 'updatedAt' | 'status' | 'repos'> & { repos?: string[]; status?: ProjectStatus }): ProjectRecord {
     if (!input.name?.trim()) throw new Error(t('项目名称必填'))
@@ -422,7 +422,7 @@ export class ExecutionHubService extends Service {
     if (input.goalId && !this.goals().get(input.goalId)) throw new Error(t('关联目标不存在：{id}', { id: input.goalId }))
     const record = this.projects().insert({
       id: newId('proj'),
-      // #16：缺省沿目标血缘继承，再回落平台根组织
+      // #16 : par défaut, hérite le long de la lignée d'objectifs, puis repli sur l'organisation racine de la plateforme
       orgId: input.orgId ?? this.goals().get(input.goalId ?? '')?.orgId ?? this.rootOrgId() ?? '',
       ...(input.goalId ? { goalId: input.goalId } : {}),
       name: input.name.trim(),
@@ -440,7 +440,7 @@ export class ExecutionHubService extends Service {
     if (!project) throw new Error(t('项目不存在：{id}', { id }))
     if (patch.goalId && !this.goals().get(patch.goalId)) throw new Error(t('关联目标不存在：{id}', { id: patch.goalId }))
     const updated = this.projects().update(id, patch)
-    // 项目改挂目标 → 重物化其下任务血缘
+    // Projet re-rattaché à un autre objectif → re-matérialisation de la lignée des tâches en dessous
     if (patch.goalId !== undefined) {
       for (const issue of this.issues().all().filter((item) => item.projectId === id)) {
         this.rematerialize(issue.id)
@@ -459,9 +459,9 @@ export class ExecutionHubService extends Service {
     return { deleted: true }
   }
 
-  // -- 任务（E2/E4） -------------------------------------------------------------
+  // -- Tâches (E2/E4) -------------------------------------------------------------
 
-  /** 血缘重物化：goalAncestry = goalChain(project.goalId) + [projectId]。 */
+  /** Re-matérialisation de lignée : goalAncestry = goalChain(project.goalId) + [projectId]. */
   private rematerialize(issueId: string): void {
     const issue = this.issues().get(issueId)
     if (!issue) return
@@ -487,7 +487,7 @@ export class ExecutionHubService extends Service {
     }
     if (input.assigneeAgentId && !this.agentOf(input.assigneeAgentId)) throw new Error(t('负责人 Agent 不存在：{id}', { id: input.assigneeAgentId }))
     const project = input.projectId ? this.projects().get(input.projectId) : undefined
-    // #16：继承链 principal（REST 层已解析进 input.orgId）→ 项目 → Agent → 平台根组织
+    // #16 : chaîne d'héritage principal (la couche REST a déjà résolu dans input.orgId) → projet → Agent → organisation racine de la plateforme
     const orgId = input.orgId ?? project?.orgId ?? this.agentOf(input.assigneeAgentId ?? '')?.orgId ?? this.rootOrgId() ?? ''
     const record = this.issues().insert({
       id: newId('iss'),
@@ -506,7 +506,7 @@ export class ExecutionHubService extends Service {
       createdBy: input.createdBy,
     })
     this.ctx.platformBus.emit(PlatformEvents.ExecIssueChanged, { issueId: record.id, action: 'created', status: record.status })
-    // 派发触发器：assigneeAgentId 由空变为非空（E7 触发源接线表）
+    // Déclencheur de dispatch : assigneeAgentId passe de vide à non vide (table de câblage des sources de déclenchement E7)
     if (record.assigneeAgentId) {
       this.enqueueWake({
         orgId, issueId: record.id, agentId: record.assigneeAgentId, trigger: 'assign',
@@ -527,7 +527,7 @@ export class ExecutionHubService extends Service {
     }
     const updated = this.issues().update(id, { ...patch })
     this.rematerialize(id)
-    // 换 Agent / 新挂 Agent → 派发唤醒（幂等键带时间桶，重复 PATCH 不重复唤醒）
+    // Changement d'Agent / nouvel Agent rattaché → dispatch d'un réveil (clé idempotente avec seau temporel, un PATCH répété ne réveille pas deux fois)
     const newAssignee = updated.assigneeAgentId
     if (newAssignee && newAssignee !== issue.assigneeAgentId) {
       this.enqueueWake({
@@ -547,7 +547,7 @@ export class ExecutionHubService extends Service {
       throw new Error(t('任务状态 {from} 不允许流转到 {to}', { from: issue.status, to }))
     }
     if (to === 'done' && issue.executionRunId) {
-      // 收尾语义：终态前先收 run（释放锁 + run 完结），不留悬挂锁
+      // Sémantique de clôture : avant l'état terminal, on clôt d'abord le run (libération du verrou + run terminé), pas de verrou suspendu
       this.completeRun(issue.executionRunId, { status: 'completed', summary: t('任务完成收尾（{actor}）', { actor }) })
     }
     if (to === 'cancelled' && issue.executionRunId) {
@@ -555,12 +555,12 @@ export class ExecutionHubService extends Service {
     }
     const updated = this.issues().update(id, { status: to })
     this.ctx.platformBus.emit(PlatformEvents.ExecIssueChanged, { issueId: id, action: 'transition', status: to })
-    // 依赖解除触发器：blocker 终态后，下游全解除者入队 dependency 唤醒（E7 触发源接线表）
+    // Déclencheur de levée de dépendance : blocker en état terminal, les tâches aval entièrement libérées entrent en file de réveil dependency (table de câblage E7)
     if (to === 'done' || to === 'cancelled') this.wakeUnblockedDependents(id)
     return updated
   }
 
-  /** 扫描以 issueId 为前置的任务：其 blockers 全部终态 → 入队 dependency 唤醒。 */
+  /** Scanne les tâches ayant issueId comme prérequis : tous leurs blockers en état terminal → mise en file d'un réveil dependency. */
   private wakeUnblockedDependents(issueId: string): void {
     for (const dependent of this.issues().all().filter((item) => item.blockerIds.includes(issueId))) {
       const statuses = dependent.blockerIds.map((bid) => this.issues().get(bid)?.status ?? 'todo')
@@ -584,13 +584,13 @@ export class ExecutionHubService extends Service {
     return { deleted: true }
   }
 
-  // -- 执行锁（E2：CAS 语义，检查-置位在同一同步段＝Node 原子） -------------------
+  // -- Verrou d'exécution (E2 : sémantique CAS, vérifier-positionner dans le même segment synchrone = atomique en Node) -------------------
 
   /**
-   * 投影取锁（issue 三字段 CAS）。附录 A 决策 3 后本方法只维护投影，持有裁决以
-   * exec_run_leases 为权威；两处护栏语义（D05/D06 幂等认领）：
-   *   - 同 runId 重复获取＝ok（刷新 agentKey/心跳时间戳，不报冲突）；
-   *   - 投影指向已终态/已消失的 run（租约权威口径下无人持有）→ 视为可夺回，直接覆盖。
+   * Prise de verrou par projection (CAS sur les trois champs d'issue). Depuis la décision 3 de l'annexe A, cette méthode ne maintient que la projection, l'arbitrage de détention fait
+   * autorité sur exec_run_leases ; sémantique des deux gardes (D05/D06 réclamation idempotente) :
+   *   - reprise répétée du même runId = ok (rafraîchit agentKey/horodatage de battement, pas de conflit signalé) ;
+   *   - projection pointant un run terminal/disparu (au référentiel du bail d'autorité, personne ne détient) → considéré reprenable, écrasement direct.
    */
   acquireLock(issueId: string, runId: string, agentKey: string): { ok: true } | { ok: false; reason: 'no_issue' | 'locked_by_other'; holder?: string } {
     const issue = this.issues().get(issueId)
@@ -611,7 +611,7 @@ export class ExecutionHubService extends Service {
     return { ok: true }
   }
 
-  /** run 级批量释放（Paperclip 语义：按 executionRunId 释放全部持有 issue，防部分释放泄漏）。 */
+  /** Libération par lots au niveau run (sémantique Paperclip : libère toutes les issues tenues selon executionRunId, contre les fuites par libération partielle). */
   releaseLocks(runId: string): number {
     let released = 0
     for (const issue of this.issues().all().filter((item) => item.executionRunId === runId)) {
@@ -623,8 +623,8 @@ export class ExecutionHubService extends Service {
   }
 
   /**
-   * 僵尸锁回收（Paperclip active-run-watchdog 思路）：锁龄超阈值时按
-   * decideReleaseRecovery 裁决——run 消失/终态直接强释，run 仍 running 记 timeout 再强释。
+   * Récupération des verrous zombies (approche active-run-watchdog de Paperclip) : quand l'âge du verrou dépasse le seuil, arbitrage par
+   * decideReleaseRecovery — run disparu/terminal = libération forte directe ; run toujours running = d'abord noter timeout puis libération forte.
    */
   reclaimZombieLocks(nowMs = Date.now()): number {
     let reclaimed = 0
@@ -643,7 +643,7 @@ export class ExecutionHubService extends Service {
       }
       const holderRun = issue.executionRunId!
       this.issues().update(issue.id, { executionRunId: undefined, executionAgentKey: undefined, executionLockedAt: undefined })
-      // 租约与投影同步收口：僵尸投影对应的权威租约一并释放（防 TTL 内幽灵持有）
+      // Clôture synchronisée bail et projection : le bail d'autorité correspondant à la projection zombie est aussi libéré (contre la détention fantôme dans le TTL)
       this.releaseLeasesSafe(holderRun, `zombie-reclaim:${decision.kind}`)
       reclaimed += 1
       this.auditSafe({
@@ -672,12 +672,12 @@ export class ExecutionHubService extends Service {
   }
 
   /**
-   * run 收尾：终态 + run 级释放锁与租约 + in_progress 任务交回审阅（review）。
+   * Clôture du run : état terminal + libération verrous et baux au niveau run + les tâches in_progress retournées en revue (review).
    *
-   * 兼容说明：任务去向现状为 review（「交付已提交、真人验收」，§6.5），既有调用方
-   * （transitionIssue 收尾等）行为不变；仅 exec_complete 显式传
-   * failedIssueDisposition='todo' 时，失败 run 的进行中任务转回待办（todo）等待重派
-   * （直接更新，与 review 同款处理——todo 供调度重新唤醒，不占 review 验收队列）。
+   * Note de compatibilité : à ce jour, la destination des tâches est review (« livrable soumis, acceptation par une personne », §6.5) ; les appelants existants
+   * (clôture de transitionIssue, etc.) gardent leur comportement ; seul exec_complete passant explicitement
+   * failedIssueDisposition='todo' fait passer les tâches en cours du run échoué en retour à faire (todo) en attente de réaffectation
+   * (mise à jour directe, même traitement que review — todo permet au planificateur de réveiller, sans occuper la file d'acceptation review).
    */
   completeRun(runId: string, options: { status?: RunStatus; summary?: string; failedIssueDisposition?: 'review' | 'todo' } = {}): RunRecord {
     const run = this.runs().get(runId)
@@ -689,7 +689,7 @@ export class ExecutionHubService extends Service {
       ...(options.summary ? { summary: options.summary } : {}),
     })
     this.releaseLocks(runId)
-    // 租约随 run 终态释放（权威存储收口；投影已由 releaseLocks 清理）
+    // Le bail est libéré à l'état terminal du run (clôture du stockage d'autorité ; la projection a déjà été nettoyée par releaseLocks)
     this.releaseLeasesSafe(runId, `run-${updated.status}`)
     const failedToTodo = updated.status !== 'completed' && options.failedIssueDisposition === 'todo'
     for (const issueId of run.issueIds) {
@@ -708,14 +708,14 @@ export class ExecutionHubService extends Service {
     return updated
   }
 
-  // -- 员工工作集成端口（ExecHubWorkIntegration，附录 A 决策 3/§6.2） ----------------
+  // -- Port d'intégration du travail des employés (ExecHubWorkIntegration, décision 3 de l'annexe A/§6.2) ----------------
   //
-  // plugin-workforce 结构化消费（组2）：认领＝「幂等确认已分配租约」——
-  // 统一准入（冻结/预算/权限/P0，与 processWake 同源函数不绕行）→ get-or-create run
-  // （V05：调度预取锁的 run 直接被认领采用，不另造）→ exec_run_leases 原子取租约
-  // （权威）→ issue 投影写齐（现状兼容）。本插件不 import plugin-workforce（§10.2）。
+  // Consommation structurée par plugin-workforce (groupe 2) : réclamer = « confirmation idempotente d'un bail déjà attribué » —
+  // admission unifiée (gel/budget/permissions/P0, mêmes fonctions sources que processWake, pas de contournement) → get-or-create run
+  // (V05 : le run au verrou préempté par l'ordonnanceur est directement adopté à la réclamation, pas de création superflue) → prise atomique du bail dans exec_run_leases
+  // (autorité) → projection issue écrite intégralement (compatibilité du statu quo). Cette extension n'importe pas plugin-workforce (§10.2).
 
-  /** 员工幂等认领：同员工+同任务重复认领返回既有 run/租约（created=false）。 */
+  /** Réclamation idempotente d'employé : réclamer deux fois le même employé+même tâche renvoie le run/bail existant (created=false). */
   async claimForEmployee(input: { issueId: string; employeeId: string; agentKey: string; principalId: string; ttlMs?: number }): Promise<EmployeeClaimResult> {
     try {
       if (!input.issueId) return { ok: false, code: 'ISSUE_NOT_FOUND', message: t('任务 ID 必填') }
@@ -727,13 +727,13 @@ export class ExecutionHubService extends Service {
       if (issue.status === 'done' || issue.status === 'cancelled') {
         return { ok: false, code: 'ISSUE_CLOSED', message: t('任务已{state}关闭，不可认领', { state: issue.status === 'done' ? t('完成') : t('取消') }) }
       }
-      // agentKey 归一：优先入参，否则 employee:<id>
+      // Normalisation de l'agentKey : paramètre d'entrée en priorité, sinon employee:<id>
       const agentKey = input.agentKey?.trim() ? normalizeAgentKey(input.agentKey) : `employee:${input.employeeId}`
-      // 统一准入照跑（冻结/预算/权限/P0——复用 processWake 同源函数，D06 不绕行）
+      // L'admission unifiée s'exécute (gel/budget/permissions/P0 — réutilise les mêmes fonctions sources que processWake, D06 sans contournement)
       const admission = this.admitAgentForClaim(issue, agentKey)
       if (!admission.ok) return { ok: false, code: admission.code, message: admission.message }
       const ttlMs = input.ttlMs && input.ttlMs > 0 ? input.ttlMs : DEFAULT_LEASE_TTL_MS
-      // 幂等裁决（domain 纯函数）先行：同持有者已有有效租约 → 续期并复用既有 run，不另造
+      // Arbitrage d'idempotence (fonctions pures de domain) d'abord : même détenteur avec bail valide → renouvellement et réutilisation du run existant, pas de création
       const existing = this.leaseStore.activeForIssue(issue.id)
       if (existing) {
         const decision = decideLeaseClaim({
@@ -755,7 +755,7 @@ export class ExecutionHubService extends Service {
           return { ok: false, code: 'LEASE_HELD_BY_OTHER', message: t('任务执行租约由 {holder} 持有，不可重复认领', { holder: decision.holder }), holder: decision.holder }
         }
       }
-      // get-or-create run（V05/D05：唤醒预持锁的运行中 run 直接采用；脏投影才新建）
+      // get-or-create run (V05/D05 : un run en cours au verrou préempté par le réveil est directement adopté ; seule une projection sale fait créer)
       const agentId = this.resolveAgentIdForIssue(issue, agentKey)
       const projectedRun = issue.executionRunId ? this.runs().get(issue.executionRunId) : undefined
       const adoption = decideRunAdoption({
@@ -775,15 +775,15 @@ export class ExecutionHubService extends Service {
           contextPack: this.buildIssueContext(issue, agent ?? {}),
         }).id
       }
-      // 原子取租约（权威 CAS；竞争失败映射为他人持有）
+      // Prise atomique du bail (CAS d'autorité ; échec de concurrence mappé en détenu par autrui)
       const acquired = this.leaseStore.acquire({ issueId: issue.id, runId, employeeId: input.employeeId, agentKey, principalId: input.principalId, ttlMs })
       if (!acquired.ok) {
         return { ok: false, code: 'LEASE_HELD_BY_OTHER', message: t('任务执行租约由 {holder} 持有，不可重复认领', { holder: acquired.holder }), holder: acquired.holder }
       }
-      // 投影写齐（附录 A 决策 3：权威在 exec_run_leases，投影保持现状兼容）
+      // Projection écrite intégralement (décision 3 de l'annexe A : l'autorité est dans exec_run_leases, la projection maintient la compatibilité du statu quo)
       const cas = this.acquireLock(issue.id, runId, agentKey)
       if (!cas.ok && cas.reason === 'locked_by_other') {
-        // 投影残留他人运行中 run（迁移期脏投影）：以租约权威为准覆盖投影
+        // Projection résiduelle pointant le run en cours d'un autre (projection sale de période de migration) : le bail d'autorité fait foi et écrase la projection
         this.writeExecutionProjection(issue.id, runId, agentKey)
       }
       this.ensureIssueInProgress(issue)
@@ -800,7 +800,7 @@ export class ExecutionHubService extends Service {
     }
   }
 
-  /** 续租/进度心跳：同主体、active、未过期才能续（否则 LEASE_STALE）。 */
+  /** Renouvellement/battement de progression : même principal, actif, non expiré pour renouveler (sinon LEASE_STALE). */
   async renewLease(input: { runId: string; principalId: string; ttlMs?: number }): Promise<EmployeeLeaseResult> {
     try {
       if (!input.runId || !input.principalId) {
@@ -815,7 +815,7 @@ export class ExecutionHubService extends Service {
     }
   }
 
-  /** exec_complete 的主体/run 所有权校验（D07）：跨员工/旧租约拒绝（端口口径从严：无租约记录亦拒绝）。 */
+  /** Validation de propriété principal/run pour exec_complete (D07) : refus entre employés ou bail périmé (référentiel port resserré : sans enregistrement de bail, refus aussi). */
   async assertRunOwnership(input: { runId: string; principalId: string }): Promise<{ ok: true; lease: RunLeaseRecord } | { ok: false; code: ExecHubWorkDenyCode; message: string }> {
     try {
       if (!input.runId || !input.principalId) {
@@ -838,7 +838,7 @@ export class ExecutionHubService extends Service {
     }
   }
 
-  /** 停职/撤销联动：按 run 释放权威租约并清理 issue 投影（不改变 run 业务状态）。 */
+  /** Couplage suspension/retrait : libère les baux d'autorité par run et nettoie la projection issue (sans changer l'état métier du run). */
   releaseForRun(runId: string, reason: string): void {
     if (!runId) return
     const released = this.leaseStore.release(runId, reason || 'released')
@@ -852,7 +852,7 @@ export class ExecutionHubService extends Service {
     }
   }
 
-  /** 统一准入（D06）：冻结/预算/权限（Agent 可解析时）+ P0 审批门禁（任务级恒查）。复用 processWake 同源函数。 */
+  /** Admission unifiée (D06) : gel/budget/permissions (quand l'Agent est résoluble) + barrière d'approbation P0 (toujours vérifiée au niveau tâche). Réutilise les mêmes fonctions sources que processWake. */
   private admitAgentForClaim(issue: IssueRecord, agentKey: string): { ok: true } | { ok: false; code: 'ADMISSION_DENIED' | 'BUDGET_EXCEEDED' | 'APPROVAL_REQUIRED'; message: string } {
     const agentId = this.resolveAgentIdForIssue(issue, agentKey)
     const agent = agentId ? this.agentOf(agentId) : undefined
@@ -873,7 +873,7 @@ export class ExecutionHubService extends Service {
     return { ok: true }
   }
 
-  /** 冻结检查（复用点：processWake 与员工认领准入同源）。 */
+  /** Contrôle de gel (point de réutilisation : même source que l'admission de processWake et de la réclamation d'employé). */
   private isAgentFrozen(agentId: string): boolean {
     try {
       return Boolean(this.ctx.agentRegistry && typeof this.ctx.agentRegistry.isFrozen === 'function' && this.ctx.agentRegistry.isFrozen(agentId))
@@ -882,7 +882,7 @@ export class ExecutionHubService extends Service {
     }
   }
 
-  /** 认领准入的 Agent 解析：优先任务负责人，其次按 agentKey 匹配（id 直等 / 归一化名称）。 */
+  /** Résolution d'Agent pour l'admission à la réclamation : d'abord le responsable de la tâche, sinon correspondance par agentKey (égalité d'id / nom normalisé). */
   private resolveAgentIdForIssue(issue: IssueRecord, agentKey: string): string | undefined {
     if (issue.assigneeAgentId && this.agentOf(issue.assigneeAgentId)) return issue.assigneeAgentId
     const normalized = normalizeAgentKey(agentKey)
@@ -895,7 +895,7 @@ export class ExecutionHubService extends Service {
     return issue.assigneeAgentId || undefined
   }
 
-  /** 投影写齐（附录 A 决策 3：权威在 exec_run_leases，三字段降级为投影）。 */
+  /** Écriture intégrale de la projection (décision 3 de l'annexe A : l'autorité est dans exec_run_leases, les trois champs rétrogradés en projection). */
   private writeExecutionProjection(issueId: string, runId: string, agentKey: string): void {
     this.issues().update(issueId, {
       executionRunId: runId,
@@ -904,17 +904,17 @@ export class ExecutionHubService extends Service {
     })
   }
 
-  /** 工具侧投影写入口（exec_claim 幂等分支复用；公开薄包装）。 */
+  /** Entrée d'écriture de projection côté outils (réutilisée par la branche idempotente d'exec_claim ; fine enveloppe publique). */
   writeClaimProjectionForTool(issueId: string, runId: string, agentKey: string): void {
     this.writeExecutionProjection(issueId, runId, agentKey)
   }
 
-  /** 任务进行中推进（认领/唤醒共用：todo → in_progress）。 */
+  /** Progression de tâche en cours (partagé réclamation/réveil : todo → in_progress). */
   private ensureIssueInProgress(issue: IssueRecord): void {
     if (issue.status === 'todo') this.issues().update(issue.id, { status: 'in_progress' })
   }
 
-  /** 租约释放的安全包装（租约面异常不阻断 run 收尾主链路）。 */
+  /** Enveloppe de sécurité pour la libération de bail (une exception côté bail ne bloque pas la chaîne principale de clôture du run). */
   private releaseLeasesSafe(runId: string, reason: string): void {
     try {
       this.leaseStore.release(runId, reason)
@@ -923,13 +923,13 @@ export class ExecutionHubService extends Service {
     }
   }
 
-  // -- 唤醒队列（E3） -------------------------------------------------------------
+  // -- File de réveils (E3) -------------------------------------------------------------
 
   enqueueWake(input: {
     orgId: string; issueId?: string; agentId?: string; trigger: WakeTrigger
     triggerDetail?: string; payload?: Record<string, unknown>; idempotencyKey?: string
   }): WakeRecord {
-    // 幂等键去重：pending / deferred_issue_execution 期间的重复投递直接返回既有单
+    // Déduplication par clé idempotente : une livraison répétée pendant pending / deferred_issue_execution renvoie directement la fiche existante
     if (input.idempotencyKey) {
       const existing = this.wakes().findOne((item) =>
         item.idempotencyKey === input.idempotencyKey
@@ -956,17 +956,17 @@ export class ExecutionHubService extends Service {
     return record
   }
 
-  // -- 心跳循环（E3/R9） ----------------------------------------------------------
+  // -- Boucle de battement (E3/R9) ----------------------------------------------------------
 
   async tick(): Promise<TickResult> {
     const result: TickResult = { processed: 0, woken: 0, deferred: 0, skipped: 0, failed: 0, reclaimed: 0, routineFired: 0, heartbeatDue: 0 }
-    // 1. 僵尸锁回收
+    // 1. Récupération des verrous zombies
     result.reclaimed = this.reclaimZombieLocks()
-    // 2. 例行规则到期 → 入队 routine 唤醒
+    // 2. Règles de routine échues → mise en file de réveils routine
     result.routineFired = this.fireDueRoutines()
-    // 3. 心跳到期（配置了 heartbeatIntervalMinutes 的运行态 Agent）→ 入队 routine 唤醒
+    // 3. Battements échus (Agents en marche ayant configuré heartbeatIntervalMinutes) → mise en file de réveils routine
     result.heartbeatDue = this.enqueueDueHeartbeats()
-    // 4. 处理 pending + deferred 唤醒（先进先出，批量上限）
+    // 4. Traitement des réveils pending + deferred (FIFO, plafond par lot)
     const batch = this.wakes().all()
       .filter((item) => item.status === 'pending' || item.status === 'deferred_issue_execution')
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
@@ -979,13 +979,13 @@ export class ExecutionHubService extends Service {
       else if (outcome === 'failed') result.failed += 1
       else result.skipped += 1
     }
-    // 5. 心跳留痕滚动保留 7 天
+    // 5. Conservation glissante de 7 jours de la traçabilité des battements
     const cutoff = new Date(Date.now() - HEARTBEAT_RETENTION_MS).toISOString()
     for (const stale of this.heartbeats().all().filter((item) => item.at < cutoff)) this.heartbeats().remove(stale.id)
     return result
   }
 
-  /** 例行规则到期判定（interval 到点 / cron 分钟命中且距上次 ≥60s / webhook 由端点即时入队）。 */
+  /** Jugement d'échéance des règles de routine (intervalle atteint / minute cron correspondante et ≥60 s depuis la dernière / webhook mis en file à la volée par l'endpoint). */
   private fireDueRoutines(nowMs = Date.now()): number {
     let fired = 0
     const now = new Date()
@@ -1012,7 +1012,7 @@ export class ExecutionHubService extends Service {
     return fired
   }
 
-  /** 心跳到期（R9）：运行态 + 配置间隔 + 距上次唤醒 ≥ 间隔 → 入队心跳唤醒。 */
+  /** Battement échu (R9) : en marche + intervalle configuré + ≥ intervalle depuis le dernier réveil → mise en file d'un réveil de battement. */
   private enqueueDueHeartbeats(nowMs = Date.now()): number {
     let due = 0
     for (const agent of this.listRunnableAgents()) {
@@ -1042,8 +1042,8 @@ export class ExecutionHubService extends Service {
   }
 
   /**
-   * 单条唤醒处理（治理五联动顺序：预算前置 → 冻结检查 → 权限校验 → 审批门禁 → 取锁/合并/延迟）。
-   * 返回处理结果分类（供 tick 计数）；全程同步段内完成 CAS，无 await 穿插。
+   * Traitement d'un réveil isolé (ordre des cinq couplages de gouvernance : budget d'abord → contrôle de gel → vérification de permissions → barrière d'approbation → prise de verrou/fusion/différé).
+   * Renvoie la classification du résultat (pour les compteurs du tick) ; le CAS est bouclé dans un segment synchrone complet, sans await intercalé.
    */
   private processWake(wakeId: string): 'woken' | 'deferred' | 'failed' | 'skipped' {
     const wake = this.wakes().get(wakeId)
@@ -1069,7 +1069,7 @@ export class ExecutionHubService extends Service {
       return 'failed'
     }
 
-    // 联动①：冻结检查（R10：预算超限冻结后不再唤醒，直至解冻审批执行；与员工认领准入同源 isAgentFrozen）
+    // Couplage ① : contrôle de gel (R10 : après gel pour dépassement de budget, plus de réveil jusqu'à exécution de l'approbation de dégel ; même source que l'admission de réclamation d'employé isAgentFrozen)
     if (this.isAgentFrozen(agentId)) {
       this.recordHeartbeat(agent, 'skipped_frozen', wake.trigger)
       this.wakes().update(wakeId, { status: 'failed', lastError: t('Agent 已冻结（预算超限联动），待解冻审批') })
@@ -1081,7 +1081,7 @@ export class ExecutionHubService extends Service {
       return 'failed'
     }
 
-    // 联动②：预算前置（E6——平台独有增值：超限直接不唤醒，而非事后记账报警）
+    // Couplage ② : budget d'abord (E6 — valeur ajoutée propre à la plateforme : au-delà de la limite, pas de réveil du tout, plutôt qu'une comptabilisation et une alerte a posteriori)
     const budgetGate = this.checkAgentBudget(agentId, agent.orgId)
     if (budgetGate.blocked) {
       this.wakes().update(wakeId, { status: 'failed', budgetCheckPassed: false, lastError: t('预算熔断：{reason}', { reason: budgetGate.reason ?? '' }) })
@@ -1091,7 +1091,7 @@ export class ExecutionHubService extends Service {
         action: 'exec.wakeup.budget_denied', resourceType: 'agent', resourceId: agentId,
         resourceName: agent.name, result: 'denied', detail: `wake=${wakeId} ${budgetGate.reason}`,
       })
-      // 超额联动冻结（R10）：预算标记 freezeAgent 时冻结 Agent 并生成 L4 解冻审批（复用审批基建，天然带二次确认）
+      // Gel couplé au dépassement (R10) : quand le budget marque freezeAgent, gèle l'Agent et génère une approbation L4 de dégel (réutilise l'infrastructure d'approbation, double confirmation native)
       if (budgetGate.freezeAgent && this.ctx.agentRegistry && typeof this.ctx.agentRegistry.freezeAgent === 'function' && !this.ctx.agentRegistry.isFrozen(agentId)) {
         try {
           this.ctx.agentRegistry.freezeAgent(agentId, t('执行中枢预算前置熔断：{reason}', { reason: budgetGate.reason ?? '' }), 'exec-hub')
@@ -1103,8 +1103,8 @@ export class ExecutionHubService extends Service {
     }
     this.wakes().update(wakeId, { budgetCheckPassed: true })
 
-    // 联动③：权限校验（#7 解耦：存活心跳只要求 exec.read——评价官/验收官等只读角色也参与心跳调度；
-    // exec.write 在真正写路径（创建 run / 派发执行）上单独校验，见下方联动③b）
+    // Couplage ③ : vérification de permissions (découplage #7 : le battement de survie n'exige que exec.read — les rôles en lecture seule comme évaluateur/acceptant participent aussi au battement ;
+    // exec.write est vérifié séparément sur le vrai chemin d'écriture (création de run / dispatch d'exécution), voir couplage ③b ci-dessous)
     const scopes = this.agentScopes(agentId)
     if (scopes === null || !(scopes.includes('exec.read') || scopes.includes('*'))) {
       this.wakes().update(wakeId, { status: 'failed', lastError: t('Agent 机器主体无 exec.read 权限（身份未纳管或权限收敛），存活监测无法成立') })
@@ -1121,7 +1121,7 @@ export class ExecutionHubService extends Service {
       return 'failed'
     }
 
-    // Agent 级心跳唤醒（无 issue）：拉取待办 → 有则派发（上下文=待办清单），无则跳过
+    // Réveil de battement au niveau Agent (sans issue) : tirage des tâches à faire → s'il y en a, dispatch (contexte = liste des tâches), sinon saut
     if (!issue) {
       const todos = this.collectTodos(agent)
       if (todos.total === 0) {
@@ -1129,7 +1129,7 @@ export class ExecutionHubService extends Service {
         this.wakes().update(wakeId, { status: 'done' })
         return 'skipped'
       }
-      // 只读角色有待办：心跳成立（存活），但不派发——非错误收尾，不记 status=failed（#7）
+      // Rôle en lecture seule avec tâches à faire : le battement est établi (survie), mais pas de dispatch — clôture non-erreur, sans noter status=failed (#7)
       if (!(scopes.includes('exec.write') || scopes.includes('*'))) {
         this.recordHeartbeat(agent, 'skipped_permission', t('{n} 项待办未派发（只读主体，缺 exec.write）', { n: todos.total }))
         this.wakes().update(wakeId, { status: 'done' })
@@ -1147,7 +1147,7 @@ export class ExecutionHubService extends Service {
       return 'woken'
     }
 
-    // 联动③b：任务执行路径须 exec.write（#7：写权限与存活心跳解耦后，在真正写路径收口）
+    // Couplage ③b : le chemin d'exécution de tâche exige exec.write (#7 : après découplage permission d'écriture et battement de survie, resserrage sur le vrai chemin d'écriture)
     if (!(scopes.includes('exec.write') || scopes.includes('*'))) {
       this.wakes().update(wakeId, { status: 'failed', lastError: t('Agent 机器主体无 exec.write 权限（身份未纳管或权限收敛）') })
       this.recordHeartbeat(agent, 'skipped_permission', 'exec.write 缺失')
@@ -1163,14 +1163,14 @@ export class ExecutionHubService extends Service {
       return 'failed'
     }
 
-    // 联动④：审批门禁（P0=高危任务：执行前须 exec.issue.run 审批 executed）
+    // Couplage ④ : barrière d'approbation (P0 = tâche haut risque : approbation exec.issue.run à l'état executed requise avant exécution)
     if (issue.priority === 'P0' && !this.p0ApprovalPassed(issue.id)) {
       const deferred = this.wakes().update(wakeId, { status: 'deferred_issue_execution', lastError: t('P0 任务待审批放行') })
       this.recordHeartbeat(agent, 'deferred', `P0 审批 ${issue.id}`)
       return deferred ? 'deferred' : 'failed'
     }
 
-    // 三态裁决（决策=domain 纯函数；CAS=下方护栏）
+    // Arbitrage trois états (décision = fonction pure de domain ; CAS = garde ci-dessous)
     const decision = decideWakeAdmission({
       isSameExecutionAgent: issue.executionAgentKey === normalizeAgentKey(agent.name),
       shouldDeferFollowupWake: false,
@@ -1192,7 +1192,7 @@ export class ExecutionHubService extends Service {
       })
       runId = run.id
     }
-    // CAS 护栏：并发下仅一方成功（决策层不依赖它，它只防重复取锁）
+    // Garde CAS : sous concurrence, un seul gagne (la couche de décision n'en dépend pas, elle ne fait que prévenir la double prise de verrou)
     const acquired = this.acquireLock(issue.id, runId, agentKey)
     if (!acquired.ok) {
       this.wakes().update(wakeId, { status: 'deferred_issue_execution', lastError: t('取锁竞争失败（{holder} 持有）', { holder: acquired.holder ?? '' }) })
@@ -1214,7 +1214,7 @@ export class ExecutionHubService extends Service {
     return 'woken'
   }
 
-  /** Agent 机器主体有效 scopes（principal 缺席/禁用 = null，fail-closed）。 */
+  /** Scopes effectifs du principal machine de l'Agent (principal absent/désactivé = null, fail-closed). */
   private agentScopes(agentId: string): string[] | null {
     try {
       const principal = this.ctx.authn.principals().findOne((item) =>
@@ -1227,9 +1227,9 @@ export class ExecutionHubService extends Service {
   }
 
   /**
-   * 预算前置检查（E6 联动②）：读 modelgw Agent 主体预算（B 组契约方法
-   * budgetStatusForSubject）。方法缺席（旧版 modelgw）放行——invoke 时点的
-   * enforceBudget 仍是硬闸；方法存在但抛错则 fail-closed 拒绝派发。
+   * Contrôle préalable de budget (couplage ② de E6) : lit le budget du sujet Agent côté modelgw (méthode de contrat du groupe B
+   * budgetStatusForSubject). Méthode absente (ancien modelgw) = passage — l'enforceBudget à l'instant de l'invoke
+   * reste une barrière dure ; méthode présente mais jetant une erreur = fail-closed, refus du dispatch.
    */
   private checkAgentBudget(agentId: string, orgId?: string): { blocked: boolean; reason?: string; freezeAgent?: boolean } {
     const modelGateway = this.ctx.modelGateway as unknown as {
@@ -1258,7 +1258,7 @@ export class ExecutionHubService extends Service {
     return { blocked: false }
   }
 
-  /** P0 审批门禁：无 executed 的 exec.issue.run 审批单时自动挂单（幂等：已有 pending/executed 即不再开）。 */
+  /** Barrière d'approbation P0 : sans approbation exec.issue.run à l'état executed, ouverture automatique d'une fiche (idempotent : pending/executed existant = pas de nouvelle fiche). */
   private p0ApprovalPassed(issueId: string): boolean {
     const approvals = this.ctx.opsStorage.collection<{ kind?: string; status?: string; payload?: Record<string, unknown>; orgId?: string }>('audit:approvals')
     const related = approvals.all().filter((item) =>
@@ -1274,7 +1274,7 @@ export class ExecutionHubService extends Service {
         payload: { issueId, title: issue?.title ?? '' },
         ...(issue?.orgId ? { orgId: issue.orgId } : {}),
       })
-    } catch { /* 审批面缺席时门禁保持拦截（fail-closed），下轮 tick 重试挂单 */ }
+    } catch { /* face d'approbation absente : la barrière maintient l'interception (fail-closed), le ticket en attente est retenté au prochain tick */ }
     return false
   }
 
@@ -1286,12 +1286,12 @@ export class ExecutionHubService extends Service {
         ...(issueCount !== undefined ? { issueCount } : {}),
       })
       this.ctx.platformBus.emit(PlatformEvents.ExecHeartbeatRecorded, { agentId: agent.id, outcome })
-    } catch { /* 留痕失败不阻断调度 */ }
+    } catch { /* échec de traçabilité n'interrompt pas l'ordonnancement */ }
   }
 
-  // -- 待办拉取与上下文装配（R9 + E4） --------------------------------------------
+  // -- Tirage des tâches à faire et assemblage de contexte (R9 + E4) --------------------------------------------
 
-  /** Agent 待办三源：exec 任务（todo）+ 部门面板任务（todo/doing）+ 事务流 Agent 步骤（pending/running）。 */
+  /** Trois sources des tâches à faire de l'Agent : tâches exec (todo) + tâches du panneau départemental (todo/doing) + étapes Agent du flux de dossiers (pending/running). */
   collectTodos(agent: { id: string; name: string }): { total: number; issues: number; panelTasks: number; flowSteps: number } {
     const issues = this.issues().all().filter((item) => item.assigneeAgentId === agent.id && item.status === 'todo').length
     let panelTasks = 0
@@ -1299,14 +1299,14 @@ export class ExecutionHubService extends Service {
       panelTasks = this.ctx.opsStorage.collection<{ assigneeType?: string; assigneeName?: string; lane?: string }>('panel:tasks')
         .all().filter((item) => item.assigneeType === 'agent' && item.assigneeName === agent.name
           && (item.lane === 'todo' || item.lane === 'doing')).length
-    } catch { /* 面板集合缺席（独立形态）按 0 计 */ }
+    } catch { /* collection du panneau absente (forme autonome) : comptée 0 */ }
     let flowSteps = 0
     try {
       for (const flow of this.ctx.flow.flows().all().filter((item) => item.status === 'running')) {
         flowSteps += flow.steps.filter((step) => step.actorType === 'agent' && step.assignee === agent.name
           && (step.status === 'pending' || step.status === 'running')).length
       }
-    } catch { /* 事务流服务缺席按 0 计 */ }
+    } catch { /* service de flux transactionnel absent : compté 0 */ }
     return { total: issues + panelTasks + flowSteps, issues, panelTasks, flowSteps }
   }
 
@@ -1350,7 +1350,7 @@ export class ExecutionHubService extends Service {
     return lines.filter((line) => line !== '').join('\n')
   }
 
-  /** 任务血缘视图（E5：exec_lineage 工具与详情抽屉共用）。 */
+  /** Vue de lignée de tâche (E5 : partagée par l'outil exec_lineage et le tiroir de détail). */
   issueLineage(issueId: string): {
     issue?: IssueRecord
     goal?: GoalRecord
@@ -1375,7 +1375,7 @@ export class ExecutionHubService extends Service {
     return { issue, goal, project, ancestry, blockers }
   }
 
-  // -- 健康度与总览（R9） -----------------------------------------------------------
+  // -- Santé et vue d'ensemble (R9) -----------------------------------------------------------
 
   agentsHealth(): Array<{
     agentId: string; name: string; status: string; orgRole?: string; rank?: string
@@ -1385,7 +1385,7 @@ export class ExecutionHubService extends Service {
     const nowMs = Date.now()
     return this.ctx.resourceCore.list('agent').map((agent) => {
       const lastHeartbeat = this.heartbeats().all()
-        // 权限、预算、冻结等拒绝记录不证明有效心跳，不能将失败刷新为健康。
+        // Les refus de permission, budget, gel, etc. ne prouvent pas un battement valide et ne peuvent rafraîchir un échec en santé.
         .filter((item) => item.agentId === agent.id && (item.outcome === 'woken' || item.outcome === 'skipped_no_todo'))
         .sort((a, b) => b.at.localeCompare(a.at))[0]
       let lastMetrics: { updatedAt: string } | undefined
@@ -1393,7 +1393,7 @@ export class ExecutionHubService extends Service {
         lastMetrics = this.ctx.agentRegistry.usage().all()
           .filter((item) => item.agentId === agent.id)
           .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
-      } catch { /* usage 集合缺席按无提报计 */ }
+      } catch { /* collection usage absente : traité comme sans rapport */ }
       const frozen = (() => {
         try {
           return Boolean(this.ctx.agentRegistry.isFrozen?.(agent.id))
@@ -1441,21 +1441,21 @@ export class ExecutionHubService extends Service {
   }
 
   /**
-   * 工作台驾驶舱聚合（设计适配规格 5.1，2026-10-14，只读 additive）：
-   * GET /api/exec/overview 在既有 overview() 字段之上增量并入本方法结果（旧字段不动）。
+   * Agrégat cockpit de l'espace de travail (spécification d'adaptation de conception 5.1, 2026-10-14, lecture seule additive) :
+   * GET /api/exec/overview incorpore de façon incrémentale le résultat de cette méthode au-dessus des champs de l'overview() existant (anciens champs intouchés).
    *
-   * 字段口径（全部真实数据派生，无硬编码话术）：
-   *   - insight.text：由「目标达成度（achieved 占比 + 关联任务完成率）+ 未读告警分级 +
-   *     今日调用/消耗」拼装的真实中文结论；目标与告警双缺时给出零数据口径说明。
-   *   - insight.exceptions：未读告警（critical/warning）+ MCP 熔断态 + 模型预算 breach——
-   *     {name, level, chain, owner}，owner 尽力解析到资产负责人，解析不到给空串。
-   *   - kpis.assets：六类资产（mcp/agent/app/skill/model/nas）统一生命周期桶计数
-   *     （online 含 gray/trial/published/deprecated 仍在册口径）。
-   *   - kpis.callsToday/tokensToday/costToday：usage 今日窗口（UTC 日界）真实聚合。
-   *   - kpis.risk：未读告警 critical/warning 计数（info 不计）。
+   * Référentiel des champs (tous dérivés de données réelles, aucun discours codé en dur) :
+   *   - insight.text : conclusion réelle assemblée depuis « atteinte des objectifs (part achieved + taux d'achèvement des tâches liées) + gradation des alertes non lues
+   *     + appels/consommation du jour » ; objectifs et alertes tous deux absents = libellé de référentiel zéro donnée.
+   *   - insight.exceptions : alertes non lues (critical/warning) + état disjoncteur MCP + dépassement de budget de modèle —
+   *     {name, level, chain, owner}, owner résolu au mieux vers le responsable de l'actif, chaîne vide si irrésoluble.
+   *   - kpis.assets : comptage par seau de cycle de vie unifié des six classes d'actifs (mcp/agent/app/skill/model/nas)
+   *     (online inclut gray/trial/published/deprecated encore au registre).
+   *   - kpis.callsToday/tokensToday/costToday : agrégats réels de la fenêtre du jour de usage (jour UTC).
+   *   - kpis.risk : comptage des alertes non lues critical/warning (info non compté).
    */
   cockpit(): { insight: { text: string; exceptions: Array<{ name: string; level: 'critical' | 'warning'; chain: string; owner: string }> }; kpis: { assets: { total: number; online: number; draft: number; deprecated: number }; callsToday: number; tokensToday: number; costToday: number; risk: { critical: number; warning: number } } } {
-    // -- 今日用量（UTC 日界，与 modelgw budgetStatus 窗口口径一致） ----------------
+    // -- Usage du jour (jour UTC, aligné sur le référentiel de fenêtre budgetStatus de modelgw) ----------------
     const todayStart = `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`
     let callsToday = 0
     let tokensToday = 0
@@ -1465,9 +1465,9 @@ export class ExecutionHubService extends Service {
       callsToday = summary.byResource.reduce((sum, row) => sum + row.events, 0)
       tokensToday = summary.input_tokens + summary.output_tokens
       costToday = summary.cost_cents
-    } catch { /* usage 面缺席（独立宿主形态）按零值呈现，不阻塞总览 */ }
+    } catch { /* face usage absente (forme hôte autonome) : rendue à zéro, ne bloque pas la vue d'ensemble */ }
 
-    // -- 六类资产统一计数（与 plugin-console /api/fleet/ledger 同一套生命周期映射） --
+    // -- Comptage unifié des six classes d'actifs (même cartographie de cycle de vie que le /api/fleet/ledger de plugin-console) --
     const buckets = { total: 0, online: 0, draft: 0, deprecated: 0 }
     const countAsset = (status: string, deprecated = false): void => {
       buckets.total++
@@ -1504,7 +1504,7 @@ export class ExecutionHubService extends Service {
     for (const model of models) countAsset(model.status)
     for (const nas of nasList) countAsset(nas.status)
 
-    // -- 异常面：未读告警 + MCP 熔断 + 模型预算超限（真实状态，不虚构） ------------
+    // -- Face anomalies : alertes non lues + disjoncteur MCP + budget de modèle dépassé (états réels, sans invention) ------------
     const exceptions: Array<{ name: string; level: 'critical' | 'warning'; chain: string; owner: string }> = []
     let critical = 0
     let warning = 0
@@ -1521,7 +1521,7 @@ export class ExecutionHubService extends Service {
             : ''
         exceptions.push({ name: alert.title, level: alert.severity as 'critical' | 'warning', chain: `${alert.ruleId ?? 'ad-hoc'}${alert.resourceType ? ` → ${alert.resourceType}:${alert.resourceId ?? ''}` : ''}`, owner })
       }
-    } catch { /* 审计面缺席按无告警计 */ }
+    } catch { /* face d'audit absente : traité comme sans alerte */ }
     for (const service of mcpServices) {
       if (!service.health.breakerOpen) continue
       critical++
@@ -1534,7 +1534,7 @@ export class ExecutionHubService extends Service {
       }
     }
 
-    // -- 目标达成度（achieved 占比 + 关联任务完成率——真实派生） ------------------
+    // -- Atteinte des objectifs (part achieved + taux d'achèvement des tâches liées — dérivation réelle) ------------------
     const goals = this.goals().all()
     const issues = this.issues().all()
     const activeGoals = goals.filter((goal) => goal.status === 'active')
@@ -1543,7 +1543,7 @@ export class ExecutionHubService extends Service {
     const goalCompletion = goals.length > 0 ? Math.round((achieved / goals.length) * 100) : null
     const issueCompletion = issues.length > 0 ? Math.round((doneIssues / issues.length) * 100) : null
 
-    // -- 洞察文案：全部由上方真实数字拼装（禁止硬编码场景话术） -------------------
+    // -- Libellé d'aperçu : assemblé exclusivement des chiffres réels ci-dessus (scénarios codés en dur interdits) -------------------
     const bits: string[] = []
     if (goals.length > 0) {
       bits.push(t('目标 {total} 项（进行中 {active}、已达成 {achieved}，达成率 {rate}%）', { total: goals.length, active: activeGoals.length, achieved, rate: goalCompletion }))
@@ -1562,7 +1562,7 @@ export class ExecutionHubService extends Service {
     }
   }
 
-  /** 纳管提报催办（R9）：运行态 Agent 超 24h 未提报 → 告警催办（按日去重）。 */
+  /** Rappel des rapports gérés (R9) : un Agent en marche sans rapport depuis > 24 h → alerte de rappel (déduplication quotidienne). */
   private async remindOverdueMetrics(): Promise<void> {
     const dayKey = new Date().toISOString().slice(0, 10)
     for (const agent of this.listRunnableAgents()) {
@@ -1587,16 +1587,16 @@ export class ExecutionHubService extends Service {
     }
   }
 
-  /** 审计留痕（audit 缺席静默降级——dsh-bridge softRead 同款防御）。 */
+  /** Traçabilité d'audit (absence d'audit = repli silencieux — même défense que softRead de dsh-bridge). */
   private auditSafe(entry: Omit<AuditLogRecord, 'id' | 'createdAt' | 'updatedAt'>): void {
     try {
       this.ctx.audit?.record(entry)
-    } catch { /* 审计面独立降级 */ }
+    } catch { /* dégradation indépendante du plan d'audit */ }
   }
 }
 
 // ---------------------------------------------------------------------------
-// REST + 工具 + 装配（/api/exec/*：guarded 自注册，鉴权依赖 console 中间件先行）
+// REST + outils + assemblage (/api/exec/* : guarded auto-enregistré, l'authentification dépend du middleware console en amont)
 // ---------------------------------------------------------------------------
 
 export function apply(ctx: Context) {
@@ -1612,12 +1612,12 @@ export function apply(ctx: Context) {
         actorId: info.userId ?? info.principalId, actorName: info.name,
         action, resourceType: 'exec', resourceId: exchange.params['id'] ?? '', resourceName, result: 'ok', detail,
       })
-    } catch { /* 审计面独立降级 */ }
+    } catch { /* dégradation indépendante du plan d'audit */ }
   }
 
-  // #16（2026-10-29）：exec 域组织血缘收口——显式空串 400；缺省继承调用主体组织
-  //（console 鉴权中间件按用户/Agent 归属反查的 unified.orgId），再沿血缘（目标/项目/Agent）
-  // 兜底，最终回落平台根组织；组织树未播种时保持 ''（与 seedExecHub 兜底一致，迁移函数幂等补齐）。
+  // #16 (2026-10-29) : resserrage de la lignée organisationnelle du domaine exec — chaîne vide explicite = 400 ; par défaut hérite de l'organisation du principal appelant
+  // (unified.orgId retrouvé par le middleware d'authentification console selon le rattachement utilisateur/Agent), puis repli le long de la lignée (objectif/projet/Agent),
+  // enfin organisation racine de la plateforme ; arbre d'organisations non ensemencé = '' (cohérent avec le repli seedExecHub, la fonction de migration complète idempotemment).
   const principalOrgId = (exchange: HttpExchange): string => {
     const unified = (exchange.principal as { unified?: { orgId?: string } } | undefined)?.unified
     return typeof unified?.orgId === 'string' ? unified.orgId : ''
@@ -1632,14 +1632,14 @@ export function apply(ctx: Context) {
     return [principalOrgId(exchange), ...lineage].find((item) => item) ?? hub.rootOrgId() ?? ''
   }
 
-  // -- 总览 / 健康（R9） ------------------------------------------------------
-  // 设计适配（2026-10-14）：增量并入工作台驾驶舱聚合（insight/kpis）——既有字段原样保留，
-  // 前端旧消费方（exec 页/tools）不受影响；cockpit() 为只读查询方法。
+  // -- Vue d'ensemble / santé (R9) ------------------------------------------------------
+  // Adaptation de conception (2026-10-14) : incorporation incrémentale de l'agrégat cockpit de l'espace de travail (insight/kpis) — champs existants conservés tels quels,
+  // les anciens consommateurs du front (page exec/outils) non affectés ; cockpit() est une méthode de lecture seule.
   guarded('GET', '/api/exec/overview', 'exec.read', () => ({ ...hub.overview(), ...hub.cockpit() }))
 
-  // -- 目标（R8） ---------------------------------------------------------------
+  // -- Objectifs (R8) ---------------------------------------------------------------
   guarded('GET', '/api/exec/goals', 'exec.read', (exchange) => {
-    // #16：?orgId= 过滤（组织范围看板/成本归集的数据面）
+    // #16 : filtre ?orgId= (plan de données des tableaux de bord par périmètre organisationnel/imputation des coûts)
     const orgId = exchange.query.get('orgId') ?? ''
     return { goals: hub.goals().all().filter((item) => !orgId || item.orgId === orgId) }
   })
@@ -1664,10 +1664,10 @@ export function apply(ctx: Context) {
     return result
   })
 
-  // -- 项目（E4） -----------------------------------------------------------------
+  // -- Projets (E4) -----------------------------------------------------------------
   guarded('GET', '/api/exec/projects', 'exec.read', (exchange) => {
     const issues = hub.issues().all()
-    // #16：?orgId= 过滤
+    // #16 : filtre ?orgId=
     const orgId = exchange.query.get('orgId') ?? ''
     return {
       projects: hub.projects().all()
@@ -1703,12 +1703,12 @@ export function apply(ctx: Context) {
     return result
   })
 
-  // -- 任务（E2/E4） ----------------------------------------------------------------
+  // -- Tâches (E2/E4) ----------------------------------------------------------------
   guarded('GET', '/api/exec/issues', 'exec.read', (exchange) => {
     const status = exchange.query.get('status') ?? ''
     const agentId = exchange.query.get('agentId') ?? ''
     const projectId = exchange.query.get('projectId') ?? ''
-    const orgId = exchange.query.get('orgId') ?? '' // #16：组织范围过滤
+    const orgId = exchange.query.get('orgId') ?? '' // #16 : filtre par périmètre organisationnel
     const agents = ctx.resourceCore.list('agent')
     const projects = hub.projects().all()
     return {
@@ -1775,7 +1775,7 @@ export function apply(ctx: Context) {
 
   guarded('GET', '/api/exec/lineage/:issueId', 'exec.read', (exchange) => hub.issueLineage(exchange.params['issueId']!))
 
-  // -- 唤醒 / run ------------------------------------------------------------------
+  // -- Réveils / run ------------------------------------------------------------------
   guarded('GET', '/api/exec/wakes', 'exec.read', (exchange) => {
     const status = exchange.query.get('status') ?? ''
     const agents = ctx.resourceCore.list('agent')
@@ -1808,7 +1808,7 @@ export function apply(ctx: Context) {
     return wake
   })
 
-  // -- 例行规则（E7） -----------------------------------------------------------------
+  // -- Règles de routine (E7) -----------------------------------------------------------------
   guarded('GET', '/api/exec/routines', 'exec.read', () => {
     const agents = ctx.resourceCore.list('agent')
     return {
@@ -1872,14 +1872,14 @@ export function apply(ctx: Context) {
     return { deleted: true }
   })
 
-  // -- 运维（手动 tick：测试与运维通道） ----------------------------------------------
+  // -- Opérations (tick manuel : canal de test et d'exploitation) ----------------------------------------------
   guarded('POST', '/api/exec/tick', 'exec.admin', async (exchange) => {
     const result = await hub.tick()
     changeLog(exchange, 'exec.tick', 'manual', `processed=${result.processed} woken=${result.woken} reclaimed=${result.reclaimed}`)
     return result
   })
 
-  // -- Webhook 触发器（E7：路径即凭证——未登记/停用一律 404，不泄露存在性） ---------------
+  // -- Déclencheur Webhook (E7 : le chemin sert d'identifiant — non enregistré/désactivé = toujours 404, sans fuiter l'existence) ---------------
   http.register('POST', '/api/exec/webhook/:path', (exchange) => {
     const path = exchange.params['path'] ?? ''
     const routine = hub.routines().findOne((item) => item.kind === 'webhook' && item.webhookPath === path && item.enabled)
@@ -1895,7 +1895,7 @@ export function apply(ctx: Context) {
     exchange.ok({ wakeId: wake.id, routine: routine.name })
   }, { access: 'public', selfValidated: true })
 
-  // -- Agent 工具（E5：Agent 会话内直接调用，无需知晓执行中枢存在） --------------------
+  // -- Outils Agent (E5 : appel direct dans la session Agent, sans avoir à connaître l'existence du centre d'exécution) --------------------
   const tools = ctx.tools
   if (tools) {
     tools.register(defineTool({
@@ -1918,14 +1918,14 @@ export function apply(ctx: Context) {
       output: { type: 'object', additionalProperties: true },
       async execute(args, exec) {
         const issueId = String(args.issueId ?? '')
-        // D05/D06 fail-closed：无调用主体不认领（身份不入工具参数，一律取 exec.principal）
+        // D05/D06 fail-closed : pas de principal appelant = pas de réclamation (l'identité n'entre pas dans les paramètres d'outil, toujours prise depuis exec.principal)
         if (!exec.principal) throw new Error(t('缺少调用主体（exec.principal），拒绝认领（fail-closed）——请检查令牌与会话注入'))
         const issue = hub.issues().get(issueId)
         if (!issue) throw new Error(t('任务不存在：{id}', { id: issueId }))
         const principal = exec.principal
-        // 受管数字员工路径（运行时结构化探测 workforce 服务，不进 inject——装配在 exec-hub 之后）。
-        // 软读（同 dsh-bridge softRead 口径）：workforce 服务已由提供方声明进 ctx，cordis 严格注入下
-        // `(ctx as any).workforceAdmission` 直访会被 get trap 硬抛「without inject」，必须走 reflect。
+        // Chemin de l'employé numérique géré (sondage structurel au runtime du service workforce, hors inject — assemblé après exec-hub).
+        // Lecture souple (même référentiel que softRead de dsh-bridge) : le service workforce ayant été déclaré dans ctx par le fournisseur, sous l'injection stricte de cordis,
+        // l'accès direct `(ctx as any).workforceAdmission` est durement jeté par le get trap « without inject », il faut passer par reflect.
         const softRead = (key: string): unknown => {
           try {
             if (typeof (ctx as unknown as { reflect?: { get?: (k: string, optional?: boolean) => unknown } }).reflect?.get === 'function') {
@@ -1941,7 +1941,7 @@ export function apply(ctx: Context) {
         const isManagedAgent = principal.kind === 'machine' && principal.refType === 'agent'
           && typeof admission?.claimWork === 'function' && typeof identity?.resolveByCaller === 'function'
         if (isManagedAgent) {
-          // WorkCallerRef 形状（platform-core/workforce-port）：可信主体由令牌解析，禁止 args 传入
+          // Forme WorkCallerRef (platform-core/workforce-port) : principal de confiance analysé depuis le jeton, passage par args interdit
           const caller = {
             kind: 'machine' as const,
             principalId: principal.principalId,
@@ -1957,7 +1957,7 @@ export function apply(ctx: Context) {
             return { ok: false, code: 'POLICY_INTERNAL_ERROR', message: t('受管身份反查失败（fail-closed）：{message}', { message }) }
           }
           if (resolution) {
-            // 命中受管员工 → 统一认领入口（准入/permit/能力清单/租约一次完成，不复制实现）
+            // Employé géré atteint → entrée de réclamation unifiée (admission/permit/liste de capacités/bail en une fois, sans dupliquer l'implémentation)
             const outcome = await admission.claimWork!(caller, { issueId }) as {
               ok: boolean
               employeeId?: string; agentId?: string; issueId?: string; runId?: string; idempotent?: boolean
@@ -1990,16 +1990,16 @@ export function apply(ctx: Context) {
               ...(outcome.holder ? { holder: outcome.holder } : {}),
             }
           }
-          // 非受管（resolveByCaller=null）→ 落回旧 exec_claim 语义（保持兼容）
+          // Non géré (resolveByCaller=null) → retombe dans l'ancienne sémantique d'exec_claim (compatibilité maintenue)
         }
-        // -- 旧语义（D05/D06 幂等修正版） -----------------------------------------
-        // 机器主体只能认领指派给自己的任务（人类 exec.write 持有者不受此限）
+        // -- Ancienne sémantique (version corrigée idempotente D05/D06) -----------------------------------------
+        // Le principal machine ne peut réclamer que les tâches qui lui sont assignées (les détenteurs humains d'exec.write ne sont pas soumis à cette limite)
         if (principal.kind === 'machine' && principal.refType === 'agent' && issue.assigneeAgentId !== principal.refId) {
           throw new Error(t('该任务未指派给你（no_permission）'))
         }
         const agent = issue.assigneeAgentId ? ctx.resourceCore.collection('agent').get(issue.assigneeAgentId) : undefined
         const agentKey = normalizeAgentKey(agent?.name ?? 'unknown')
-        // 幂等①：权威租约已存在——同 agentKey（legacy 判同键）→ 返回既有 run；他人 → locked_by_other
+        // Idempotence ① : bail d'autorité existant — même agentKey (clé d'identité legacy) → renvoie le run existant ; autrui → locked_by_other
         const active = hub.leaseStore.activeForIssue(issue.id)
         if (active) {
           const decision = decideLeaseClaim({
@@ -2017,7 +2017,7 @@ export function apply(ctx: Context) {
           }
           return { ok: false, reason: 'locked_by_other', holder: active.runId }
         }
-        // 幂等②：无租约但投影指向同主体的运行中 run（唤醒预取锁/旧认领）→ 采纳既有 run（V05）
+        // Idempotence ② : pas de bail mais projection pointant un run en cours du même sujet (verrou préempté par réveil/ancienne réclamation) → adoption du run existant (V05)
         if (issue.executionRunId) {
           const existingRun = hub.runs().get(issue.executionRunId)
           if (existingRun && existingRun.status === 'running') {
@@ -2035,7 +2035,7 @@ export function apply(ctx: Context) {
             }
             return { ok: false, reason: 'locked_by_other', holder: issue.executionRunId }
           }
-          // run 缺失/已终态＝脏投影：继续新建（acquireLock 会覆盖残留投影）
+          // Run manquant/déjà terminal = projection sale : poursuite en création (acquireLock écrasera la projection résiduelle)
         }
         const runId = newId('run')
         const acquired = hub.leaseStore.acquire({ issueId: issue.id, runId, employeeId: '', agentKey, principalId: principal.principalId })
@@ -2075,12 +2075,12 @@ export function apply(ctx: Context) {
           const issue = issueId ? hub.issues().get(issueId) : undefined
           runId = issue?.executionRunId ?? ''
           if (!runId && !principal) {
-            // 参数不足升级提示（D07 fail-closed，不静默放行）
+            // Invitation à compléter les paramètres (D07 fail-closed, pas de passage silencieux)
             throw new Error(t('参数不足：既未提供 runId，也无法识别调用主体（exec.principal 缺失）——请携带 exec_claim 返回的 runId 重试；如身份异常请联系管理员升级人工处理'))
           }
           if (!runId) throw new Error(t('缺少 runId，或该任务未持有执行锁'))
         }
-        // D07 主体/run 所有权校验：run 有租约记录时必须主体一致（旧租约拒绝 LEASE_STALE）
+        // D07 validation de propriété principal/run : un run avec enregistrement de bail exige la coïncidence des principaux (bail périmé refusé LEASE_STALE)
         const lease = hub.leaseStore.latestForRun(runId)
         const ownership = decideCompleteOwnership({
           hasLeaseRecord: Boolean(lease),
@@ -2119,16 +2119,16 @@ export function apply(ctx: Context) {
     }))
   }
 
-  // -- 存量迁移（#16：空 orgId 归根组织，记审计，幂等） --------------------------------
+  // -- Migration des préexistants (#16 : orgId vide rattaché à l'organisation racine, audit tracé, idempotent) --------------------------------
   migrateEmptyExecOrgId(ctx, hub)
 
-  // -- 演示种子（G3：DEMO_SEED 下制造业三部门示例；空库幂等） --------------------------
+  // -- Graines de démonstration (G3 : exemples manufacturiers trois départements sous DEMO_SEED ; idempotent sur base vide) --------------------------
   seedExecHub(ctx, hub)
 }
 
 /**
- * #16（2026-10-29）存量迁移：Goal/Project/Issue 的空 orgId 记录归入平台根组织并留审计。
- * 幂等（只处理空串归属）；组织树未播种时跳过（下次启动补齐）——「空串 = 血缘断链」从此不可再入。
+ * #16 (2026-10-29) Migration des préexistants : les enregistrements Goal/Project/Issue à orgId vide sont rattachés à l'organisation racine de la plateforme avec audit.
+ * Idempotent (ne traite que les rattachements à chaîne vide) ; saute si l'arbre d'organisations n'est pas ensemencé (complété au prochain démarrage) — « chaîne vide = lignée rompue » n'est plus re-entrant.
  */
 function migrateEmptyExecOrgId(ctx: Context, hub: ExecutionHubService): void {
   const rootOrgId = hub.rootOrgId()
@@ -2150,7 +2150,7 @@ function migrateEmptyExecOrgId(ctx: Context, hub: ExecutionHubService): void {
       resourceName: t('平台根组织'), result: 'ok',
       detail: t('存量空 orgId 归根组织（#16）：{count} 条，样例 {samples}', { count: migrated, samples: samples.join(', ') }),
     })
-  } catch { /* 审计面独立降级 */ }
+  } catch { /* dégradation indépendante du plan d'audit */ }
   ctx.logger('exec-hub').info(`存量 exec 记录空 orgId 已归根组织（#16）：${migrated} 条（${samples.join(', ')}${samples.length < migrated ? ' 等' : ''}）`)
 }
 
@@ -2164,10 +2164,10 @@ export const name = 'exec-hub'
 export const inject = [
   'httpServer', 'opsStorage', 'platformBus', 'iam', 'authn', 'audit', 'tools',
   'modelGateway', 'resourceCore', 'agentRegistry', 'flow',
-  // 设计适配（2026-10-14）cockpit() 驾驶舱聚合所需只读面（提供方均在 exec-hub 之前装配，
-  // 见 boot-all.ts / cordis.yml 装配序列）：usage=今日计量聚合，其余为六类资产存量计数与异常面
+  // Adaptation de conception (2026-10-14) surface de lecture seule requise par l'agrégat cockpit() (les fournisseurs sont assemblés avant exec-hub,
+  // voir la séquence d'assemblage boot-all.ts / cordis.yml) : usage = agrégat de metering du jour, le reste = comptage du stock des six classes d'actifs et face anomalies
   'usage', 'mcpRegistry', 'skillHub', 'nasRegistry',
-  // 附录 A 决策 3（2026-10-15）：exec_run_leases 权威租约存储——txnStore 由 platform-core
-  // 首位装配（boot-all.ts 第一插件），先于 exec-hub；workforce 侧服务一律运行时探测，不进本列表
+  // Décision 3 de l'annexe A (2026-10-15) : stockage de baux d'autorité exec_run_leases — txnStore assemblé en premier par platform-core
+  // (premier plugin de boot-all.ts), avant exec-hub ; les services côté workforce sont toujours sondés à l'exécution, hors de la présente liste
   'txnStore',
 ]

@@ -1,13 +1,13 @@
 /**
- * 制造工具箱 —— 结果导出（自「制造业 AI 工具集」src/core/export.ts 并入，服务端化）。
+ * Boîte à outils manufacture — export des résultats (intégré depuis « jeu d'outils IA manufacture » src/core/export.ts, côté serveur).
  *
- * 源项目在浏览器侧用 Blob 下载；面板形态改为服务端产出文本、由浏览器落盘
- * （同一份渲染逻辑同时服务导出与「结果转上下文继续分析」，避免两处格式漂移）。
- * 支持面与源项目一致：JSON 与 Markdown 两种，不伪造未实现的办公格式导出。
+ * Le projet source téléchargeait côté navigateur via Blob ; en forme panneau, le serveur produit le texte et le navigateur l'écrit
+ * (le même rendu sert l'export et « convertir le résultat en contexte pour poursuivre l'analyse », évitant toute dérive de format entre les deux).
+ * Périmètre identique au projet source : JSON et Markdown, sans fabriquer d'export bureautique non implémenté.
  */
 import type { ToolResult } from './types.ts'
 
-/** ToolResult → Markdown（源项目 markdown() 等价，逐块渲染）。 */
+/** ToolResult → Markdown (équivalent du markdown() du projet source, rendu bloc par bloc). */
 export function toMarkdown(result: ToolResult): string {
   const body = result.blocks.map((block) => {
     switch (block.type) {
@@ -31,7 +31,7 @@ export function toMarkdown(result: ToolResult): string {
   return `# ${result.title}\n\n${result.createdAt}\n\n${body}\n\n${warnings}\n\n运行编号：${result.runId}\n`
 }
 
-/** 导出文件名（带时间戳片段，便于多次运行区分）。 */
+/** Nom de fichier d'export (avec fragment d'horodatage, pour distinguer des exécutions multiples). */
 export function exportFileName(result: ToolResult, extension: 'json' | 'md'): string {
   const stamp = result.createdAt.replace(/[:.]/g, '-').slice(0, 19)
   return `${result.toolId}-${stamp}.${extension}`

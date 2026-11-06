@@ -1,13 +1,13 @@
 /**
- * @dsh-ops/plugin-skillhub —— Skill 市场（方案 §四）。
+ * @dsh-ops/plugin-skillhub — marché des Skills (plan §4).
  *
- * 提交流水线（事件驱动）：submitted → scanned(静态扫描) → approved(两级审批)
- *                        → published(版本化上架)。
- * - 提交前置校验：格式/元数据完整性、恶意代码静态扫描、敏感信息检测。
- * - 两级审批：领域负责人（业务适用性）→ 平台管理员（安全合规）；
- *   高风险 Skill（外联/写文件）需安全团队加签；允许同一人依次通过两级（同人二次审批）。
- * - 版本不可变：新版本上架不覆盖旧版，支持弃用标记与强制下架。
- * - 下载/安装即登记依赖关系（接入 Agent 时自动回填关联 Skill 列表）。
+ * Chaîne de soumission (pilotée par événements) : submitted → scanned (analyse statique) → approved (approbation à deux niveaux)
+ *                        → published (publication versionnée).
+ * - Validations préalables à la soumission : format/complétude des métadonnées, analyse statique de code malveillant, détection d'informations sensibles.
+ * - Approbation à deux niveaux : responsable de domaine (pertinence métier) → admin plateforme (conformité sécurité) ;
+ *   un Skill à haut risque (sorties réseau/écriture de fichiers) exige la signature additionnelle de l'équipe sécurité ; la même personne peut enchaîner les deux niveaux (double approbation par la même personne).
+ * - Versions immuables : la publication d'une nouvelle version n'écrase pas l'ancienne, marque de dépréciation et retrait forcé pris en charge.
+ * - Téléchargement/installation = enregistrement de la relation de dépendance (la liste des Skills liés est automatiquement remplie en retour à la connexion d'un Agent).
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -16,7 +16,7 @@ import { t } from '../../platform-i18n/src/index.ts'
 import * as skillhubTools from './tools.ts'
 
 // ---------------------------------------------------------------------------
-// 数据模型
+// Modèle de données
 // ---------------------------------------------------------------------------
 
 export type SkillStatus = 'draft' | 'scanning' | 'pending_approval' | 'rejected' | 'published' | 'deprecated' | 'offline'
@@ -35,7 +35,7 @@ export interface VersionApproval {
   at: string
 }
 
-/** 上架产物：Skill 包（skill.zip）的位置与体积（storage=nas 时由上架钩子写入）。 */
+/** Artefact publié : emplacement et taille du paquet Skill (skill.zip) (écrit par le crochet de publication quand storage=nas). */
 export interface SkillPackageInfo {
   storage: 'nas' | 'local'
   nasId?: string
@@ -54,9 +54,9 @@ export interface SkillVersion {
   approvals: VersionApproval[]
   publishedAt?: string
   rejectedReason?: string
-  /** 提交时可选携带的 skill.zip 包内容（base64；上架时原样上传 NAS）。 */
+  /** Contenu du paquet skill.zip optionnellement porté à la soumission (base64 ; uploadé tel quel sur NAS à la publication). */
   packageBase64?: string
-  /** 上架时写入的包位置（storage=nas 为 NAS 绝对路径；local 为平台内联）。 */
+  /** Emplacement du paquet écrit à la publication (chemin absolu NAS si storage=nas ; sinon inline plateforme). */
   package?: SkillPackageInfo
 }
 
@@ -78,7 +78,7 @@ export interface SkillRecord extends RecordBase {
   status: SkillStatus
   currentVersion: string
   versions: SkillVersion[]
-  /** 弃用/强制下架原因（下架分析口径：随记录持久化，详情与看板可见）。 */
+  /** Motif de dépréciation/retrait forcé (référentiel d'analyse de retrait : persisté avec l'enregistrement, visible en détail et tableau de bord). */
   deprecatedReason?: string
   deprecatedAt?: string
   stats: { downloads: number; installs: number; rating: number; ratingCount: number }
@@ -94,7 +94,7 @@ export interface SkillDownloadRecord extends RecordBase {
 }
 
 // ---------------------------------------------------------------------------
-// 静态扫描器
+// Analyseur statique
 // ---------------------------------------------------------------------------
 
 const BLOCK_RULES: Array<{ rule: string; pattern: RegExp; message: string }> = [
@@ -123,7 +123,7 @@ export function scanContent(content: string): ScanFinding[] {
 }
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 export class SkillHubService extends Service {
@@ -142,12 +142,12 @@ export class SkillHubService extends Service {
   }
 
   categories(): string[] {
-    // 标准分类（platform-core ASSET_CATEGORIES）固定全量返回——市场筛选条不再随数据漂移；
-    // 数据里仍存在的遗留分类附在标准项之后，保证存量记录迁移前仍可筛选。
+    // Les catégories standard (ASSET_CATEGORIES de platform-core) sont renvoyées intégralement en fixe — la barre de filtres du marché ne dérive plus avec les données ;
+    // les catégories legacy encore présentes dans les données suivent les entrées standard, pour que les enregistrements existants restent filtrables avant migration.
     return withLegacyCategories(this.skills().all().map((skill) => skill.category))
   }
 
-  // -- 提交与扫描 ---------------------------------------------------------
+  // -- Soumission et analyse ---------------------------------------------------------
 
   submit(input: {
     name: string
@@ -166,7 +166,7 @@ export class SkillHubService extends Service {
     applicableModels?: string[]
     deps?: string[]
     cover?: string
-    /** 可选：skill.zip 包内容（base64）。上架时经存储后端（可配 NAS）原样上传。 */
+    /** Optionnel : contenu du paquet skill.zip (base64). À la publication, uploadé tel quel via le backend de stockage (NAS configurable). */
     packageBase64?: string
   }): SkillRecord {
     if (!input.name?.trim()) throw new Error(t('Skill 名称不能为空'))
@@ -198,7 +198,7 @@ export class SkillHubService extends Service {
       this.runScan(updated.id, version.version)
       return this.skills().get(updated.id)!
     }
-    // 分类对齐到平台标准口径（ASSET_CATEGORIES）；非标准原值保留进 tags 不丢信息
+    // Catégorie alignée sur le référentiel standard de la plateforme (ASSET_CATEGORIES) ; la valeur non standard est conservée dans tags sans perte d'information
     const aligned = alignAssetCategory(input.category, input.tags ?? [])
     const created = this.skills().insert({
       id: newId('skl'),
@@ -228,7 +228,7 @@ export class SkillHubService extends Service {
     return this.skills().get(created.id)!
   }
 
-  /** 静态扫描：blocking 发现 → 自动驳回；警告 → 高风险需安全加签。 */
+  /** Analyse statique : trouvailles blocking → rejet automatique ; avertissements → haut risque exige la signature sécurité. */
   runScan(skillId: string, version: string): ScanFinding[] {
     const skill = this.requireSkill(skillId)
     const target = skill.versions.find((item) => item.version === version)
@@ -256,7 +256,7 @@ export class SkillHubService extends Service {
     return findings
   }
 
-  // -- 审批与上架 ---------------------------------------------------------
+  // -- Approbation et publication ---------------------------------------------------------
 
   approve(skillId: string, version: string, level: 'domain' | 'security', approver: { id: string; name: string }, opinion: string): SkillRecord {
     const skill = this.requireSkill(skillId)
@@ -267,8 +267,8 @@ export class SkillHubService extends Service {
     }
     if (level === 'domain' && target.status !== 'pending_domain') throw new Error(t('领域审批已完成，当前等待安全审批'))
     if (level === 'security' && target.status !== 'pending_security') throw new Error(t('高风险 Skill 才需要安全加签，当前等待领域审批'))
-    // 同人连审放开（原 REL-03 四眼原则已按业务要求取消）：允许同一审批人依次完成
-    // domain 与 security 两级（二次审批），不再强制换人；两级顺序与状态机不变。
+    // Le passage des deux niveaux par la même personne est autorisé (l'ancien principe des quatre yeux REL-03 a été levé à la demande du métier) : le même approbateur peut enchaîner
+    // domain puis security (double approbation), sans changement de personne forcé ; l'ordre des deux niveaux et la machine à états restent inchangés.
     if (target.approvals.some((item) => item.level === level && item.approverId === approver.id)) {
       throw new Error(t('同一审批人不可重复审批同一级'))
     }
@@ -289,11 +289,11 @@ export class SkillHubService extends Service {
   }
 
   /**
-   * 上架：审批通过 →（可选）skill.zip 上传 NAS 存储后端 → 版本标记 published。
-   * 存储后端为 nas 时 fail-closed：包上传失败即上架失败（错误信息含网关/中转目录排查指引）。
-   * NAS 上传走平台服务身份（onBehalf=false）：存储区写入是平台自身能力，不随操作人个人
-   * NAS 数据权限起伏（操作人仍留在平台审计/事件里；网关侧以令牌绑定账号判定，需有
-   * skill 存储目录的显式 allow 例外——数据权限页可配）。
+   * Publication : approbation accordée → (optionnel) upload du skill.zip vers le backend de stockage NAS → version marquée published.
+   * Backend de stockage nas = fail-closed : l'échec d'upload du paquet fait échouer la publication (le message d'erreur contient les pistes de vérification passerelle/répertoire de transit).
+   * L'upload NAS passe par l'identité de service de la plateforme (onBehalf=false) : l'écriture dans la zone de stockage est une capacité propre de la plateforme, indépendante
+   * des permissions de données NAS personnelles de l'opérateur (l'opérateur reste dans l'audit/événements de la plateforme ; côté passerelle, le jugement se fait sur le compte
+   * lié au jeton, qui doit avoir une exception allow explicite sur le répertoire de stockage des skills — configurable dans la page des permissions de données).
    */
   async publish(skillId: string, version: string, actor: { id: string; name: string }): Promise<SkillRecord> {
     const skill = this.requireSkill(skillId)
@@ -335,7 +335,7 @@ export class SkillHubService extends Service {
     return updated
   }
 
-  /** 上架/下载用的 skill.zip 字节：优先提交时携带的原始包；否则由 SKILL.md + manifest 现场打包。 */
+  /** Octets du skill.zip pour publication/téléchargement : priorité au paquet original porté à la soumission ; sinon empaquetage à la volée depuis SKILL.md + manifest. */
   packageBufferOf(skill: SkillRecord, target: SkillVersion): Buffer {
     if (target.packageBase64) return Buffer.from(target.packageBase64, 'base64')
     return createZip([
@@ -344,7 +344,7 @@ export class SkillHubService extends Service {
     ])
   }
 
-  /** 取某已发布版本的 skill.zip（本地字节与 NAS 上架产物同源）。 */
+  /** Prend le skill.zip d'une version publiée (octets locaux et artefact publié NAS de même source). */
   packageOf(skillId: string, version: string): { buffer: Buffer; filename: string; info: SkillPackageInfo } {
     const skill = this.requireSkill(skillId)
     const target = skill.versions.find((item) => item.version === version && item.status === 'published')
@@ -356,13 +356,13 @@ export class SkillHubService extends Service {
     }
   }
 
-  // -- 编辑与资源重传 -------------------------------------------------------
+  // -- Édition et re-téléversement de ressource -------------------------------------------------------
 
   /**
-   * 编辑已上架（及其他状态）Skill 的市场信息：分类/标签/简介/描述/可见性/适用模型/依赖/封面。
-   * 仅作者本人或管理员（skill.publish，路由层判定后传 asAdmin）可编辑；slug 保持稳定
-   * （Agent 按 slug 回填关联 Skill，改名不打断引用）；SKILL.md 内容不走此口——内容变更
-   * 属新版本，仍须走提交 → 扫描 → 审批流水线（版本不可变原则）。
+   * Édite les informations de marché d'un Skill publié (et autres états) : catégorie/étiquettes/résumé/description/visibilité/modèles applicables/dépendances/couverture.
+   * Seul l'auteur lui-même ou un admin (skill.publish, jugé par la couche de routage puis passé en asAdmin) peut éditer ; le slug reste stable
+   * (les Agents remplissent en retour les Skills liés par slug, un changement de nom ne casse pas la référence) ; le contenu SKILL.md ne passe pas ici — un changement de contenu
+   * est une nouvelle version, qui doit repasser la chaîne soumission → analyse → approbation (principe d'immuabilité des versions).
    */
   update(skillId: string, patch: {
     name?: string
@@ -375,7 +375,7 @@ export class SkillHubService extends Service {
     applicableModels?: string[]
     deps?: string[]
     cover?: string
-    /** 作者/开发者展示名：仅改展示（列表与详情署名），authorId 归属锚点不变。 */
+    /** Nom d'affichage de l'auteur/développeur : simple affichage (signature des listes et détails), le point d'ancrage d'appartenance authorId ne change pas. */
     authorName?: string
   }, actor: { id: string; name: string }, opts?: { asAdmin?: boolean }): SkillRecord {
     const skill = this.requireSkill(skillId)
@@ -395,14 +395,14 @@ export class SkillHubService extends Service {
     }
     const allowed = ['name', 'category', 'tags', 'summary', 'description', 'visibility', 'targetOrgs', 'applicableModels', 'deps', 'cover', 'authorName'] as const
     const changes = Object.fromEntries(allowed.map((key) => [key, patch[key]]).filter(([, value]) => value !== undefined))
-    // 分类对齐到平台标准口径（ASSET_CATEGORIES）；非标准原值保留进 tags 不丢信息
+    // Catégorie alignée sur le référentiel standard de la plateforme (ASSET_CATEGORIES) ; la valeur non standard est conservée dans tags sans perte d'information
     if (changes['category'] !== undefined || changes['tags'] !== undefined) {
       const aligned = alignAssetCategory(changes['category'] ?? skill.category, changes['tags'] ?? skill.tags)
       changes['category'] = aligned.category
       changes['tags'] = aligned.tags
     }
     if (Object.keys(changes).length === 0) return skill
-    // 名称可改、slug 不变：slug 是安装依赖回填（agent.attrs.skills）的引用键
+    // Le nom peut changer, le slug non : le slug est la clé de référence du remplissage des dépendances d'installation (agent.attrs.skills)
     const updated = this.skills().update(skillId, {
       ...changes,
       ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
@@ -416,9 +416,9 @@ export class SkillHubService extends Service {
   }
 
   /**
-   * 重新手动上传当前已发布版本的 skill.zip 资源包：原地替换（版本号不变），
-   * storage=nas 时按上架同链路重传 NAS（fail-closed），local 时仅更新内联包与登记。
-   * 仅作者本人或管理员可操作；替换后下载/安装取到的即是新包（packageBufferOf 优先 packageBase64）。
+   * Re-téléversement manuel du paquet de ressources skill.zip de la version publiée courante : remplacement sur place (numéro de version inchangé),
+   * en storage=nas, re-transfert NAS par la même chaîne que la publication (fail-closed) ; en local, simple mise à jour du paquet inline et de l'enregistrement.
+   * Seul l'auteur lui-même ou un admin peut opérer ; après remplacement, téléchargement/installation prennent le nouveau paquet (packageBufferOf priorise packageBase64).
    */
   async replacePackage(skillId: string, packageBase64: string, actor: { id: string; name: string }, opts?: { asAdmin?: boolean }): Promise<SkillRecord> {
     const skill = this.requireSkill(skillId)
@@ -469,7 +469,7 @@ export class SkillHubService extends Service {
       deprecatedReason: note,
       deprecatedAt: new Date().toISOString(),
     })
-    // 扫描引用该 Skill 的 Agent，产出存量引用告警
+    // Scanne les Agents référençant ce Skill, produit les alertes de références préexistantes
     const referencingAgents = this.referencingAgents(skillId)
     this.ctx.platformBus.emit(PlatformEvents.SkillDeprecated, {
       skillId, name: updated.name, actor, note, force,
@@ -488,7 +488,7 @@ export class SkillHubService extends Service {
     return { skill: updated, referencingAgents }
   }
 
-  /** 依赖图反查：哪些 Agent 安装了该 Skill。 */
+  /** Recherche inverse du graphe de dépendances : quels Agents ont installé ce Skill. */
   referencingAgents(skillId: string): Array<{ id: string; name: string; owner: string }> {
     return this.ctx.resourceCore.dependencies()
       .find((record) => record.kind === 'skill' && record.toId === skillId)
@@ -499,7 +499,7 @@ export class SkillHubService extends Service {
       .filter((item): item is { id: string; name: string; owner: string } => item !== null)
   }
 
-  /** 删除后的关联清理：安装依赖边、下载登记与技能记录；审计数据保留。 */
+  /** Nettoyage des liaisons après suppression : arêtes de dépendance d'installation, enregistrements de téléchargement et fiche du skill ; données d'audit conservées. */
   purge(skillId: string): void {
     for (const record of this.ctx.resourceCore.dependencies().find((item) => item.kind === 'skill' && item.toId === skillId)) {
       this.ctx.resourceCore.dependencies().remove(record.id)
@@ -508,7 +508,7 @@ export class SkillHubService extends Service {
     this.skills().remove(skillId)
   }
 
-  // -- 下载 / 安装 --------------------------------------------------------
+  // -- Téléchargement / installation --------------------------------------------------------
 
   download(skillId: string, version: string, user: { id: string; name: string }): { content: string } {
     const skill = this.requireSkill(skillId)
@@ -520,9 +520,9 @@ export class SkillHubService extends Service {
     return { content: target.content }
   }
 
-  /** 包获取留痕（2026-11-02）：skill.zip 直下（GET /package）与 SKILL.md 下载同口径登记
-   *  下载流水 + 统计 + 计量——此前包直下零留痕，使用凭证/授权判定（asset-reports skillGranted）
-   *  依赖 downloads 流水，漏记会导致「已获取但报未授权」。 */
+  /** Trace de prise de paquet (2026-11-02) : téléchargement direct du skill.zip (GET /package) et téléchargement du SKILL.md enregistrés au même référentiel
+   *  flux de téléchargement + statistiques + metering — auparavant, le téléchargement direct du paquet était sans trace ; les jugements d'utilisation de justificatif/autorisation (asset-reports skillGranted)
+   * dépendent du flux downloads, un oubli produit « acquis mais signalé non autorisé ». */
   recordPackageFetch(skillId: string, version: string, user: { id: string; name: string }): void {
     const skill = this.requireSkill(skillId)
     const record = this.downloads().insert({ id: newId('dwl'), skillId, version, userId: user.id, userName: user.name })
@@ -530,7 +530,7 @@ export class SkillHubService extends Service {
     this.meterSkillUsage(skill, 'downloads', `skill:dl:${record.id}`, `user:${user.id}`)
   }
 
-  /** 安装到 Agent：登记依赖关系（资源依赖图自动回填）。 */
+  /** Installation sur un Agent : enregistre la relation de dépendance (remplissage automatique dans le graphe de dépendances de ressources). */
   install(skillId: string, version: string, agentId: string, actor: string): SkillRecord {
     const skill = this.requireSkill(skillId)
     const agent = this.ctx.resourceCore.collection('agent').get(agentId)
@@ -538,7 +538,7 @@ export class SkillHubService extends Service {
     const target = skill.versions.find((item) => item.version === version && item.status === 'published')
     if (!target) throw new Error(t('已发布版本不存在：{version}', { version }))
     this.ctx.resourceCore.addDependency({ fromType: 'agent', fromId: agentId, toType: 'skill', toId: skillId, kind: 'skill' })
-    // 回填 Agent 属性中的关联 Skill 列表
+    // Remplissage en retour de la liste des Skills liés dans les attributs de l'Agent
     const skillsAttr = Array.isArray(agent.attrs['skills']) ? [...agent.attrs['skills'] as string[]] : []
     if (!skillsAttr.includes(skill.slug)) {
       skillsAttr.push(skill.slug)
@@ -550,9 +550,9 @@ export class SkillHubService extends Service {
     return updated
   }
 
-  /** 计量管道（观测补齐）：skill 下载/安装进 usage 事件（skill:<ID>，中文名 slug 含非 ASCII 故用 ID；
-   *  skill:* 默认零费率，失败只告警不阻断主流程。calls 为价格簿计价键（usage.record 硬校验要求
-   *  事件必含计价键），downloads/installs 为观测维度保留。 */
+  /** Pipeline de metering (complément d'observation) : téléchargement/installation de skill dans les événements usage (skill:<ID>, le slug à nom chinois contenant du non-ASCII, d'où l'ID ;
+   *  skill:* tarif nul par défaut, un échec n'alerte qu'alerte sans interrompre le flux principal. calls est la clé de tarification du tarif (usage.record exige
+   *  dans sa validation dure que l'événement contienne la clé), downloads/installs conservés comme dimensions d'observation. */
   private meterSkillUsage(skill: SkillRecord, meterKey: 'downloads' | 'installs', idempotencyKey: string, subject: string): void {
     try {
       this.ctx.usage.record({
@@ -588,11 +588,11 @@ export class SkillHubService extends Service {
     return this.skills().update(skillId, { ratings, stats: { ...skill.stats, rating, ratingCount: ratings.length } })
   }
 
-  // -- 搜索 ---------------------------------------------------------------
+  // -- Recherche ---------------------------------------------------------------
 
   /**
-   * 搜索：默认仅已上架/已弃用；includePending 时把在途项（待审批/扫描中）一并呈现
-   * （排最前、按更新时间排序，带状态徽标）——让审批人直接在市场里看到待办。
+   * Recherche : par défaut, seulement publié/déprécié ; avec includePending, les éléments en vol (en approbation/en analyse) sont aussi présentés
+   * (en tête, triés par date de mise à jour, avec badge d'état) — pour que l'approbateur voie ses à-faire directement dans le marché.
    */
   search(options: { q?: string; category?: string; tag?: string; sort?: 'downloads' | 'rating' | 'updated'; viewerOrgId?: string; includePending?: boolean }): SkillRecord[] {
     let list = this.skills().find((skill) => {
@@ -602,7 +602,7 @@ export class SkillHubService extends Service {
       if (options.tag && !skill.tags.includes(options.tag)) return false
       if (skill.visibility === 'orgs' && options.viewerOrgId && !skill.targetOrgs.includes(options.viewerOrgId)) return false
       if (options.q) {
-        // 关键字覆盖：名称 / 简介 / 描述 / 标签 / 分类 / 作者（市场搜索框口径）
+        // Couverture des mots-clés : nom / résumé / description / étiquettes / catégorie / auteur (référentiel de la barre de recherche du marché)
         const haystack = `${skill.name} ${skill.summary} ${skill.description} ${skill.tags.join(' ')} ${skill.category} ${skill.authorName}`.toLowerCase()
         if (!haystack.includes(options.q.toLowerCase())) return false
       }
@@ -639,7 +639,7 @@ function bumpMinor(version: string): string {
   return parts.join('.')
 }
 
-/** 提交包校验：base64 可解码、ZIP 魔数（PK\u0003\u0004）、体积 ≤ 32MB。 */
+/** Validation du paquet soumis : base64 décodable, nombre magique ZIP (PK\u0003\u0004), taille ≤ 32 Mo. */
 function validatePackageBase64(value: string): void {
   if (typeof value !== 'string' || value.length === 0) throw new Error(t('packageBase64 不能为空字符串'))
   if (value.length > 44_000_000) throw new Error(t('skill.zip 过大（base64 后上限 32MB）'))
@@ -654,7 +654,7 @@ function now(): string {
 }
 
 // ---------------------------------------------------------------------------
-// 插件
+// Extension
 // ---------------------------------------------------------------------------
 
 declare module '@deepseek-ai/cordis' {

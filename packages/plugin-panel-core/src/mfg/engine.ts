@@ -1,17 +1,17 @@
 /**
- * 制造工具箱 —— 共享执行引擎（自「制造业 AI 工具集」server/engine.ts 并入）。
+ * Boîte à outils manufacture — moteur d'exécution partagé (intégré depuis « jeu d'outils IA manufacture » server/engine.ts).
  *
- * 设计不变：网页与本仓工具面共用同一份工具定义、参数校验与执行路径（单一事实源，
- * 「同一工具不同入口结果不一致」从结构上不可能）。源项目「Web/MCP 一致性」断言依赖此性。
+ * Conception inchangée : le web et la face outils du dépôt partagent la même définition d'outils, la même validation de paramètres et le même chemin d'exécution (source de fait unique,
+ * « un même outil, des entrées différentes, des résultats divergents » est structurellement impossible). L'assertion « cohérence Web/MCP » du projet source dépend de cette propriété.
  *
- * 并入改编点（登记 docs/plan-mfg-toolkit-fusion-20261019.md）：
- *   1. 模型面：源项目自带 env 客户端（MODEL_API_KEY 等，OpenAI/Anthropic 双协议）→ 平台模型网关
- *      （modelgw 或 dsh llm 桥）。面板/随附包不再持有任何密钥，也不再有协议概念：
- *      出站、重试、计量、密钥管理归平台。源项目「密钥不进浏览器」的边界在此收紧为「密钥不进面板」。
- *   2. 放行维度：源项目按协议各一套放行（openai:/anthropic:）→ 按平台模型标识一套（见 quality.ts）。
- *   3. 配额：源项目进程内 AI 日额度/并发计数 → 平台侧（modelgw 预算熔断 + usage 计量）。
- *      面板不再自建计数器——多实例下进程内计数本就是源项目文档承认的验证版局限。
- *   4. 校验：zod → validate.ts 等价手写（随附包零运行时依赖）。
+ * Points d'adaptation de l'intégration (consignés dans docs/plan-mfg-toolkit-fusion-20261019.md) :
+ *   1. face modèle : le projet source portait son client env (MODEL_API_KEY etc., double protocole OpenAI/Anthropic) → passerelle de modèles de la plateforme
+ *      (modelgw ou pont llm dsh). Le panneau/le paquet ne détient plus aucune clé ni même la notion de protocole :
+ *      sortie, retries, metering, gestion des clés relèvent de la plateforme. La frontière « pas de clé dans le navigateur » du projet source est ici resserrée en « pas de clé dans le panneau ».
+ *   2. dimension de libération : le projet source avait une libération par protocole (openai:/anthropic:) → une seule selon l'identifiant de modèle de la plateforme (voir quality.ts).
+ *   3. quota : quota journalier IA/compteur de concurrence en processus du projet source → côté plateforme (disjoncteur de budget modelgw + metering usage).
+ *      Le panneau ne se construit plus de compteur — en multi-instances, le comptage en processus était de toute façon une limite de version de vérification admise par la doc du projet source.
+ *   4. validation : zod → réécriture équivalente validate.ts (paquet à zéro dépendance d'exécution).
  */
 import { randomUUID } from 'node:crypto'
 import { findTool, tools } from './catalog.ts'
@@ -27,23 +27,23 @@ const metrics = (items: Extract<Block, { type: 'metrics' }>['items']): Block => 
 const note = (title: string, content: string): Block => ({ type: 'text', title, content })
 const bars = (title: string, items: { label: string; value: number }[], unit?: string): Block => ({ type: 'bars', title, items, ...(unit ? { unit } : {}) })
 
-/** 模型面依赖（由 index.ts 注入：解析平台模型网关 + 放行存储）。 */
+/** Dépendance de la face modèle (injectée par index.ts : résolution de la passerelle de modèles de la plateforme + stockage des libérations). */
 export interface ModelRuntime {
-  /** 当前可用模型标识（供放行指纹与展示）；无网关时返回 null。 */
+  /** Identifiant du modèle actuellement disponible (pour l'empreinte de libération et l'affichage) ; null sans passerelle. */
   identity(): { model: string; endpoint?: string } | null
-  /** 真实单轮调用（走平台网关；未接入时抛出）。 */
+  /** Vrai appel en tour unique (via la passerelle de la plateforme ; lève si non connecté). */
   invoke(input: { system: string; user: string; signal?: AbortSignal }): Promise<{ content: string; model: string }>
   releases: ReleaseStore
 }
 
 export interface ExecuteOptions {
-  /** 评估通道：跳过放行门禁（仅供服务端评估函数使用，HTTP 输入不接受该字段）。 */
+  /** Canal d'évaluation : saute la passe de libération (usage réservé aux fonctions d'évaluation serveur ; le champ n'est pas accepté en entrée HTTP). */
   evaluation?: boolean
   signal?: AbortSignal
   runtime?: ModelRuntime
 }
 
-/** AI 工具执行：配置 → 放行 → 调用 → 结构/引文门禁 → Block。 */
+/** Exécution d'outil IA : configuration → libération → appel → passe structure/citations → Block. */
 async function runModel(
   toolId: string,
   tool: (typeof tools)[number],
@@ -80,14 +80,14 @@ async function runModel(
 }
 
 /**
- * 统一执行入口：按工具定义校验输入（strict，未知字段拒绝）→ 计算/AI 分支 → 统一 ToolResult。
- * 模型分支失败不降级为「成功」，一律按错误抛出（源项目质量纪律）。
+ * Entrée d'exécution unifiée : validation de l'entrée selon la définition d'outil (strict, champs inconnus refusés) → branche calcul/IA → ToolResult unifié.
+ * Un échec de la branche modèle n'est pas rétrogradé en « succès », toujours levé en erreur (discipline de qualité du projet source).
  */
 export async function execute(toolId: string, raw: unknown, options: ExecuteOptions = {}): Promise<ToolResult> {
   const started = performance.now()
   const tool = findTool(toolId)
   if (!tool) fail('NOT_FOUND', '没有找到该工具', 404)
-  // strict 校验：按字段定义逐项校验并重建输入（未知字段 = 拒绝，源项目注入断言依赖此语义）
+  // validation strict : validation champ par champ selon la définition et reconstruction de l'entrée (champ inconnu = refus, l'assertion d'injection du projet source dépend de cette sémantique)
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('INVALID_INPUT', '输入必须是对象')
   const source = raw as Record<string, unknown>
   const allowed = new Set<string>(tool.fields.map((field) => field.key))
@@ -216,7 +216,7 @@ export async function execute(toolId: string, raw: unknown, options: ExecuteOpti
       default: fail('NOT_IMPLEMENTED', '该工具尚未实现', 501)
     }
   }
-  // 序列化前拦溢出（源项目同规：不得静默变成 null）
+  // interception du débordement avant sérialisation (même règle que le projet source : jamais de null silencieux)
   JSON.stringify(blocks, (_key, value) => {
     if (typeof value === 'number' && !Number.isFinite(value)) fail('NUMERIC_OVERFLOW', '输入数值过大，无法得到有限结果')
     return value
@@ -239,17 +239,17 @@ function integer(value: number, label: string): void {
   requireCondition(Number.isSafeInteger(value), `${label}须为安全范围内的整数`)
 }
 
-/** 字段级数值校验（与源项目契约等语义：有限 + 上下界）。 */
+/** Validation numérique au niveau champ (sémantique équivalente au contrat du projet source : fini + bornes). */
 function checkFieldNumber(value: unknown, label: string, min?: number, max?: number): number {
   return checkNumber(value, label, min, max)
 }
 
-/** 字段级文本校验（与源项目契约等语义：trim 后非空 + 长度上限）。 */
+/** Validation texte au niveau champ (sémantique équivalente : non vide après trim + plafond de longueur). */
 function checkFieldText(value: unknown, label: string): string {
   return checkText(value, label)
 }
 
-/** 100 项选题的目录统计（供面板与工具面呈现，不夸大实现进度）。 */
+/** Statistiques du catalogue des 100 sujets (pour l'affichage du panneau et de la face outils, sans exagérer l'avancement). */
 export function catalogStats(): { implementedCalculation: number; modelValidationPending: number; planned: number; total: number; modelTools: number; calculationTools: number } {
   return {
     implementedCalculation: tools.filter((tool) => tool.mode === 'calculation').length,

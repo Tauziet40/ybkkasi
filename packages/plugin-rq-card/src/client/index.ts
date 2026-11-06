@@ -1,29 +1,29 @@
 /**
- * 浏览器半：slot 注册 + 降级探测（WP-06 交付物 1/3，spike §4.3 伪代码落地）。
+ * Moitié navigateur : enregistrement de slots + sonde de dégradation (livrables 1/3 de WP-06, atterrissage du pseudo-code spike §4.3).
  *
- * 【注入面】两条 slot：
- *   ① 四态执行卡：为元冰可工具名（RQ_TOOL_NAMES）逐一注册 `tool.call.toolview`
- *      键位条目——加法式，未列名的工具回落 dsh 的 GenericToolCard；
- *   ② 👍/👎 反馈条：`conversation.chat.assistant-actions` list 条目
- *      （id 'rq-feedback'，与 dsh 自带 'feedback' 并存，order 20 排其后）。
+ * [Face d'injection] deux slots :
+ *   ① carte d'exécution à quatre états : enregistre un `tool.call.toolview` pour chaque nom d'outil métier de method (RQ_TOOL_NAMES)
+ *      entrée clavier — additif, les outils non listés retombent sur le GenericToolCard de dsh ;
+ *   ② barre de feedback 👍/👎 : entrée du list `conversation.chat.assistant-actions`
+ *      (id 'rq-feedback', coexiste avec le 'feedback' intégré de dsh, order 20 derrière).
  *
- * 【W5 耦合面收窄】本文件对宿主的全部依赖经 createClientHostPort 收窄为
- * HostClientPort 窄端口（platform-core/src/host-bridge.ts 声明契约）；dsh
- * 三包类型只进 host-port.ts 单点——dsh 升级 API 漂移时改 adapter + 重跑
- * 契约测试（tests/host-bridge.contract.mjs），插件体不动。
+ * [Resserrement de la face de couplage W5] toutes les dépendances de ce fichier envers l'hôte convergent via createClientHostPort
+ * dans le port étroit HostClientPort (contrat déclaré dans platform-core/src/host-bridge.ts) ; les types
+ * des trois paquets dsh n'entrent qu'en un point, host-port.ts — en cas de dérive d'API dsh à une montée de version, adapter + relancer
+ * les tests de contrat (tests/host-bridge.contract.mjs), le corps de l'extension ne bouge pas.
  *
- * 【降级预案（spike §5 的 1-4 条，本 apply 逐条落实）】
- *   1. 声明依赖全部走 ctx.slots.inject：目标槽未声明时回调永不执行、注入保持
- *      惰性——上游改名/删槽 = 卡片静默消失，不崩宿主（机制天然兜底）；
- *   2. 显式探测：apply 内 specDynamic(name) 存在性检查 + 回调执行时
- *      校验 spec.kind；任一不满足 → 置降级标志（DEGRADED 数组）；
- *   3. boot 面探测：window.__DSH_BOOT__ / bundle 404 属于「机制整体不存在」，
- *      该场景下本 bundle 根本不会执行，无需代码面处理（见 spike §5 第 3 条）；
- *   4. apply 全体 try/catch：任何抛错吞掉并置降级标志；slot 边界另有
- *      reportEntryError 让位机制（单卡崩溃只让出单元格）——双保险；
- *   5.（兜底在宿主工具侧）工具结果文本始终携带 markdown 摘要 + /rq 链接，
- *      见 src/index.ts 的 summarizeForToolResult 契约；
- *   6. 降级标志在场时经 shell.overlay 挂「卡片插件未生效」角标（槽在才挂）。
+ * [Plan de repli (items 1-4 du spike §5, appliqués un à un dans ce apply)]
+ *   1. toutes les dépendances déclarées passent par ctx.slots.inject : slot cible non déclaré = la callback ne s'exécute jamais, l'injection reste
+ *      paresseuse — renommage/suppression de slot amont = la carte disparaît silencieusement, sans faire tomber l'hôte (rattrapage naturel du mécanisme) ;
+ *   2. sonde explicite : contrôle d'existence specDynamic(name) dans apply + vérification
+ *      de spec.kind à l'exécution de la callback ; toute non-satisfaction → marque de dégradation (tableau DEGRADED) ;
+ *   3. sonde de la face boot : window.__DSH_BOOT__ / bundle 404 relèvent du « mécanisme globalement absent »,
+ *      dans ce scénario le présent bundle ne s'exécutera pas du tout, aucun traitement côté code nécessaire (voir spike §5 item 3) ;
+ *   4. apply entièrement sous try/catch : toute erreur levée est avalée et pose le marqueur de dégradation ; la frontière slot a par ailleurs
+ *      le mécanisme d'abandon reportEntryError (une carte qui crash ne rend que sa cellule) — double assurance ;
+ *   5. (le repli est côté outils hôte) le texte du résultat d'outil porte toujours un résumé markdown + lien /rq,
+ *      voir le contrat summarizeForToolResult de src/index.ts ;
+ *   6. marqueur de dégradation présent = coin « extension de cartes inactive » monté via shell.overlay (monté seulement si le slot existe).
  * @module @dsh-ops/plugin-rq-card/client
  */
 
@@ -47,49 +47,49 @@ export type { ExecutionState, ExecutionStateInput, BlockedReason } from './state
 export type { RqFeedbackView, RqToolviewInjected, RqFeedbackInjected } from './slots.ts'
 export { deriveExecutionState } from './state.ts'
 
-/** 词典命名空间（locales.ts 的 LocaleNamespaceMap 座位名）。 */
+/** Espace de noms du dictionnaire (nom de place du LocaleNamespaceMap de locales.ts). */
 const NS = 'rq-card'
 
-/** 插件 id（与 package.json name、boot 图行 id 一致）。 */
+/** id de l'extension (identique au name de package.json et à l'id de ligne du graphe boot). */
 const PLUGIN_ID = '@dsh-ops/plugin-rq-card'
 
 /**
- * 元冰可工具名名录（各插件包 tools.ts 的登记清单，截至 WP-06）。
- * 四态执行卡为这些工具注册键位；新增工具不自动获得卡片（回落 GenericToolCard），
- * 在此追加一行即可覆盖。核心主角是 mcp_invoke（资产调运四态主战场）。
+ * Répertoire des noms d'outils de method (liste enregistrée des tools.ts des paquets, à la date de WP-06).
+ * La carte d'exécution à quatre états enregistre des touches pour ces outils ; un nouvel outil n'obtient pas automatiquement de carte (repli GenericToolCard),
+ * ajouter une ligne ici suffit à le couvrir. Le rôle principal est mcp_invoke (terrain principal des quatre états de l'acheminement d'actifs).
  */
 const RQ_TOOL_NAMES: readonly string[] = [
-  // 资产调运（四态主战场）
+  // acheminement d'actifs (terrain principal des quatre états)
   'mcp_invoke', 'mcp_service_list', 'mcp_health_check', 'mcp_metrics', 'mcp_deploy', 'mcp_offline',
-  // NAS（文件/知识目录）
+  // NAS (fichiers/répertoire de savoir)
   'nas_list', 'nas_get', 'nas_health_check', 'nas_fs_list', 'nas_fs_search', 'nas_fs_upload', 'nas_fs_mkdir', 'nas_fs_delete',
-  // 技能
+  // skills
   'skill_search', 'skill_submit', 'skill_approve', 'skill_publish', 'skill_install', 'skill_deprecate',
-  // 应用
+  // applications
   'app_list', 'app_metrics', 'app_cost_breakdown', 'app_topology', 'app_metrics_report',
   // Agent
   'agent_list', 'agent_get', 'agent_bind_user', 'agent_metrics', 'agent_metrics_report', 'agent_offline',
-  // 身份与访问
+  // identité et accès
   'iam_user_list', 'iam_user_create', 'iam_user_freeze', 'iam_user_reset_password', 'iam_org_tree',
   'iam_org_create', 'iam_org_update', 'iam_role_list', 'iam_sync_run', 'iam_conflict_list',
   'authn_token_issue', 'authn_token_list', 'authn_token_revoke', 'authn_credential_create',
   'authn_credential_rotate', 'authn_credential_scopes',
-  // 连接器 / 模型 / 计费 / 审计 / 市场 / 审批
+  // connecteurs / modèles / facturation / audit / marché / approbations
   'connector_catalog_search', 'connector_connection_list', 'connector_execute', 'connector_run_list', 'connector_perm_group_list',
   'model_list', 'billing_wallet_balance', 'audit_logs', 'audit_alerts_list', 'audit_alerts_read_all',
   'audit_cost_report', 'market_plugin_list', 'approval_decide',
 ]
 
-/** 降级原因台账（spike §5 第 2/4 条的「降级标志」）。 */
+/** Registre des motifs de dégradation (le « marqueur de dégradation » des items 2/4 du spike §5). */
 const DEGRADED: string[] = []
 
-/** 记一条降级原因（console 留痕，便于运维发现；绝不抛出）。 */
+/** Consigne un motif de dégradation (trace console pour l'exploitation ; jamais levé). */
 function markDegraded(what: string, error?: unknown): void {
   DEGRADED.push(what)
   console.warn(`[rq-card] degraded (${what}):`, error ?? 'target slot unavailable')
 }
 
-/** 安全执行一段注入动作；抛错吞掉并记降级（spike §5 第 4 条）。 */
+/** Exécute sûrement une action d'injection ; l'erreur levée est avalée et consignée en dégradation (spike §5 item 4). */
 function safely(what: string, action: () => void): void {
   try {
     action()
@@ -98,36 +98,36 @@ function safely(what: string, action: () => void): void {
   }
 }
 
-/** specDynamic 探测（缺席/抛错/非对象已由 adapter 折叠为 undefined）。 */
+/** Sonde specDynamic (absent/jette/non-objet déjà repliés en undefined par l'adaptateur). */
 function probeSpec(host: HostClientPort, slot: string): { kind?: string } | undefined {
   return host.slots.specDynamic?.(slot)
 }
 
-/** 必需服务：slot 注册表 + 词典。 */
+/** Services requis : registre de slots + dictionnaire. */
 export const inject = ['slots', 'locale']
 
 /**
- * 客户端插件体入口（dsh client loader 契约：inject + apply(ctx)）。
- * @param ctx - 客户端根 context。
+ * Entrée du corps de l'extension cliente (contrat du loader client dsh : inject + apply(ctx)).
+ * @param ctx - context racine client.
  */
 export function apply(ctx: ClientContext): void {
   applyViaPort(createClientHostPort(ctx))
 }
 
 /**
- * 插件体（只依赖窄端口；契约测试经本入口 + mock 端口直跑）。
- * @param host - 宿主桥窄端口（ctx.slots / ctx.locale / ctx.effect 的最小收窄面）。
+ * Corps de l'extension (ne dépend que du port étroit ; les tests de contrat tournent directement par cette entrée + port simulé).
+ * @param host - port étroit du pont hôte (face minimale resserrée de ctx.slots / ctx.locale / ctx.effect).
  */
 export function applyViaPort(host: HostClientPort): void {
-  // 样式表先落（幂等；无 document 环境自动跳过）。
+  // La feuille de style d'abord (idempotent ; sans environnement document, saut automatique).
   safely('styles', () => { ensureStyles() })
 
-  // 词典注册。
+  // Enregistrement du dictionnaire.
   safely('locale', () => {
     host.effect(() => host.locale.register(NS, { zh, en, ja }), 'rq-card: dictionaries')
   })
 
-  // ── ① 四态执行卡：显式探测 + 键位注册（spike §5 第 2 条）──
+  // ── ① carte d'exécution à quatre états : sonde explicite + enregistrement de touches (spike §5 item 2) ──
   const toolviewSpec = probeSpec(host, SLOT_TOOLVIEW)
   if (toolviewSpec?.kind !== 'keyed') {
     markDegraded(`${SLOT_TOOLVIEW} spec missing or not keyed`, toolviewSpec)
@@ -140,7 +140,7 @@ export function applyViaPort(host: HostClientPort): void {
           id: `${TOOLVIEW_ENTRY_PREFIX}${tool}`,
           locale: NS,
           inject: (): RqToolviewInjected => ({
-            // C2 表映射的唯一入口；healthSnapshot 为宿主半后续接线点。
+            // unique entrée de la mise en correspondance C2 ; healthSnapshot est le point de câblage ultérieur de la moitié hôte.
             deriveState: deriveExecutionState,
           }),
         }, ExecutionCard))
@@ -148,7 +148,7 @@ export function applyViaPort(host: HostClientPort): void {
     }
   }
 
-  // ── ② 👍/👎 反馈条：list 条目，与 dsh 自带 'feedback' 并存 ──
+  // ── ② barre de feedback 👍/👎 : entrée list, coexiste avec le 'feedback' intégré de dsh ──
   const actionsSpec = probeSpec(host, SLOT_ASSISTANT_ACTIONS)
   if (actionsSpec?.kind !== 'list') {
     markDegraded(`${SLOT_ASSISTANT_ACTIONS} spec missing or not list`, actionsSpec)
@@ -185,7 +185,7 @@ export function applyViaPort(host: HostClientPort): void {
     })
   }
 
-  // ── ③ 降级角标：仅当确有降级原因且 shell.overlay 仍在（spike §5 第 6 条）──
+  // ── ③ coin de repli : seulement s'il y a vraiment un motif de dégradation et que shell.overlay existe encore (spike §5 item 6) ──
   if (DEGRADED.length > 0) {
     const overlaySpec = probeSpec(host, SLOT_OVERLAY)
     if (overlaySpec?.kind === 'list') {
@@ -196,13 +196,13 @@ export function applyViaPort(host: HostClientPort): void {
           order: 90,
           locale: NS,
         }, function RqCardDegradedBadge(props?: unknown) {
-          // 词典经 locale: NS 座位注入（props.t）；slot 契约未注入 t 时降级中文原文——宁可少译，不抛错。
+          // Dictionnaire injecté via la place locale: NS (props.t) ; contrat de slot sans t injecté = repli texte chinois — préférer sous-traduire plutôt que jeter.
           const maybeT = (props as { t?: unknown } | undefined)?.t
           const translate = typeof maybeT === 'function'
             ? (maybeT as (key: string) => string)
             : ((key: string) => (zh as Record<string, string>)[key] ?? key)
-          // 无其他 props 依赖：任何 slot 契约变化都只会让角标空白，不会抛错。
-          // 本文件是 .ts（非 tsx），故用 createElement 而非 JSX 字面量。
+          // aucune autre dépendance de props : tout changement du contrat de slot ne fera au pire qu'un coin vide, jamais d'erreur.
+          // ce fichier est .ts (non tsx), donc createElement plutôt qu'un littéral JSX.
           return createElement('span', { className: 'rq-badge' }, translate('badge.degraded'))
         }))
       })
@@ -210,8 +210,8 @@ export function applyViaPort(host: HostClientPort): void {
     console.warn(`[rq-card] degraded mode with ${DEGRADED.length} reason(s); markdown fallback remains available`)
   }
 
-  // 【冒烟自证（spike 风险 R8 的首个联调里程碑）】boot 后可在控制台确认：
-  //   window.__DSH_BOOT__ 含 { id: '@dsh-ops/plugin-rq-card', ... } 图行，
-  //   且本日志出现——两件事齐了，说明「空插件上链」成立。
+  // [Auto-attestation fumable (premier jalon d'intégration du risque R8 du spike)] après boot, on peut vérifier dans la console :
+  //   window.__DSH_BOOT__ contient une ligne { id: '@dsh-ops/plugin-rq-card', ... },
+  //   et ce log apparaît — les deux réunis prouvent « l'extension vide sur la chaîne » établie.
   console.info('[rq-card] client plugin applied:', PLUGIN_ID)
 }

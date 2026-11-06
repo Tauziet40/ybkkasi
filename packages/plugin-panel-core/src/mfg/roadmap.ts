@@ -1,15 +1,15 @@
 /**
- * 制造工具箱 —— 100 项选题清单（自「制造业 AI 工具集」src/core/roadmap.json 并入）。
+ * Boîte à outils manufacture — liste des 100 sujets (intégrée depuis « jeu d'outils IA manufacture » src/core/roadmap.json).
  *
- * 数据来源与口径（源项目 docs/architecture.md，并入后不改写）：
- *   - PMO Excel 工作表 `19_AI原生组织建设_场景清单` 第 2–296 行（295 条记录）；
- *   - PDF《场景化、图谱化推进重点行业数字化转型的参考指引（2025版）》62 页，第 2–6 页框架、
- *     第 37–39 页行业图谱；
- *   - 100 项为「基于原场景的产品拆分建议」，**不是原文逐项列出的 100 个工具**；
- *     原表项目「已完成」状态不继承为本项目交付状态。
+ * Sources et référentiel des données (docs/architecture.md du projet source, non réécrit après intégration) :
+ *   - feuille Excel PMO `19_AI原生组织建设_场景清单` lignes 2–296 (295 enregistrements) ;
+ *   - PDF « Referenzleitfaden (édition 2025) pour la transformation numérique sectorielle scénarisée et cartographiée », 62 pages, cadre pages 2–6,
+ *     cartographie sectorielle pages 37–39 ;
+ *   - les 100 items sont des « suggestions de découpe produit à partir des scénarios d'origine », et **non pas 100 outils listés un à un dans l'original** ;
+ *     le statut « terminé » d'éléments du tableau d'origine n'est pas hérité comme statut de livraison du présent projet.
  *
- * 诚实边界的机器可读化：本文件只读，不做任何「规划中 → 已实现」的自动推断；
- * 条目的 implemented-calculation / model-validation-pending / planned 状态逐条来自数据本身。
+ * Lisibilité machine de la frontière honnête : ce fichier est en lecture seule, aucune inférence automatique « planifié → implémenté » ;
+ * les statuts implemented-calculation / model-validation-pending / planned de chaque entrée viennent item par item des données elles-mêmes.
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -56,7 +56,7 @@ export type Roadmap = {
 
 let cached: Roadmap | undefined
 
-/** 加载选题清单（JSON 与随附包同目录，经 import.meta 解析——与 seed/demo-content.json 同规）。 */
+/** Charge la liste des sujets (JSON dans le même répertoire que le paquet, résolu via import.meta — même règle que seed/demo-content.json). */
 export function loadRoadmap(): Roadmap {
   if (cached) return cached
   const path = fileURLToPath(new URL('./roadmap.json', import.meta.url))
@@ -64,12 +64,12 @@ export function loadRoadmap(): Roadmap {
   return cached
 }
 
-/** 分组清单（图谱页按业务场景浏览用；保持数据内出现顺序）。 */
+/** Liste groupée (pour la page cartographie navigant par scénario métier ; ordre d'apparition dans les données conservé). */
 export function roadmapGroups(roadmap: Roadmap): string[] {
   return [...new Set(roadmap.tools.map((item) => item.group))]
 }
 
-/** 状态中文标签（展示层单一事实源；未知状态原样返回，不吞错）。 */
+/** Libellés chinois des statuts (source de fait unique de la couche d'affichage ; statut inconnu renvoyé tel quel, sans avaler l'erreur). */
 export const ROADMAP_STATUS_LABELS: Record<string, string> = {
   'implemented-calculation': '计算内核已实现',
   'model-validation-pending': '待模型验收',

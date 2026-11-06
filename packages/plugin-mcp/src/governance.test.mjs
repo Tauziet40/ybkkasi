@@ -1,18 +1,18 @@
 /**
- * MCP 治理字段与 Secret Broker 单元测试（W1-T2，契约 §5/§6）。
+ * Tests unitaires des champs de gouvernance MCP et du Secret Broker (W1-T2, contrats §5/§6).
  *
- * 运行方式（Node 直接加载，进程内构造，参照 approval.test.mjs 桩件风格）：
+ * Mode d'exécution (chargement direct par Node, construction en processus, sur le style de stubs de approval.test.mjs) :
  *
  *     node packages/plugin-mcp/src/governance.test.mjs
  *
- * 覆盖面：
- *   - 存量迁移幂等（ensureGovernanceMigration 跑两遍结果一致）与字段默认值；
- *   - 治理字段枚举校验（非法值显式报错）与 updateService 白名单收敛；
- *   - 明文敏感头门禁（plainSensitiveHeaderViolation + MCP_ALLOW_PLAIN_HEADERS 逃生门）；
- *   - SecretBroker put/resolve/rotate/delete、文件权限 0600、审计事件零明文；
- *   - env: 形态读取与缺失回落、vault:/external: 不支持前缀 fail-closed；
- *   - 明文敏感头迁移（migratePlainHeaders dryRun 预检 + 执行后 headers 清键 + broker 命中）；
- *   - resolveCallHeaders 注入顺序（本地 echo 服务端到端：存量非敏感头保留 + 凭证覆盖同名键）。
+ * Couverture :
+ *   - idempotence de la migration des préexistants (ensureGovernanceMigration exécuté deux fois, résultat identique) et valeurs par défaut des champs ;
+ *   - validation des énumérations des champs de gouvernance (valeur illégale = erreur explicite) et convergence en liste blanche d'updateService ;
+ *   - barrière des en-têtes sensibles en clair (plainSensitiveHeaderViolation + porte de secours MCP_ALLOW_PLAIN_HEADERS) ;
+ *   - SecretBroker put/resolve/rotate/delete, permissions de fichier 0600, événements d'audit sans clair ;
+ *   - lecture de la forme env: et repli sur absence, préfixes non supportés vault:/external: fail-closed ;
+ *   - migration des en-têtes sensibles en clair (pré-vérification dryRun de migratePlainHeaders + clés retirées de headers après exécution + atteinte du broker) ;
+ *   - ordre d'injection de resolveCallHeaders (bout en bout sur un service echo local : headers préexistants non sensibles conservés + identifiant surchargeant la clé homologue).
  */
 import assert from 'node:assert/strict'
 import { test, afterEach } from 'node:test'
@@ -25,7 +25,7 @@ import { StorageService } from '../../platform-core/src/storage.ts'
 import { McpService, normalizeGovernanceInput } from './index.ts'
 import { SecretBroker, plainSensitiveHeaderViolation, sensitiveHeaderKeys } from './secret-broker.ts'
 
-// -- 进程内构造宿主（桩总线 + 真实 StorageService + 临时数据目录） ----------------------------
+// -- Hôte construit en processus (bus stub + vrai StorageService + répertoire de données temporaire) ----------------------------
 
 const cleanup = []
 afterEach(() => {
@@ -37,7 +37,7 @@ function makeHarness() {
   cleanup.push(() => rmSync(dataDir, { recursive: true, force: true }))
   const ctx = new Context()
   const events = []
-  // 桩总线：记录 emit 供审计断言（on 返回空注销函数）
+  // Bus stub : enregistre les emit pour assertion d'audit (on renvoie une fonction de désactivation vide)
   ctx.platformBus = {
     on: () => () => {},
     emit: (name, payload) => events.push({ name, payload }),
@@ -49,7 +49,7 @@ function makeHarness() {
   return { ctx, registry, broker, events, dataDir }
 }
 
-/** 直插一条「存量无治理字段」的服务记录（模拟迁移前的旧库形态）。 */
+/** Insère directement un enregistrement de service « préexistant sans champs de gouvernance » (simule l'ancienne base avant migration). */
 function insertLegacyService(registry, overrides = {}) {
   return registry.services().insert({
     id: 'mcp-legacy-1',
@@ -75,7 +75,7 @@ function insertLegacyService(registry, overrides = {}) {
   })
 }
 
-// -- §5 治理字段：默认值 / 校验 / 迁移幂等 -------------------------------------------------
+// -- §5 champs de gouvernance : valeurs par défaut / validation / idempotence de migration -------------------------------------------------
 
 test('治理字段默认值：createService 缺省补 ownerEntity=platform/gateway/internal/prod/org', () => {
   const { registry } = makeHarness()
@@ -95,7 +95,7 @@ test('治理字段校验：枚举非法值显式报错（dataClass/exposureMode/
   assert.throws(() => registry.createService({ name: 'x', orgId: 'o', owner: 'u', visibility: 'world' }), /visibility/)
   const service = registry.createService({ name: 'x', orgId: 'o', owner: 'u' })
   assert.throws(() => registry.updateService(service.id, { environment: 'lab' }), /environment/)
-  // 合法值可写入
+  // Valeur légale inscriptible
   const updated = registry.updateService(service.id, { environment: 'staging', dataClass: 'confidential' })
   assert.equal(updated.environment, 'staging')
   assert.equal(updated.dataClass, 'confidential')
@@ -118,12 +118,12 @@ test('存量迁移幂等：跑两遍结果一致（第二遍零写入、marker �
   assert.equal(afterFirst.dataClass, 'internal')
   assert.equal(afterFirst.environment, 'prod')
   assert.equal(afterFirst.visibility, 'org')
-  // 幂等重跑：零写入、applied=false、迁移 marker 唯一
+  // Re-exécution idempotente : zéro écriture, applied=false, marqueur de migration unique
   const second = registry.ensureGovernanceMigration()
   assert.deepEqual(second.touched, [])
   assert.equal(second.applied, false)
   assert.equal(registry.ctx.opsStorage.collection('mcp:migrations').find((item) => item.key === 'mcp-governance-v1').length, 1)
-  // 两遍之后记录的治理字段完全一致
+  // Après deux passages, les champs de gouvernance de l'enregistrement sont strictement identiques
   assert.deepEqual(
     (({ ownerEntity, exposureMode, dataClass, environment, visibility }) => ({ ownerEntity, exposureMode, dataClass, environment, visibility }))(registry.services().get(legacy.id)),
     (({ ownerEntity, exposureMode, dataClass, environment, visibility }) => ({ ownerEntity, exposureMode, dataClass, environment, visibility }))(afterFirst),
@@ -149,7 +149,7 @@ test('治理待办摘要：unowned / plainHeaderServices / nonGateway 分组与�
   assert.equal(summary.totals.plainHeader, 1)
 })
 
-// -- §6 门禁：敏感头口径与逃生门 ------------------------------------------------------------
+// -- §6 barrière : référentiel des en-têtes sensibles et porte de secours ------------------------------------------------------------
 
 test('敏感头口径：与 maskServiceHeaders 同判（authorization/token/secret/key 不分大小写与位置）', () => {
   assert.deepEqual(sensitiveHeaderKeys({ Authorization: 'a', 'X-API-Key': 'b', 'client-secret': 'c', 'X-Token': 'd', Note: 'e' }),
@@ -171,29 +171,29 @@ test('明文敏感头门禁：默认拒绝、MCP_ALLOW_PLAIN_HEADERS=1 逃生门
   assert.deepEqual(plainSensitiveHeaderViolation(headers), ['Authorization'], '逃生门关闭后恢复拒绝')
 })
 
-// -- §6 SecretBroker：put/resolve/rotate/delete/审计零明文 ---------------------------------
+// -- §6 SecretBroker : put/resolve/rotate/delete/audit sans clair ---------------------------------
 
 test('SecretBroker put/resolve/rotate/delete：同名再 put 即轮换，describe 永不返回原文', () => {
   const { registry, broker, events } = makeHarness()
   const first = broker.put({ serviceId: 'mcp-x1', headerName: 'X-API-Key', secret: 'secret-value-1' })
   assert.deepEqual(first.headerNames, ['X-API-Key'])
   assert.equal(broker.resolve('mcp-x1')[0].secret, 'secret-value-1')
-  // 轮换（rotate）
+  // Rotation (rotate)
   broker.put({ serviceId: 'mcp-x1', headerName: 'X-API-Key', secret: 'secret-value-2' })
   const rotated = broker.resolve('mcp-x1')
   assert.equal(rotated.length, 1)
   assert.equal(rotated[0].secret, 'secret-value-2')
-  // describe 零原文
+  // describe sans clair
   const description = broker.describe('mcp-x1')
   assert.ok(!JSON.stringify(description).includes('secret-value'))
   assert.equal(description.credentialRef, 'local:mcp-x1')
-  // 未登记 resolve miss
+  // resolve miss sans enregistrement
   assert.equal(broker.resolve('mcp-none'), null)
-  // 删除
+  // Suppression
   assert.equal(broker.delete('mcp-x1'), true)
   assert.equal(broker.resolve('mcp-x1'), null)
   assert.equal(broker.delete('mcp-x1'), false)
-  // 审计事件存在且 payload 绝无 secret 原文
+  // Événement d'audit présent et payload sans jamais le secret en clair
   const accesses = events.filter((item) => item.name === 'mcp.secret.access')
   assert.ok(accesses.length >= 2)
   for (const item of accesses) {
@@ -210,7 +210,7 @@ test('SecretBroker 密钥文件权限：目录 0700 / 文件 0600；业务集合
   assert.ok(existsSync(file))
   assert.equal(statSync(file).mode & 0o777, 0o600)
   assert.equal(statSync(join(dataDir, 'secrets', 'mcp')).mode & 0o777, 0o700)
-  // 业务集合（内存与落盘 JSON）零密钥
+  // Collection métier (en mémoire et JSON persisté) sans clé
   assert.ok(!JSON.stringify(registry.services().all()).includes('bearer-secret-9'))
   mkdirSync(dataDir, { recursive: true })
   const raw = readFileSync(file, 'utf8')
@@ -234,14 +234,14 @@ test('SecretBroker unsupported 前缀：vault:/external: 登记与取值均抛 C
   const { broker, dataDir } = makeHarness()
   assert.throws(() => broker.put({ serviceId: 'mcp-v1', credentialRef: 'vault:kv/data/x', secret: 'v' }), /CREDENTIAL_BROKER_UNSUPPORTED/)
   assert.throws(() => broker.put({ serviceId: 'mcp-v2', credentialRef: 'external:http://x', secret: 'v' }), /CREDENTIAL_BROKER_UNSUPPORTED/)
-  // 存量手写文件形态（迁移期可能落盘）resolve 同样 fail-closed
+  // Fichier écrit à la main préexistant (possible en période de migration) : resolve tout aussi fail-closed
   const file = join(dataDir, 'secrets', 'mcp', 'mcp-v3.json')
   mkdirSync(join(dataDir, 'secrets', 'mcp'), { recursive: true })
   writeFileSync(file, JSON.stringify({ credentialRef: 'vault:prod', secrets: [{ headerName: 'Authorization', secret: 'v' }], updatedAt: new Date().toISOString() }), 'utf8')
   assert.throws(() => broker.resolve('mcp-v3'), /CREDENTIAL_BROKER_UNSUPPORTED/)
 })
 
-// -- §6 明文敏感头迁移 ----------------------------------------------------------------------
+// -- §6 migration des en-têtes sensibles en clair ----------------------------------------------------------------------
 
 test('migratePlainHeaders：dryRun 预检 → 执行后 headers 清敏感键、broker 命中、credentialRef 回写', () => {
   const { registry, broker } = makeHarness()
@@ -253,7 +253,7 @@ test('migratePlainHeaders：dryRun 预检 → 执行后 headers 清敏感键、b
   const dry = registry.migratePlainHeaders({ dryRun: true })
   assert.equal(dry.dryRun, true)
   assert.deepEqual(dry.candidates, [{ serviceId: service.id, serviceName: '带明文头服务', keys: ['Authorization', 'x-api-secret'] }])
-  // dryRun 不改数据
+  // dryRun ne modifie pas les données
   assert.equal(registry.services().get(service.id).headers.Authorization, 'Bearer migrate-me')
   const result = registry.migratePlainHeaders()
   assert.equal(result.dryRun, false)
@@ -266,12 +266,12 @@ test('migratePlainHeaders：dryRun 预检 → 执行后 headers 清敏感键、b
   const resolved = broker.resolve(service.id)
   assert.deepEqual(resolved.map((item) => item.headerName).sort(), ['Authorization', 'x-api-secret'])
   assert.ok(resolved.find((item) => item.headerName === 'Authorization').secret, 'Bearer migrate-me')
-  // 再跑：无候选（幂等，不重复迁移）
+  // Re-passage : plus de candidat (idempotent, pas de migration en double)
   assert.deepEqual(registry.migratePlainHeaders({ dryRun: true }).candidates, [])
   assert.equal(registry.migratePlainHeaders().migrated, 0)
 })
 
-// -- §6 注入点：resolveCallHeaders 组装顺序（经 syncTools 端到端打本地 echo 服务端） ------------
+// -- §6 point d'injection : ordre d'assemblage de resolveCallHeaders (bout en bout sur un service echo local via syncTools) ------------
 
 test('resolveCallHeaders：存量非敏感头保留 + 凭证覆盖同名键 + Authorization 注入（端到端）', async () => {
   const { registry, broker } = makeHarness()
@@ -333,7 +333,7 @@ test('setOwnerEntity：归属指派落库（资源存在性校验在 REST 层经
   const updated = registry.setOwnerEntity(service.id, { type: 'app', id: ' app-77 ' })
   assert.deepEqual(updated.ownerEntity, { type: 'app', id: 'app-77' })
   assert.throws(() => registry.setOwnerEntity(service.id, { type: 'department' }), /ownerEntity/)
-  // 治理摘要随之摘除 unowned
+  // Le résumé de gouvernance retire d'un coup unowned
   const summary = registry.governanceSummary()
   assert.ok(!summary.unowned.some((item) => item.serviceId === service.id))
 })

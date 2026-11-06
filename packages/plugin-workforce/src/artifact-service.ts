@@ -1,10 +1,10 @@
 /**
- * 受控 artifact 服务（实施路径 §4.5/§D.12：员工文件出入一律走受控 staging，
- * 不开放平台本地路径——远端运行时的本机路径既不等于平台路径，也不能因此
- * 获得读取平台任意文件的能力）。
+ * Service d'artefacts contrôlés (chemin d'implémentation §4.5/§D.12 : les entrées/sorties de fichiers de l'employé passent toujours par le staging contrôlé,
+ * pas de chemin local de plateforme ouvert — le chemin local d'un runtime distant n'est ni un chemin de la plateforme, et ne doit pas non plus
+ * procurer ainsi la capacité de lire un fichier arbitraire de la plateforme).
  *
- * 内容经请求体 base64 进入服务端受控目录；文件名清洗禁路径分隔符与 `..`；
- * 员工仅可写自己 run 的 artifact；读取归属＝本人或同组织 workforce.read。
+ * Le contenu entre par base64 dans le corps de requête vers le répertoire contrôlé du serveur ; le nettoyage du nom de fichier interdit les séparateurs de chemin et `..` ;
+ * l'employé ne peut écrire que des artefacts de son propre run ; lecture autorisée = lui-même ou workforce.read de la même organisation.
  */
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -27,7 +27,7 @@ import type { WorkCallerRef } from '../../platform-core/src/workforce-port.ts'
 export class ArtifactService extends Service implements WorkforceArtifacts {
   static readonly provide = 'workforceArtifacts'
 
-  /** 受控 staging 目录：与 SQLite 同底座（config.dataDir ?? <cwd>/data）。 */
+  /** Répertoire staging contrôlé : même base que SQLite (config.dataDir ?? <cwd>/data). */
   private readonly stagingDir: string
 
   constructor(ctx: Context, config: { dataDir?: string } = {}) {
@@ -36,7 +36,7 @@ export class ArtifactService extends Service implements WorkforceArtifacts {
     mkdirSync(this.stagingDir, { recursive: true })
   }
 
-  // -- 依赖 -------------------------------------------------------------
+  // -- Dépendances -------------------------------------------------------------
 
   private get store(): WorkforceStore {
     const store = (this.ctx as unknown as { workforceStore?: WorkforceStore }).workforceStore
@@ -62,30 +62,30 @@ export class ArtifactService extends Service implements WorkforceArtifacts {
     return permits
   }
 
-  // -- 受控上传 -----------------------------------------------------------
+  // -- Téléversement contrôlé -----------------------------------------------------------
 
   async createUpload(caller: WorkCallerRef, input: { name: string; contentType: string; contentBase64: string; runId?: string }): Promise<ArtifactRecord> {
-    // 身份：仅受管数字员工可写（D12）
+    // Identité : seuls les employés numériques gérés peuvent écrire (D12)
     const resolution = await this.identity.resolveByCaller(caller)
     if (!resolution) throw new WorkforceError('EMPLOYEE_NOT_ACTIVE', t('非受管数字员工，不能写入 artifact'))
-    // 大小：硬上限（默认 8MB）
+    // Taille : plafond dur (8 Mo par défaut)
     const buffer = Buffer.from(input.contentBase64, 'base64')
     if (buffer.length > ARTIFACT_MAX_BYTES) {
       throw new WorkforceError('ARTIFACT_SCOPE_DENIED', t('超出 artifact 大小上限（{max} 字节）', { max: ARTIFACT_MAX_BYTES }))
     }
-    // run 归属：携带 runId 时必须存在本员工签发且有效的 permit 绑定（V06：跨 run 拒绝）
+    // Rattachement au run : si runId est porté, il doit exister un permit valide émis pour cet employé et lié à ce run (V06 : refus inter-run)
     if (input.runId) {
       const permit = this.permits.activeForRun(input.runId)
       if (!permit || permit.employeeId !== resolution.employee.id) {
         throw new WorkforceError('ARTIFACT_SCOPE_DENIED', t('该 run 不归属当前员工，拒绝写入 artifact'))
       }
     }
-    // 文件名清洗：禁路径分隔符与 ..（V15：不向员工开放任意 localFile）
+    // Nettoyage du nom de fichier : séparateurs de chemin et .. interdits (V15 : aucun localFile arbitraire exposé à l'employé)
     const safeName = this.sanitizeName(input.name)
     const id = newId('art')
     const storagePath = join(this.stagingDir, `${id}__${safeName}`)
     writeFileSync(storagePath, buffer)
-    // TableStore.insert 为 void（落库副作用）——记录以本地变量返回，不得返回 insert() 结果
+    // TableStore.insert renvoie void (effet de bord d'écriture) — l'enregistrement est renvoyé via la variable locale, jamais le résultat d'insert()
     const record: ArtifactRecord = {
       id,
       employeeId: resolution.employee.id,
@@ -103,7 +103,7 @@ export class ArtifactService extends Service implements WorkforceArtifacts {
     return record
   }
 
-  /** 文件名清洗：去除路径分隔符、空字节与 .. 序列；空名兜底 artifact。 */
+  /** Nettoyage du nom de fichier : supprime séparateurs de chemin, octets nuls et séquences .. ; nom vide remplacé par artifact. */
   private sanitizeName(name: string): string {
     const cleaned = String(name ?? '')
       .replace(/[\\/\x00]/g, '_')
@@ -113,7 +113,7 @@ export class ArtifactService extends Service implements WorkforceArtifacts {
     return cleaned || 'artifact'
   }
 
-  // -- 读取 ---------------------------------------------------------------
+  // -- Lecture ---------------------------------------------------------------
 
   async get(caller: WorkCallerRef, artifactId: string): Promise<ArtifactRecord> {
     const record = this.store.artifacts.get(artifactId)
@@ -127,7 +127,7 @@ export class ArtifactService extends Service implements WorkforceArtifacts {
     return readFileSync(record.storagePath).toString('base64')
   }
 
-  /** 归属判定：员工本人，或 human（入口已把守权限点）且与 artifact 组织同组织。 */
+  /** Jugement d'appartenance : l'employé lui-même, ou un human (l'entrée a déjà vérifié les points de permission) de la même organisation que l'artefact. */
   private async assertReadable(caller: WorkCallerRef, record: ArtifactRecord): Promise<void> {
     const resolution = await this.identity.resolveByCaller(caller)
     if (resolution && resolution.employee.id === record.employeeId) return
@@ -138,7 +138,7 @@ export class ArtifactService extends Service implements WorkforceArtifacts {
     throw new WorkforceError('ARTIFACT_SCOPE_DENIED', t('无权访问该 artifact（仅本人或同组织主体）'))
   }
 
-  /** human 组织反查（结构化探测 iam；解析失败 fail-closed）。 */
+  /** Recherche inverse de l'organisation du human (sondage structuré iam ; échec de résolution fail-closed). */
   private humanOrgId(caller: WorkCallerRef): string | null {
     try {
       const iam = (this.ctx as unknown as { iam?: { users?: () => { get(id: string): { orgId?: string } | undefined } } }).iam
@@ -149,7 +149,7 @@ export class ArtifactService extends Service implements WorkforceArtifacts {
     }
   }
 
-  /** 内部通道（NAS 写入适配器消费）：run 归属已由 permit 校验，按存储路径直读。 */
+  /** Canal interne (consommé par l'adaptateur d'écriture NAS) : le rattachement au run est déjà vérifié par le permit, lecture directe par chemin de stockage. */
   readByPermit(permit: PermitRecord, artifactId: string): ArtifactRecord {
     const record = this.store.artifacts.get(artifactId)
     if (!record

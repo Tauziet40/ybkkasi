@@ -1,9 +1,9 @@
 /**
- * 制造工具箱 —— 结果与工具定义协议（自「制造业 AI 工具集」并入，2026-10-19 融合决策）。
+ * Boîte à outils manufacture — protocole des résultats et définitions d'outils (intégré depuis « jeu d'outils IA manufacture », décision de fusion 2026-10-19).
  *
- * 协议保持源项目 v1.0 形状不变（ToolResult/Block 判别联合）——并入方只换承载面
- * （Express+React → 01门 面板数据面与零构建 SPA），不动数据契约，使既有金标断言、
- * 导出格式与前端渲染语义零改写：融合成本落在接线，不落在业务。
+ * Le protocole conserve la forme v1.0 du projet source (union discriminée ToolResult/Block) — l'intégration ne change que la face porteuse
+ * (Express+React → plan de données du panneau porte 01 et SPA sans build), sans toucher au contrat de données, si bien que les assertions de référence,
+ * formats d'export et sémantiques de rendu du front sont sans réécriture : le coût de la fusion porte sur le câblage, pas sur le métier.
  */
 
 export type Category =
@@ -15,7 +15,7 @@ export type Category =
   | '经营财务'
   | '知识与文档'
 
-/** 表单字段：由同一份定义生成网页表单、导入模板与执行期校验（单一事实源）。 */
+/** Champ de formulaire : la même définition génère le formulaire web, le gabarit d'import et la validation à l'exécution (source de fait unique). */
 export type Field = {
   key: string
   label: string
@@ -29,7 +29,7 @@ export type Field = {
 
 export type Metric = { label: string; value: string | number; unit?: string; tone?: 'good' | 'warn' | 'neutral' }
 
-/** 结果块判别联合：仅此五类，模型不能发任意 HTML/JS（渲染面白名单）。 */
+/** Union discriminée des blocs de résultat : ces cinq classes seulement, le modèle ne peut pas émettre un HTML/JS arbitraire (liste blanche de la face de rendu). */
 export type Block =
   | { type: 'metrics'; items: Metric[] }
   | { type: 'text'; title: string; content: string }
@@ -60,12 +60,12 @@ export type ToolDefinition = {
   mode: 'calculation' | 'model'
   tags: string[]
   fields: Field[]
-  /** AI 工具的内核标识（对应 quality.ts 的 skills 注册键）。 */
+  /** Identifiant du noyau d'outil IA (correspond à la clé d'enregistrement skills de quality.ts). */
   skill?: string
   accepts?: string[]
 }
 
-/** 工具箱目录元信息（模型面按平台网关现状动态求值，不在此静态声明）。 */
+/** Métainfos du catalogue de la boîte à outils (la face modèle est évaluée dynamiquement selon l'état de la passerelle de la plateforme, pas déclarée statiquement ici). */
 export type CatalogMeta = {
   tools: ToolDefinition[]
   targetCount: number

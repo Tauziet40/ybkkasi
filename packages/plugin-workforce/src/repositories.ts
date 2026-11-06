@@ -1,12 +1,12 @@
 /**
- * 数字员工域权威存储（repositories）—— workforce_* 表全部落 SQLite txnStore（附录 A 决策 7）。
+ * Stockage de référence du domaine de l'employé numérique (repositories) — toutes les tables workforce_* en SQLite txnStore (annexe A décision 7).
  *
- * 职责边界（§11.6）：
- *   - 本服务只做「表结构迁移 + 行级 CRUD + 事务委托」，不含任何业务策略（策略在 domain.ts / 各服务）；
- *   - 事务为 BEGIN IMMEDIATE 同步事务（node:sqlite）：事务内严禁网络/异步调用；
- *     所有写路径的唯一性域校验（如 employee+version、run+stepKey）由各服务在 store.txn 内完成预检，
- *     SQLite 唯一索引兜底（insert 冲突直接抛出，服务层负责翻译成中文领域错误）；
- *   - 表结构唯一事实源是 contract.ts 的 WORKFORCE_TABLES，本文件不重复声明列。
+ * Frontières de responsabilité (§11.6) :
+ *   - ce service ne fait que « migration de structures de tables + CRUD de lignes + délégation de transaction », sans aucune politique métier (politiques dans domain.ts / les services) ;
+ *   - les transactions sont des transactions synchrones BEGIN IMMEDIATE (node:sqlite) : tout appel réseau/asynchrone y est strictement interdit ;
+ *     la validation d'unicité de domaine de tous les chemins d'écriture (ex. employee+version, run+stepKey) est précontrôlée par chaque service dans store.txn,
+ *     l'index unique SQLite sert de rattrapage (un conflit d'insert lève directement, la couche service traduit en erreur de domaine en chinois) ;
+ *   - l'unique source de fait des structures de tables est WORKFORCE_TABLES de contract.ts, ce fichier ne redéclare pas les colonnes.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -30,7 +30,7 @@ import type {
   WorkforceTableSpec,
 } from './contract.ts'
 
-/** 契约接口键 → 表名（WORKFORCE_TABLES 的权威键）。 */
+/** Clé d'interface du contrat → nom de table (clé de référence de WORKFORCE_TABLES). */
 const TABLE_NAMES = {
   employees: 'workforce_employees',
   bindings: 'workforce_bindings',
@@ -48,15 +48,15 @@ const TABLE_NAMES = {
 type Row = Record<string, SqlValue>
 
 /**
- * 基于 txnStore 的通用 TableStore 实现。
+ * Implémentation générique de TableStore fondée sur txnStore.
  *
- * jsonFields 口径（契约 WorkforceTableSpec.jsonFields）：
- *   - 标注字段写入时 JSON 序列化、读出时反序列化；值本身已是字符串则按「已序列化文本」原样落库；
- *   - 当前 WORKFORCE_TABLES 各表的 JSON 载荷（grantsJson/actionsJson/toolsJson/argsSummaryJson 等）
- *     均以 *Json TEXT 列承载、记录类型即声明为 string，故各表 jsonFields 现为空——
- *     机制保留给后续 additive 扩展字段，不改动既有列语义（§11.3 additive-only）；
- *   - findWhere 对 jsonFields 按存储文本等值匹配（不做结构化匹配）：查询方须传入与落库一致的
- *     序列化文本；未标注字段按原值等值匹配。
+ * Référentiel jsonFields (contrat WorkforceTableSpec.jsonFields) :
+ *   - les champs marqués sont sérialisés en JSON à l'écriture et désérialisés à la lecture ; une valeur déjà chaîne est stockée telle quelle comme « texte déjà sérialisé » ;
+ *   - actuellement, les charges utiles JSON des tables de WORKFORCE_TABLES (grantsJson/actionsJson/toolsJson/argsSummaryJson etc.)
+ *     sont portées par des colonnes TEXT en *Json et les types d'enregistrement les déclarent string, donc les jsonFields de chaque table sont vides pour l'instant —
+ *     le mécanisme est réservé aux futurs champs d'extension additive, sans modifier la sémantique des colonnes existantes (§11.3 additive-only) ;
+ *   - findWhere confronte les jsonFields par égalité du texte stocké (pas de correspondance structurée) : le demandeur doit passer le texte
+ *     sérialisé identique au stockage ; les champs non marqués sont confrontés par égalité de la valeur d'origine.
  */
 class TxnTableStore<T extends { id: string }> implements TableStore<T> {
   private readonly svc: SqliteTxnService
@@ -67,7 +67,7 @@ class TxnTableStore<T extends { id: string }> implements TableStore<T> {
     this.spec = spec
   }
 
-  /** 写入编码：jsonFields 序列化，其余原值（undefined 归 null）。 */
+  /** Encodage à l'écriture : jsonFields sérialisés, le reste en valeur d'origine (undefined ramené à null). */
   private encodeField(field: string, value: unknown): SqlValue {
     if ((this.spec.jsonFields ?? []).includes(field)) {
       if (typeof value === 'string') return value
@@ -82,7 +82,7 @@ class TxnTableStore<T extends { id: string }> implements TableStore<T> {
     return row
   }
 
-  /** 读出解码：jsonFields 反序列化；坏 JSON 按原始文本保留（诚实呈现，不静默修复）。 */
+  /** Décodage à la lecture : jsonFields désérialisés ; un mauvais JSON est conservé comme texte brut (rendu honnête, pas de réparation silencieuse). */
   private decodeRow(row: Row): T {
     const jsonFields = this.spec.jsonFields ?? []
     if (jsonFields.length === 0) return row as T
@@ -93,14 +93,14 @@ class TxnTableStore<T extends { id: string }> implements TableStore<T> {
       try {
         out[field] = JSON.parse(raw)
       } catch {
-        /* 存量文本非合法 JSON：保留原文，由上层显式报错 */
+        /* texte historique non JSON valide : conservé tel quel, erreur explicite remontée par la couche supérieure */
       }
     }
     return out as T
   }
 
   insert(row: T): void {
-    // 唯一索引/主键冲突在此直接抛出；服务层应在 txn 内预检并翻译为中文领域错误
+    // Un conflit d'index unique/clé primaire lève directement ici ; la couche service doit précontrôler dans la txn et traduire en erreur de domaine en chinois
     this.svc.insert(this.spec.name, this.encodeRow(row as unknown as Record<string, unknown>))
   }
 
@@ -126,7 +126,7 @@ class TxnTableStore<T extends { id: string }> implements TableStore<T> {
   }
 
   delete(id: string): void {
-    // 表名来自冻结契约（ensureTable 已按标识符白名单校验），此处仅拼接常量
+    // Les noms de tables viennent du contrat figé (ensureTable a déjà validé par liste blanche d'identifiants), simple concaténation de constantes ici
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(this.spec.name)) throw new Error(t('非法表名：{name}', { name: this.spec.name }))
     this.svc.run(`DELETE FROM ${this.spec.name} WHERE id = ?`, [id])
   }
@@ -137,18 +137,18 @@ class TxnTableStore<T extends { id: string }> implements TableStore<T> {
 }
 
 export interface WorkforceStoreConfig {
-  /** 预留：与 WorkforceConfig.dataDir 对齐（txnStore 已由 platform-core 按 dataDir 建库）。 */
+  /** Réservé : alignement avec WorkforceConfig.dataDir (la base txnStore est déjà créée par platform-core selon dataDir). */
   dataDir?: string
 }
 
 /**
  * WorkforceStoreService（provide 'workforceStore'）。
  *
- * 唯一性域校验约定（写路径纪律）：本服务不内置业务规则；服务层必须在 store.txn 内
- * 先查后写完成唯一性域校验并抛中文错误，例如：
- *   - employee+version 冲突 → `throw new Error('该员工已存在同名任用版本…')`（路由层 400）；
- *   - run+stepKey 不同参数命中唯一约束 → WorkforceError('STEP_ARGUMENT_CONFLICT')（仅限调用步骤）；
- *   - 同 Agent 二次 active 绑定 → WorkforceError('PRINCIPAL_BINDING_MISMATCH')。
+ * Convention de validation d'unicité de domaine (discipline du chemin d'écriture) : ce service n'embarque pas de règles métier ; la couche service doit, dans store.txn,
+ * chercher avant d'écrire pour valider l'unicité de domaine et lever une erreur en chinois, par exemple :
+ *   - conflit employee+version → `throw new Error('该员工已存在同名任用版本…')` (400 par la couche routes) ;
+ *   - run+stepKey avec paramètres différents heurtant la contrainte unique → WorkforceError('STEP_ARGUMENT_CONFLICT') (étapes d'appel uniquement) ;
+ *   - seconde liaison active du même Agent → WorkforceError('PRINCIPAL_BINDING_MISMATCH').
  */
 export class WorkforceStoreService extends Service implements WorkforceStore {
   static readonly provide = 'workforceStore'
@@ -169,8 +169,8 @@ export class WorkforceStoreService extends Service implements WorkforceStore {
 
   constructor(ctx: Context, config: WorkforceStoreConfig = {}) {
     super(ctx, 'workforceStore')
-    void config // txnStore 底座由 platform-core 以同一 dataDir 建库；此处仅对齐配置形状
-    // txnStore 属基础层（platform-core），本插件依赖清单已声明；经结构化读取避免装配顺序耦合
+    void config // la base txnStore est créée par platform-core avec le même dataDir ; simple alignement de la forme de configuration ici
+    // txnStore appartient à la couche de base (platform-core), déclaré dans la liste de dépendances de cette extension ; lecture structurée pour éviter le couplage d'ordre d'assemblage
     this.svc = (ctx as unknown as { txnStore: SqliteTxnService }).txnStore
     this.employees = new TxnTableStore<EmployeeRecord>(this.svc, WORKFORCE_TABLES[TABLE_NAMES.employees])
     this.bindings = new TxnTableStore<BindingRecord>(this.svc, WORKFORCE_TABLES[TABLE_NAMES.bindings])
@@ -183,11 +183,11 @@ export class WorkforceStoreService extends Service implements WorkforceStore {
     this.artifacts = new TxnTableStore<ArtifactRecord>(this.svc, WORKFORCE_TABLES[TABLE_NAMES.artifacts])
     this.deliverables = new TxnTableStore<DeliverableRecord>(this.svc, WORKFORCE_TABLES[TABLE_NAMES.deliverables])
     this.outbox = new TxnTableStore<OutboxRecord>(this.svc, WORKFORCE_TABLES[TABLE_NAMES.outbox])
-    // 装配即迁移（幂等建表）：后续服务可直接读写，不必显式调用 migrate
+    // Migration dès l'assemblage (création de tables idempotente) : les services suivants peuvent lire/écrire directement, sans appeler migrate explicitement
     this.migrate()
   }
 
-  /** 迁移：遍历 WORKFORCE_TABLES 建齐表/唯一索引/普通索引（幂等；DDL 纳入同事务）。 */
+  /** Migration : parcourt WORKFORCE_TABLES pour créer toutes les tables/index uniques/index ordinaires (idempotent ; DDL inclus dans la même transaction). */
   migrate(): void {
     this.txn(() => {
       for (const spec of Object.values(WORKFORCE_TABLES)) {
@@ -196,7 +196,7 @@ export class WorkforceStoreService extends Service implements WorkforceStore {
     })
   }
 
-  /** BEGIN IMMEDIATE 同步事务（txnStore 包装）：短检查/预留/提交用；网络调用严禁入内。 */
+  /** Transaction synchrone BEGIN IMMEDIATE (enveloppe txnStore) : pour courts contrôles/réservations/validations ; tout appel réseau y est strictement interdit. */
   txn<T>(fn: () => T): T {
     return this.svc.txn(fn)
   }

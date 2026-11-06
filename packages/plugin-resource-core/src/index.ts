@@ -1,13 +1,13 @@
 /**
- * @dsh-ops/plugin-resource-core —— 资源本体通用底座。
+ * @dsh-ops/plugin-resource-core — socle générique des entités de ressource.
  *
- * Agent 与 AI 应用模块的属性模型、权限、生命周期逻辑高度一致（方案 §八），
- * 本插件把它们抽象为「资源本体」引擎：
- *   - 属性表引擎：声明式 schema（分组 + 字段），创建/更新时统一校验，
- *     同一份 schema 驱动控制台表单与 dshctl/工具参数。
- *   - 生命周期状态机：draft → trial → online → offline → archived，
- *     迁移带 guard、审批标记、历史留痕，并发布平台事件。
- *   - 依赖图：应用 → Agent → MCP/Skill 的依赖拓扑与影响面分析。
+ * Les modules Agent et application IA partagent un modèle d'attributs, des permissions et une logique de cycle de vie très semblables (plan §8),
+ * cette extension les abstrait en moteur « entité de ressource » :
+ *   - moteur de table d'attributs : schéma déclaratif (groupes + champs), validation unifiée à la création/mise à jour,
+ *     le même schéma pilote le formulaire de console et les paramètres dshctl/outils.
+ *   - machine à états de cycle de vie : draft → trial → online → offline → archived,
+ *     transitions avec guard, marque d'approbation, trace d'historique, et publication d'événements de plateforme.
+ *   - graphe de dépendances : topologie et analyse d'impact des dépendances application → Agent → MCP/Skill.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -15,7 +15,7 @@ import { newId, slugify, type Collection, type RecordBase } from '../../platform
 import { t } from '../../platform-i18n/src/index.ts'
 
 // ---------------------------------------------------------------------------
-// 属性表 schema DSL
+// DSL de schéma de table d'attributs
 // ---------------------------------------------------------------------------
 
 export type FieldType = 'string' | 'text' | 'number' | 'boolean' | 'enum' | 'tags' | 'url' | 'model'
@@ -30,9 +30,9 @@ export interface FieldSpec {
   hint?: string
   placeholder?: string
   defaultValue?: unknown
-  /** 创建后不可修改（如 slug）。 */
+  /** Immuable après création (ex. slug). */
   immutable?: boolean
-  /** 上线（online）前必须补全。 */
+  /** Doit être complété avant la mise en ligne (online). */
   requiredForOnline?: boolean
 }
 
@@ -42,13 +42,13 @@ export interface AttributeSchema {
 }
 
 // ---------------------------------------------------------------------------
-// 生命周期状态机
+// Machine à états de cycle de vie
 // ---------------------------------------------------------------------------
 
 export interface LifecycleState {
   key: string
   label: string
-  /** 状态徽章色调：ok | info | warn | danger | muted */
+  /** Teinte de badge d'état : ok | info | warn | danger | muted */
   tone: 'ok' | 'info' | 'warn' | 'danger' | 'muted'
   terminal?: boolean
 }
@@ -58,11 +58,11 @@ export interface LifecycleTransition {
   label: string
   from: string[]
   to: string
-  /** 迁移前守卫：返回文案则拒绝。 */
+  /** Garde avant transition : renvoyer un libellé = refus. */
   guard?: (entity: ResourceEntity, ctx: Context) => string | undefined
-  /** 高危迁移需走审批中心（L4）。 */
+  /** Les transitions à haut risque passent par le centre d'approbations (L4). */
   approval?: boolean
-  /** 迁移完成后发布的平台事件名（如 agent.offlined）。 */
+  /** Nom de l'événement de plateforme publié après la transition (ex. agent.offlined). */
   event?: string
 }
 
@@ -73,7 +73,7 @@ export interface LifecycleSpec {
 }
 
 // ---------------------------------------------------------------------------
-// 资源类型声明
+// Déclaration de type de ressource
 // ---------------------------------------------------------------------------
 
 export interface ResourceTypeSpec {
@@ -119,13 +119,13 @@ export interface TransitionResult {
 }
 
 // ---------------------------------------------------------------------------
-// 数据要素域（IAW 交接 2-1..2-4：数据集登记 / 质量分 / 血缘 / 指标字典）
+// Domaine des données (livraison IAW 2-1..2-4 : enregistrement de jeux de données / score qualité / lignée / dictionnaire d'indicateurs)
 // ---------------------------------------------------------------------------
 
-/** 数据分级（与 modelgw DataClass 同值域）：渠道分级路由（1-1）按此选路。 */
+/** Gradation des données (même domaine de valeurs que DataClass de modelgw) : le routage par gradation de canal (1-1) sélectionne là-dessus. */
 export type DatasetClassification = 'public' | 'internal' | 'secret'
 
-/** 质量分四维（PRD §7.3）：完整性/准确性/时效性/一致性，等权均值=overall（v1 口径）。 */
+/** Score qualité en quatre dimensions (PRD §7.3) : complétude/exactitude/fraîcheur/cohérence, moyenne équipondérée = overall (référentiel v1). */
 export interface DatasetQualityScore {
   completeness: number
   accuracy: number
@@ -137,43 +137,43 @@ export interface DatasetQualityScore {
 }
 
 export interface DatasetRecord extends RecordBase {
-  /** 数据集编号（业务唯一键，如 ds_qb01_market）。 */
+  /** Code du jeu de données (clé métier unique, ex. ds_qb01_market). */
   code: string
   name: string
-  /** 来源系统（如 钉钉/ERP/NAS/手工台账）。 */
+  /** Système source (ex. DingTalk/ERP/NAS/registre manuel). */
   sourceSystem: string
   classification: DatasetClassification
-  /** 刷新频率描述（实时/每小时/每日/每周/手工）。 */
+  /** Description de la fréquence de rafraîchissement (temps réel/horaire/quotidienne/hebdomadaire/manuel). */
   refreshFrequency?: string
   ownerOrgId?: string
-  /** 关联场景编号（ScenegraphScene.code）。 */
+  /** Code de scénario lié (ScenegraphScene.code). */
   sceneCodes: string[]
   quality?: DatasetQualityScore
-  /** 质量分版本号（C-11）：每次登记自增；expectedVersion 条件更新据此判冲突。 */
+  /** Numéro de version du score qualité (C-11) : incrémenté à chaque enregistrement ; la mise à jour conditionnelle expectedVersion juge le conflit là-dessus. */
   qualityRevision?: number
   note?: string
 }
 
 /**
- * 指标定义（2-4 指标字典）：同一指标码允许多条定义并存——口径冲突按「记录人/时间」
- * 全量留账（不覆盖不合并），仲裁动作把某条置 active、其余 superseded。
+ * Définition d'indicateur (2-4 dictionnaire d'indicateurs) : un même code d'indicateur admet plusieurs définitions coexistantes — les conflits de référentiel sont
+ * intégralement comptabilisés par « enregistreur/temps » (ni écrasement ni fusion), l'action d'arbitrage pose une entrée active et passe les autres superseded.
  */
 export interface MetricDefinitionRecord extends RecordBase {
   code: string
   name: string
   unit?: string
   description?: string
-  /** 口径明细（计算公式/来源表字段/统计窗口等，生产方契约）。 */
+  /** Détail du référentiel (formule de calcul/champs de table source/fenêtre statistique, etc., contrat du producteur). */
   payload?: Record<string, unknown>
   recordedBy: string
   recordedAt: string
   status: 'active' | 'superseded'
-  /** 仲裁时被其取代的定义 id 链。 */
+  /** Chaîne des ids de définitions qu'elle a remplacées à l'arbitrage. */
   supersedes?: string
 }
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 export class ResourceCoreService extends Service {
@@ -185,7 +185,7 @@ export class ResourceCoreService extends Service {
     super(ctx, 'resourceCore')
   }
 
-  /** 插件注册资源类型（幂等：重复注册覆盖，供开发期热载）。 */
+  /** L'extension enregistre un type de ressource (idempotent : un double enregistrement écrase, pour le rechargement à chaud en développement). */
   registerType(spec: ResourceTypeSpec): () => void {
     this.types.set(spec.type, spec)
     return () => this.types.delete(spec.type)
@@ -210,7 +210,7 @@ export class ResourceCoreService extends Service {
     return spec
   }
 
-  // -- 属性校验 -----------------------------------------------------------
+  // -- Validation d'attributs -----------------------------------------------------------
 
   validateAttrs(type: string, attrs: Record<string, unknown>, mode: 'create' | 'update' | 'online'): string[] {
     const spec = this.requireSpec(type)
@@ -218,8 +218,8 @@ export class ResourceCoreService extends Service {
     for (const field of spec.schema.fields) {
       const value = attrs[field.key]
       const present = value !== undefined && value !== null && value !== ''
-      // update 校验的是合并后的完整 attrs，required 与 create 同等强制——否则 PATCH 空值可绕过
-      // 创建期必填（外部 QA-20261014 QA-04：PATCH description:'' 曾返回 200 清空描述）
+      // la mise à jour valide les attrs complets après fusion, required aussi contraignant qu'à la création — sinon un PATCH vide contourne
+      // l'obligatoire de création (QA-20261014 QA-04 externe : PATCH description:'' avait renvoyé 200 en vidant la description)
       if ((mode === 'create' || mode === 'update') && field.required && !present) {
         errors.push(t('缺少必填字段「{label}」({key})', { label: field.label, key: field.key }))
       }
@@ -250,7 +250,7 @@ export class ResourceCoreService extends Service {
         default:
           if (typeof value !== 'string') errors.push(t('「{label}」必须是字符串', { label: field.label }))
           else if (looksLikeCorruptedText(value)) {
-            // 测试 DEF-06：注册端编码错误（如 GBK 字节流按 UTF-8 解码）产生的乱码不再入库上架
+            // test DEF-06 : les caractères moisis issus d'une erreur d'encodage côté enregistrement (ex. flux d'octets GBK décodé en UTF-8) n'entrent plus en base
             errors.push(t('「{label}」含乱码字符（疑似编码错误），请以 UTF-8 编码重新提交', { label: field.label }))
           }
       }
@@ -258,7 +258,7 @@ export class ResourceCoreService extends Service {
     return errors
   }
 
-  // -- 实体 CRUD ----------------------------------------------------------
+  // -- CRUD d'entités ----------------------------------------------------------
 
   create(type: string, input: {
     name: string
@@ -341,8 +341,8 @@ export class ResourceCoreService extends Service {
   }
 
   /**
-   * 删除资源：默认仅终态可删；调用方可经 allowStates 放宽（如 NAS 允许草稿直删——
-   * 草稿从未上线，无法经 下线→归档 到达终态）。
+   * Supprime une ressource : par défaut, seul l'état terminal est supprimable ; l'appelant peut relâcher via allowStates (ex. NAS permet la suppression directe
+   * du brouillon — un brouillon jamais mis en ligne ne peut pas atteindre l'état terminal par hors ligne→archivage).
    */
   remove(type: string, id: string, opts?: { allowStates?: string[] }): boolean {
     const spec = this.requireSpec(type)
@@ -355,7 +355,7 @@ export class ResourceCoreService extends Service {
     return this.collection(type).remove(id)
   }
 
-  // -- 生命周期 -----------------------------------------------------------
+  // -- Cycle de vie -----------------------------------------------------------
 
   stateLabel(type: string, status: string): { label: string; tone: string } {
     const spec = this.requireSpec(type)
@@ -372,7 +372,7 @@ export class ResourceCoreService extends Service {
       .map(({ action, label, to, approval }) => ({ action, label, to, approval }))
   }
 
-  /** 执行状态迁移：guard → 状态更新 → 历史留痕 → 平台事件。 */
+  /** Exécute une transition d'état : guard → mise à jour d'état → trace d'historique → événement de plateforme. */
   transition(type: string, id: string, action: string, actor: string, note?: string): TransitionResult {
     const spec = this.requireSpec(type)
     const collection = this.collection(type)
@@ -411,7 +411,7 @@ export class ResourceCoreService extends Service {
     return { entity: updated, event }
   }
 
-  // -- 依赖图 -------------------------------------------------------------
+  // -- Graphe de dépendances -------------------------------------------------------------
 
   dependencies(): Collection<DependencyRecord> {
     return this.ctx.opsStorage.collection<DependencyRecord>('resource:dependencies')
@@ -439,7 +439,7 @@ export class ResourceCoreService extends Service {
     if (record) this.dependencies().remove(record.id)
   }
 
-  /** 拓扑：从某资源向下展开依赖树（应用 → Agent → MCP/Skill）。未注册类型按叶节点呈现。 */
+  /** Topologie : déploie l'arbre de dépendances depuis une ressource vers le bas (application → Agent → MCP/Skill). Type non enregistré rendu comme feuille. */
   topology(type: string, id: string, depth = 4): TopologyNode {
     const spec = this.types.get(type)
     const entity = spec ? this.collection(type).get(id) : undefined
@@ -458,7 +458,7 @@ export class ResourceCoreService extends Service {
     return node
   }
 
-  /** 影响面：谁直接/间接依赖了该资源（下线前预览）。未注册类型仅登记 id。 */
+  /** Impact : qui dépend directement/indirectement de cette ressource (aperçu avant mise hors ligne). Type non enregistré : id seul enregistré. */
   impact(type: string, id: string): Array<{ type: string; id: string; name: string; status: string; depth: number }> {
     const result: Array<{ type: string; id: string; name: string; status: string; depth: number }> = []
     const visit = (t: string, i: string, depth: number): void => {
@@ -475,7 +475,7 @@ export class ResourceCoreService extends Service {
     return result.sort((a, b) => a.depth - b.depth)
   }
 
-  // -- 数据要素域（IAW 交接 2-1..2-4） ---------------------------------------
+  // -- Domaine des données (livraison IAW 2-1..2-4) ---------------------------------------
 
   datasets(): Collection<DatasetRecord> {
     const collection = this.ctx.opsStorage.collection<DatasetRecord>('resource:datasets')
@@ -483,7 +483,7 @@ export class ResourceCoreService extends Service {
     return collection
   }
 
-  /** 数据集登记（upsert by code）：来源系统/分级/刷新频率/关联场景（2-1）。 */
+  /** Enregistrement de jeu de données (upsert par code) : système source/gradation/fréquence de rafraîchissement/scénario lié (2-1). */
   upsertDataset(input: {
     code: string
     name: string
@@ -532,7 +532,7 @@ export class ResourceCoreService extends Service {
     return created
   }
 
-  /** 数据集列表（2-1 面板最小接口口径）：按场景/分级/组织/关键词过滤。 */
+  /** Liste des jeux de données (2-1, interface minimale du panneau) : filtres par scénario/gradation/organisation/mot-clé. */
   listDatasets(filter: { sceneCode?: string; classification?: string; orgId?: string; q?: string } = {}): Array<DatasetRecord & { sceneCount: number }> {
     const q = filter.q?.toLowerCase()
     return this.datasets().all()
@@ -548,9 +548,9 @@ export class ResourceCoreService extends Service {
   }
 
   /**
-   * 质量分登记（2-2）：四维 0-100，overall 等权均值；登记快照不回写历史引用。
-   * 并发语义（C-11）：score.expectedVersion 缺省=最后写入（存量调用方不受影响）；
-   * 携带时与当前 qualityRevision 比对，不一致即拒绝（防并发登记互相覆盖）。
+   * Enregistrement d'un score qualité (2-2) : quatre dimensions 0-100, overall en moyenne équipondérée ; l'instantané enregistré ne réécrit pas les références historiques.
+   * Sémantique de concurrence (C-11) : score.expectedVersion absent = dernier écrivain (appelants existants non affectés) ;
+    * porté, comparé au qualityRevision courant, divergence = refus (contre l'écrasement croisé d'enregistrements concurrents).
    */
   scoreDataset(code: string, score: {
     completeness: number
@@ -558,7 +558,7 @@ export class ResourceCoreService extends Service {
     timeliness: number
     consistency: number
     note?: string
-    /** 乐观锁：携带时必须等于当前 qualityRevision，否则拒绝。 */
+    /** Verrou optimiste : porté, doit égaler le qualityRevision courant, sinon refus. */
     expectedVersion?: number
   }): DatasetRecord {
     const dataset = this.datasets().findOne((item) => item.code === code)
@@ -585,8 +585,8 @@ export class ResourceCoreService extends Service {
   }
 
   /**
-   * 数据血缘（2-3）：复用依赖图，边语义「派生集 --依赖--> 源集」（fromType/toType='dataset'，kind='lineage'）。
-   * 反向追溯=谁派生自我（downstream）；顺向=我来自谁（upstream）。
+   * Lignée de données (2-3) : réutilise le graphe de dépendances, sémantique d'arête « ensemble dérivé --dépend de--> ensemble source » (fromType/toType='dataset', kind='lineage').
+   * Trace inverse = qui dérive de moi (downstream) ; trace directe = de qui je viens (upstream).
    */
   lineage(code: string): {
     dataset: string
@@ -603,7 +603,7 @@ export class ResourceCoreService extends Service {
     return { dataset: code, upstream: collect(true), downstream: collect(false) }
   }
 
-  /** 登记血缘边（派生集 derived 依赖源集 source）。成环拒绝（C-08）：沿既有 dataset 血缘边 DFS，source 已可达 derived 即环。 */
+  /** Enregistre une arête de lignée (l'ensemble dérivé derived dépend de l'ensemble source). Cycle refusé (C-08) : DFS le long des arêtes de lignée dataset existantes, source déjà accessible depuis derived = cycle. */
   addLineage(derived: string, source: string, kind = 'lineage'): DependencyRecord {
     if (derived === source) throw new Error(t('血缘边两端不能是同一数据集'))
     for (const code of [derived, source]) {
@@ -615,7 +615,7 @@ export class ResourceCoreService extends Service {
     return this.addDependency({ fromType: 'dataset', fromId: derived, toType: 'dataset', toId: source, kind })
   }
 
-  /** 沿 dataset 依赖边（from→to）向下 DFS：判断 from 是否可达 target（成环判定的可达性查询）。 */
+  /** DFS vers le bas le long des arêtes de dépendance dataset (from→to) : from atteint-il target (requête d'accessibilité pour le jugement de cycle). */
   private lineageReaches(from: string, target: string): boolean {
     const seen = new Set<string>([from])
     const stack = [from]
@@ -637,9 +637,9 @@ export class ResourceCoreService extends Service {
   }
 
   /**
-   * 指标口径登记（2-4）：同码不覆盖不合并——内容相同的重复登记幂等返回既有条目；
-   * 内容不同即新定义并存（口径冲突按记录人/时间全量留账），仲裁决定 active。
-   * 指纹键序归一（C-09）：payload 递归排序键后序列化，同内容不同键序不再误判为口径冲突。
+   * Enregistrement d'un référentiel d'indicateur (2-4) : même code sans écrasement ni fusion — un double enregistrement de contenu identique renvoie idempotemment l'entrée existante ;
+    * contenu différent = nouvelle définition coexistante (conflit de référentiel intégralement comptabilisé par enregistreur/temps), l'arbitrage décide de l'active.
+   * Normalisation d'ordre des clés de l'empreinte (C-09) : le payload sérialisé après tri récursif des clés, un même contenu avec ordre de clés différent n'est plus un faux conflit de référentiel.
    */
   putMetricDefinition(input: {
     code: string
@@ -666,7 +666,7 @@ export class ResourceCoreService extends Service {
       ...(input.payload ? { payload: input.payload } : {}),
       recordedBy: input.recordedBy.trim(),
       recordedAt: new Date().toISOString(),
-      // 首条定义默认 active；已有 active 的新口径并存为 superseded（待仲裁）
+      // première définition active par défaut ; un nouveau référentiel avec active existante coexiste en superseded (en attente d'arbitrage)
       status: existing.length === 0 ? 'active' : 'superseded',
     })
     this.ctx.platformBus.emit('resource.metric.changed', { code: definition.code, definitionId: definition.id, action: 'recorded', activeCount })
@@ -679,7 +679,7 @@ export class ResourceCoreService extends Service {
     return all.map((item) => ({ ...item, conflictCount: all.length }))
   }
 
-  /** 口径仲裁（2-4）：指定某条定义为 active，其余同码定义置 superseded。 */
+  /** Arbitrage de référentiel (2-4) : désigne une définition active, les autres définitions du même code passent superseded. */
   arbitrateMetric(code: string, definitionId: string, actor: string): { active: MetricDefinitionRecord; superseded: number } {
     const all = this.metricDefinitions().all().filter((item) => item.code === code)
     const target = all.find((item) => item.id === definitionId)
@@ -687,7 +687,7 @@ export class ResourceCoreService extends Service {
     let superseded = 0
     for (const item of all) {
       if (item.id === definitionId) continue
-      // C-09：非目标的同码定义统一把 supersedes 指向本次赢家（含此前已 superseded 的陈旧指针）
+      // C-09 : les définitions du même code hors cible pointent uniformément supersedes vers le gagnant du jour (pointeurs périmés déjà superseded inclus)
       if (item.status !== 'superseded' || item.supersedes !== definitionId) {
         this.metricDefinitions().update(item.id, { status: 'superseded', supersedes: definitionId })
         if (item.status === 'active') superseded++
@@ -709,8 +709,8 @@ export interface TopologyNode {
 }
 
 /**
- * 键序归一化序列化（C-09）：对象键递归排序后再序列化——同一口径 payload 因键插入顺序不同
- * 不再被判为口径冲突（伪冲突）。数组保持原序（元素顺序通常有语义），仅对象键无序。
+ * Sérialisation normalisée d'ordre des clés (C-09) : les clés d'objet triées récursivement avant sérialisation — un même payload de référentiel dont l'ordre d'insertion
+ * des clés diffère n'est plus jugé en conflit de référentiel (faux conflit). Les tableaux gardent leur ordre (l'ordre des éléments porte généralement une sémantique), seules les clés d'objet sont sans ordre.
  */
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`
@@ -722,11 +722,11 @@ function stableStringify(value: unknown): string {
 }
 
 /**
- * 文本乱码检测（测试 DEF-06）：识别注册端编码错误入库的文本。
- * 判定依据（命中任一即视为乱码）：
- *   1. U+FFFD 替换符——字节流非合法 UTF-8 被解码时产生；
- *   2. 控制字符（除 \t \n \r）或私用区/非字符码位——正常业务文案不会出现；
- *   3. 经典乱码标记串（锟斤拷/烫烫烫/连续 ?? 占位）。
+ * Détection de texte moisi (test DEF-06) : identifie les textes entrés en base via une erreur d'encodage côté enregistrement.
+ * Critères (une atteinte quelconque = considéré moisi) :
+ *   1. caractère de remplacement U+FFFD — produit quand un flux d'octets non UTF-8 légal est décodé ;
+ *   2. caractères de contrôle (hors \t \n \r) ou zone à usage privé/codepoints non-caractères — n'apparaissent pas dans des libellés métier normaux ;
+ *   3. marqueurs classiques de moisi (锟斤拷/烫烫烫/?? consécutifs en placeholder).
  */
 export function looksLikeCorruptedText(value: string): boolean {
   if (!value) return false
@@ -741,7 +741,7 @@ export function looksLikeCorruptedText(value: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// 插件
+// Extension
 // ---------------------------------------------------------------------------
 
 declare module '@deepseek-ai/cordis' {

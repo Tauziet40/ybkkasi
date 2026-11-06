@@ -1,17 +1,17 @@
 /**
- * @ybkk/plugin-panel-core —— 部门 Agent 工作台面板（review-dsh-agent-panel-v2 Phase 1/2）。
+ * @ybkk/plugin-panel-core — panneau de l'espace de travail Agent départemental (review-dsh-agent-panel-v2 Phase 1/2).
  *
- * 职责：
- *   - 静态托管面板 SPA（/panel，对外经 dsh-bridge 即 /gate01/panel/；宿主 web diff=0 铁律）
- *   - /api/panel/* REST（guarded + 权限点；自注册路由推入 httpServer.routeMatrix 共享登记处，
- *     保住 selftest 的 RBAC 100% 越权断言网——Phase 0 补欠账）
- *   - SSE /api/panel/stream（EventSource 无法带 Bearer → 端点公开 + 内部 ?token= 自校验 fail-closed；
- *     降级轮询 GET /api/panel/:dept/poll——钉钉 webview 30s 轮询兜底铁律）
- *   - 行业激活审批执行器（audit approvals：申请→审批→置 active+grantCapabilities；license 签发链路 Phase 4）
- *   - 模型目录面（GET/POST/DELETE /api/panel/models + :slug/test 连通性测试）：与 dsh 服务共用
- *     modelgw 唯一事实源；协作会话对话框经 messages 的 model 参数切换模型（panelAgentRuntime 优先取用）
- *   - panel_* 工具族（注册共享 tools 键，dsh 下即原生 ToolRuntime 可被模型调用）
- *   - 种子：基线=五部门骨架配置+内置行业激活；DEMO_SEED=1 追加演示会话/任务/知识/看板
+ * Responsabilités :
+ *   - hébergement statique du SPA panneau (/panel, exposé via dsh-bridge en /gate01/panel/ ; ligne d'airain diff=0 du web hôte)
+ *   - REST /api/panel/* (guarded + point de permission ; les routes auto-enregistrées vont dans httpServer.routeMatrix, registre partagé,
+ *     pour préserver le réseau d'assertions RBAC 100% hors-permission du selftest — dette comblée Phase 0)
+ *   - SSE /api/panel/stream (EventSource ne peut pas porter de Bearer → endpoint public + auto-vérification interne ?token= fail-closed ;
+ *     repli par scrutin GET /api/panel/:dept/poll — ligne d'airain du repli par scrutin 30 s de la webview DingTalk)
+ *   - exécuteur d'approbation d'activation de secteur (approbations d'audit : demande→approbation→pose active+grantCapabilities ; chaîne d'émission de licence Phase 4)
+ *   - face catalogue de modèles (GET/POST/DELETE /api/panel/models + test de connectivité :slug/test) : partage avec le service dsh
+ *     la source de fait unique modelgw ; la boîte de dialogue de session collaborative bascule de modèle via le paramètre model de messages (panelAgentRuntime prioritaire)
+ *   - famille d'outils panel_* (enregistrée sur la clé tools partagée, sous dsh ToolRuntime natif appelable par le modèle)
+ *   - graines : base = squelettes de configuration des cinq départements + activation intégrée des secteurs ; DEMO_SEED=1 ajoute sessions/tâches/savoir/tableaux de démo
  */
 import { join, dirname } from 'node:path'
 import { existsSync, writeFileSync } from 'node:fs'
@@ -30,41 +30,41 @@ import { DwsCli } from './dws.ts'
 import { applyMfgModule } from './mfg/module.ts'
 
 /**
- * 面板契约版本（#13，2026-10-29 回植自底座）：面板能力族集合的语义版本——新增能力族/下线路由族时递增。
- * 底座是契约所有者：/api/health 的 contract.panel 暴露本版本与实时推导的能力清单，
- * 前台（DeptAI-UI-DSH 等）据此对齐宿主支持面，版本组合偏差 fail-visible 而非静默 404。
+ * Version de contrat du panneau (#13, 2026-10-29, replanté depuis le socle) : version sémantique de l'ensemble des familles de capacités du panneau — incrémentée à chaque famille ajoutée/famille de routes retirée.
+ * Le socle est propriétaire du contrat : /api/health expose via contract.panel cette version et la liste des capacités dérivée en temps réel,
+ * le front (DeptAI-UI-DSH, etc.) s'aligne dessus ; un écart de combinaison de versions est fail-visible et non un 404 silencieux.
  */
 export const PANEL_CONTRACT_VERSION = 1
 
 export const name = 'panel-core'
-// plan-gate01 Phase 2 瘦身：硬依赖只保留数据面基座 5 键（platform-core / dsh 原生提供）。
-// 其余 9 键（iam/authn/audit/usage/modelGateway/resourceCore/behavior/mcpRegistry/skillHub）
-// 走 soft() 软读降级——cordis 的 inject 是加载前硬依赖（缺提供者=永久挂起，spike 定稿），
-// 声明即要求提供者在场；01门装态无宿主面包，这些键必须能缺席。
-// 注意：panel 服务不可自 inject（自依赖=永久挂起）——内部直接 new PanelService(ctx) 使用。
+// Amincissement plan-gate01 Phase 2 : les dépendances dures ne gardent que les 5 clés du socle du plan de données (fournies par platform-core / natif dsh).
+// Les 9 autres clés (iam/authn/audit/usage/modelGateway/resourceCore/behavior/mcpRegistry/skillHub)
+// passent par la lecture souple soft() — l'inject de cordis est une dépendance dure d'avant-chargement (sans fournisseur = suspension permanente,
+// entériné par le spike) ; déclarer exige la présence du fournisseur ; en forme installée porte 01, sans pain de l'hôte, ces clés doivent pouvoir manquer.
+// Note : le service panel ne peut pas s'auto-injecter (auto-dépendance = suspension permanente) — usage interne direct new PanelService(ctx).
 export const inject = [
   'httpServer', 'opsStorage', 'platformBus', 'tools', 'scenegraphs',
 ]
 
-/** panel-core 装配配置。 */
+/** Configuration d'assemblage de panel-core. */
 export interface PanelConfig {
   /**
-   * 演示鉴权开关（fail-closed，缺省 false=严格鉴权）：仅 cordis.patch.yml 的 01门 4-entry
-   * 装配声明 true——放行只读动词（GET/HEAD/OPTIONS）以演示访客身份读内置演示数据，
-   * 写动词一律 403；全量形态（cordis.yml / boot-all）永不声明，走 console 中间件严格鉴权。
-   * 严禁运行时探测 authn 是否在场来放行——那会把「全量形态中间件未覆盖」误判为演示态（fail-open）。
+   * Interrupteur d'authentification de démonstration (fail-closed, défaut false = authentification stricte) : seul l'assemblage 01-gate 4-entry
+   * de cordis.patch.yml déclare true — laisse passer les verbes en lecture (GET/HEAD/OPTIONS) sous l'identité de visiteur de démo lisant les données
+   * de démo intégrées, les verbes d'écriture toujours 403 ; la forme complète (cordis.yml / boot-all) ne le déclare jamais, authentification stricte par le middleware console.
+   * Interdiction absolue de sonder à l'exécution la présence d'authn pour laisser passer — cela jugerait « middleware non couvert de la forme complète » à tort comme un état démo (fail-open).
    */
   demoAuth?: boolean
   /**
-   * 着陆归一开关（缺省 false）：仅 01门 装态（cordis.patch.yml）声明 true——装配无 console，
-   * 根路径没有控制台可落，SPA 兜底会把控制台缺失的壳页发给浏览器（相对资源 404 回落 HTML →
-   * module MIME 错误白屏）。声明后 GET / 302 到 ${externalBase}/panel/；全量形态永不声明，
-   * 根路径着陆归 console（行为不变）。
+   * Interrupteur de normalisation de l'atterrissage (défaut false) : seul l'état installé porte 01 (cordis.patch.yml) déclare true — l'assemblage n'a pas de console,
+   * la racine n'a pas de console où atterrir, le repli SPA enverrait au navigateur la page coquille sans console (ressources relatives 404 → repli HTML →
+   * écran blanc d'erreur MIME module). Déclaré, GET / 302 vers ${externalBase}/panel/ ; la forme complète ne le déclare jamais,
+   * l'atterrissage racine reste console (comportement inchangé).
    */
   landingRedirect?: boolean
 }
 
-/** 演示访客身份（只读权限点：面板读 + 场景图谱读）。 */
+/** Identité du visiteur de démo (points de permission en lecture : lecture panneau + lecture cartographie de scénarios). */
 const DEMO_PRINCIPAL = {
   kind: 'human' as const,
   principalId: 'demo-visitor',
@@ -73,7 +73,7 @@ const DEMO_PRINCIPAL = {
   actChain: [],
 }
 
-/** 可选宿主服务软读（与 PanelService.soft 同规；模块级供路由面使用）。 */
+/** Lecture douce des services d'hôte optionnels (même règle que PanelService.soft ; niveau module pour la face routes). */
 const soft = (ctx: Context, key: string): any => ctx.reflect.get(key, false)
 
 interface CallerInfo {
@@ -91,22 +91,22 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
   const demoAuth = config.demoAuth === true
   const http = ctx.httpServer
   ctx.plugin(PanelService)
-  // 卡片包服务（双轨迁移自 platform-core 装配）：面板是看板/卡片包域唯一消费方与宿主（不可自 inject，同 PanelService 惯例）
+  // Service de paquets de cartes (migration à double voie depuis l'assemblage platform-core) : le panneau est l'unique consommateur et hôte du domaine tableaux de bord/paquets de cartes (pas d'auto-inject, usage de PanelService)
   ctx.plugin(CardpackService)
   const cardpacks = new CardpackService(ctx)
   const panel = new PanelService(ctx)
 
   const caller = (exchange: HttpExchange): CallerInfo => exchange.principal as CallerInfo
 
-  // 与 console 同款 requirePermission：缺权限 403 + audit.authz.denied 留痕（RBAC 探针的判定面）。
-  // 三道前置（plan-gate01 Phase 2.2 + 2026-09-11 写通道打通）：
-  //   1. Bearer 自校验——鉴权中间件住在 plugin-console（01门 4+2 entry 装态无 console），
-  //      面板对自带 Bearer 的请求经 authn.verify 自行建立 principal（与 SSE ?token= 通道同规）；
-  //      出示了令牌但校验失败 → 干净 401，绝不降级为演示访客（fail-closed）；
-  //   2. 严格态 principal 兜底——无凭证且非演示态 → 401；
-  //   3. demoAuth（缺省 false）演示放行——仅「无有效 principal」时介入：只读动词以演示身份
-  //      渲染内置演示数据，写动词 403；已登录（有 principal）用户不受只读限制。该开关只由
-  //      01门 patch 装配声明，全量形态永不声明。
+  // Même requirePermission que console : permission manquante = 403 + trace audit.authz.denied (face de jugement de la sonde RBAC).
+  // Trois préalables (plan-gate01 Phase 2.2 + ouverture du canal d'écriture 2026-09-11) :
+  //   1. auto-vérification Bearer — le middleware d'authentification vit dans plugin-console (l'état installé 4+2 entry porte 01 n'a pas de console),
+  //      le panneau établit lui-même le principal des requêtes portant un Bearer via authn.verify (même règle que le canal SSE ?token=) ;
+  //      un jeton présenté mais invalide → 401 propre, jamais rétrogradé en visiteur de démo (fail-closed) ;
+  //   2. en mode strict, repli de principal — sans identifiant et hors état démo → 401 ;
+  //   3. demoAuth (défaut false) laisse passer la démo — n'intervient que « sans principal valide » : verbes de lecture sous l'identité de démo
+  //      rendant les données de démo intégrées, verbes d'écriture 403 ; un utilisateur connecté (avec principal) n'est pas soumis à la restriction lecture. Cet interrupteur
+  //      n'est déclaré que par l'assemblage patch porte 01, jamais par la forme complète.
   const requirePermission = (exchange: HttpExchange, point: string): boolean => {
     if (!exchange.principal) {
       const header = String(exchange.headers['authorization'] ?? '')
@@ -155,21 +155,21 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     return false
   }
 
-  /** 能力型可选服务缺席（演示态）的端点级诚实降级：503 DEGRADED（非 500、非静默空数据）。 */
+  /** Dégradation honnête au niveau endpoint d'un service optionnel de type capacité absent (état démo) : 503 DEGRADED (ni 500, ni données vides silencieuses). */
   const degraded = (exchange: HttpExchange, capability: string): null => {
     exchange.fail(503, 'DEGRADED', `「${capability}」能力未接入（01门演示态）——连接宿主后可用`)
     return null
   }
 
   const guarded = (method: string, path: string, permission: string, handler: (exchange: HttpExchange) => unknown | Promise<unknown>): void => {
-    // H5：声明经 http.register 自动汇入 routeMatrix 共享登记处（注册期缺声明即抛错）
+    // H5 : les déclarations sont automatiquement fondues via http.register dans le registre partagé routeMatrix (une déclaration manquante à l'enregistrement = erreur levée)
     http.register(method, path, async (exchange) => {
       if (!requirePermission(exchange, permission)) return
       try {
         const result = await handler(exchange)
         if (!exchange.res.writableEnded) {
-          // 演示态标记（plan-gate01 Phase 4）：仅「确以演示访客身份放行」的只读响应带 demo:true——
-          // 已登录用户读到的是真实数据，不再误标（2026-09-11 写通道打通配套语义收紧）
+          // Marque d'état démo (plan-gate01 Phase 4) : seules les réponses en lecture « effectivement laissées passer sous l'identité du visiteur de démo » portent demo:true —
+          // l'utilisateur connecté lit des données réelles, plus de marquage erroné (resserrage de sémantique accompagnant l'ouverture du canal d'écriture 2026-09-11)
           const isDemoPrincipal = caller(exchange)?.principalId === DEMO_PRINCIPAL.principalId
           const demoMarked = demoAuth && isDemoPrincipal && result !== null && typeof result === 'object' && !Array.isArray(result)
             ? { ...result, demo: true }
@@ -186,7 +186,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
   const body = <T extends Record<string, any>>(exchange: HttpExchange): T => (exchange.body ?? {}) as T
   const changeLog = (exchange: HttpExchange, action: string, resourceType: string, resourceId: string, resourceName: string, detail = ''): void => {
     const info = caller(exchange)
-    // 审计中心缺席（01门演示态）→ 空记录（null-object 降级）：操作本身照常执行
+    // Centre d'audit absent (état démo porte 01) → enregistrement nul (dégradation null-object) : l'opération s'exécute normalement
     soft(ctx, 'audit')?.record({
       type: 'change',
       actorType: info.kind === 'human' ? 'human' : 'machine',
@@ -202,7 +202,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     })
   }
 
-  /** 部门参数解析 + 归属校验（部门范围权限：绑定组织后仅组织子树/管理员/机器凭证可访问）。 */
+  /** Résolution du paramètre département + validation d'appartenance (permissions de périmètre départemental : après liaison, seuls sous-arbre d'organisation/admin/identifiants machine peuvent accéder). */
   const deptOf = (exchange: HttpExchange) => {
     const dept = String(exchange.params.dept ?? '')
     if (!DEPT_RE.test(dept)) throw new Error(`部门标识非法：${dept}`)
@@ -219,15 +219,15 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     const iam = soft(ctx, 'iam')
     return (info.userId ? iam?.users().get(info.userId)?.orgId : undefined)
       ?? iam?.orgs().find((org) => org.parentId === null).at(0)?.id
-      // 组织目录缺席（01门 装态）→ 演示组织主键（与 seed.ts 的内置激活登记同值，行业面可用）
+      // Catalogue d'organisations absent (forme installée porte 01) → clé primaire de l'organisation de démo (même valeur que l'enregistrement d'activation intégré de seed.ts, la face secteur reste utilisable)
       ?? DEMO_ORG_ID
   }
 
   /**
-   * 场景级授权执行点（A-01 残余收口，回植自底座，与 plugin-flow-core 同构）：任务创建携带
-   * sceneCode 时强制裁决场景策略——deny/fail-closed（有策略无命中）一律 403 并落 audit.authz.denied；
-   * allow 放行；未携带 sceneCode 或场景未配置策略维持存量放行（与 flow 域无策略语义一致，
-   * 守卫不阻断普通任务）。机器主体不入场景域（权限点 RBAC 已覆盖），口径见 release-notes-2026-09-12。
+   * Point d'exécution de l'autorisation au niveau scénario (verrou final du reliquat A-01, replanté du socle, structurellement identique à plugin-flow-core) : une création de tâche portant
+   * un sceneCode impose l'arbitrage par la politique du scénario — deny/fail-closed (politique sans correspondance) = 403 avec audit.authz.denied ;
+   * allow laisse passer ; sans sceneCode ou scénario sans politique, le passage historique est maintenu (cohérent avec la sémantique sans politique du domaine flow,
+   * le garde n'interrompt pas les tâches ordinaires). Les principaux machine n'entrent pas dans le domaine scénario (le RBAC par points de permission couvre déjà), référentiel voir release-notes-2026-09-12.
    */
   const sceneGuard = (exchange: HttpExchange, sceneCode: string | undefined, action: string): boolean => {
     if (!sceneCode?.trim()) return true
@@ -244,7 +244,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     return false
   }
 
-  // -- 部门与总览 -------------------------------------------------------------
+  // -- Départements et vue d'ensemble -------------------------------------------------------------
 
   guarded('GET', '/api/panel/depts', 'panel.read', (exchange) => {
     const info = caller(exchange)
@@ -257,14 +257,14 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     }
   })
 
-  // 组织树（配置抽屉的部门↔组织绑定选择器；最小字段，panel.config.write 管理面）
+  // Arbre d'organisations (sélecteur de liaison département↔organisation du tiroir de configuration ; champs minimaux, face de gestion panel.config.write)
   guarded('GET', '/api/panel/orgs', 'panel.config.write', (exchange) => {
     const iam = soft(ctx, 'iam')
     if (!iam) return degraded(exchange, '组织目录')
     return { orgs: iam.orgs().all().map((org) => ({ id: org.id, name: org.name, parentId: org.parentId })) }
   })
 
-  /** 部门↔组织绑定（账号组织打通的管理动作）：设置后部门范围权限即刻生效。 */
+  /** Liaison département↔organisation (action de gestion de l'interconnexion comptes-organisations) : posée, les permissions de périmètre départemental prennent effet immédiatement. */
   guarded('PUT', '/api/panel/:dept/config', 'panel.config.write', (exchange) => {
     const iam = soft(ctx, 'iam')
     if (!iam) return degraded(exchange, '组织目录')
@@ -309,7 +309,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     widgets: panel.board(deptOf(exchange)),
   }))
 
-  // -- 配置抽屉（widget / KPI / Agent 阵容） ------------------------------------
+  // -- Tiroir de configuration (widget / KPI / ligne-up d'Agents) ------------------------------------
 
   guarded('GET', '/api/panel/:dept/widgets', 'panel.read', (exchange) => ({ widgets: deptOf(exchange).widgets }))
 
@@ -355,12 +355,12 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     return { agents }
   })
 
-  // -- 模型目录（modelgw 事实源优先；01门 dsh 装态落 dsh 模型桥——目录随 dsh 配置只读同源） ------
+  // -- Catalogue de modèles (source de fait modelgw prioritaire ; en état installé porte 01 avec dsh, pont de modèles dsh — catalogue en lecture seule homogène avec la configuration dsh) ------
 
-  /** 模型网关解析：modelgw 在场优先，缺席时 dsh llm 在场即落桥（llm-bridge.ts），两者皆无 → undefined。 */
+  /** Résolution de la passerelle de modèles : modelgw présent prioritaire, absent mais llm dsh présent → pont (llm-bridge.ts), ni l'un ni l'autre → undefined. */
   const modelGateway = () => resolvePanelModelGateway(ctx)
 
-  /** 目录读取（面板视角）：apiKey 脱敏回显（env: 引用原样展示，直填密钥打码），与 console 同口径。 */
+  /** Lecture du catalogue (vue panneau) : apiKey en écho masqué (référence env: affichée telle quelle, clé directe masquée), même référentiel que console. */
   const maskedModel = (model: { apiKey: string } & Record<string, unknown>) => ({
     ...model,
     apiKey: model.apiKey.startsWith('env:') ? model.apiKey : '***',
@@ -370,7 +370,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     const resolved = modelGateway()
     if (!resolved) return degraded(exchange, '模型网关')
     if (resolved.kind === 'dsh') {
-      // dsh 桥目录：惰性发现（provider 路由枚举是异步的），default 跟随 dsh 默认模型置顶
+      // Catalogue du pont dsh : découverte paresseuse (l'énumération des routages provider est asynchrone), default suit le modèle par défaut de dsh en tête
       const models = await resolved.gateway.ensureCatalog()
       return { models: models.map(maskedModel), source: 'dsh' }
     }
@@ -392,11 +392,11 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     if (!input.endpoint?.trim()) throw new Error('endpoint 必填（OpenAI 兼容基址；未配置不可调用，绝不造假回复）')
     if (!Number.isFinite(input.listCentsPerKTokens) || (input.listCentsPerKTokens ?? -1) < 0) throw new Error('listCentsPerKTokens 必须是非负数（挂牌价，分/千 tokens）')
     const status = input.status === 'offline' ? 'offline' as const : 'online' as const
-    // 数据分级上限（IAW 交接 1-1）：公开/内部/秘密，缺省 internal（存量登记兼容）
+    // Plafond de gradation des données (livraison IAW 1-1) : public/interne/secret, défaut internal (compatibilité des enregistrements existants)
     const dataClassLimit = input.dataClassLimit === 'public' || input.dataClassLimit === 'internal' || input.dataClassLimit === 'secret'
       ? input.dataClassLimit as 'public' | 'internal' | 'secret'
       : 'internal' as const
-    // 编辑时密钥留空 = 保持既有密钥（表单不回填密钥的约定），不得覆盖为默认引用
+    // À l'édition, laisser la clé vide = conserver la clé existante (convention : le formulaire ne remplit pas la clé), ne pas écraser par la référence par défaut
     const existing = gateway.models().findOne((item) => item.slug === slug)
     const model = gateway.upsertModel({
       slug,
@@ -413,7 +413,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     return maskedModel(model)
   })
 
-  /** 删除登记：从模型目录移除；计量与审计数据保留。 */
+  /** Suppression de l'enregistrement : retire du catalogue de modèles ; données de metering et d'audit conservées. */
   guarded('DELETE', '/api/panel/models/:id', 'panel.config.write', (exchange) => {
     const resolved = modelGateway()
     if (!resolved) return degraded(exchange, '模型网关')
@@ -430,7 +430,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     return { deleted: true }
   })
 
-  /** 连通性测试：真实走网关 invoke 全链（modelgw 计量 / dsh 桥真实出站），失败如实回传，不造假成功。 */
+  /** Test de connectivité : toute la chaîne invoke réelle via la passerelle (metering modelgw / vraie sortie du pont dsh), l'échec est renvoyé tel quel, sans succès fabriqué. */
   guarded('POST', '/api/panel/models/:slug/test', 'panel.config.write', async (exchange) => {
     const resolved = modelGateway()
     if (!resolved) return degraded(exchange, '模型网关')
@@ -449,7 +449,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
       return { ok: true, model: result.model, content: result.content.slice(0, 80), outputTokens: result.outputTokens }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      // 高频误配提示：OpenAI 兼容基址漏了 /v1 路径时上游 404（如「404 page not found」）——可行动文案而非裸状态码
+      // Astuce haute fréquence d'erreur : une URL de base compatible OpenAI sans le chemin /v1 donne un 404 amont (ex. « 404 page not found ») — libellé actionnable plutôt qu'un code de statut nu
       const hint = /HTTP 404/.test(message)
         ? '（提示：HTTP 404 常因 endpoint 漏了 /v1 路径——OpenAI 兼容基址应形如 https://<host>/v1）'
         : ''
@@ -457,15 +457,15 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     }
   })
 
-  // -- 战略看板（双轨迁移：原 portal board 聚合 + console /api/platform/card-packs 卡片包下发） --
-  // 读 panel.read；聚合面（漏斗/WAIC/ROI）与卡片包面（角色×平台×ref 存活）一套端点下发。
-  // 卡片包服务本体仍在 platform-core（与主分支逐字节一致），本插件是唯一消费方。
+  // -- Tableau de bord stratégique (migration à double voie : agrégat board du portal d'origine + délivrance des paquets de cartes console /api/platform/card-packs) --
+  // Lit panel.read ; la face agrégat (entonnoir/WAIC/ROI) et la face paquets de cartes (rôle×plateforme×survie de ref) délivrées par un seul endpoint.
+  // Le service de paquets de cartes reste dans platform-core (identique à l'octet près à la branche principale), ce plugin est l'unique consommateur.
   const refAlive = (ref: string): boolean => {
     const colon = ref.indexOf(':')
     const type = ref.slice(0, colon)
     const id = ref.slice(colon + 1)
     const matches = (item: { id?: string; slug?: string }): boolean => item.id === id || item.slug === id
-    // 资产目录缺失（01门演示态）→ 视为存活（卡片全部展示，不因降级隐藏入口）
+    // Catalogue d'actifs absent (état démo porte 01) → considéré vivant (toutes les cartes affichées, pas d'entrée cachée par la dégradation)
     if (!soft(ctx, 'resourceCore') && ['agent', 'app', 'nas'].includes(type)) return true
     if (!soft(ctx, 'mcpRegistry') && type === 'mcp') return true
     if (!soft(ctx, 'skillHub') && type === 'skill') return true
@@ -485,7 +485,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
 
   guarded('GET', '/api/panel/board', 'panel.read', (exchange) => {
     const info = caller(exchange)
-    // -- 卡片包面（原 console /api/platform/card-packs 语义） --
+    // -- Face paquets de cartes (sémantique de l'ancien console /api/platform/card-packs) --
     const available = [...new Set(cardpacks.all().map((pack) => pack.platform))]
     const requested = exchange.query.get('platform') ?? process.env.RQ_PLATFORM
       ?? (available.includes('rd') ? 'rd' : available[0]) ?? 'strategy'
@@ -507,7 +507,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
       })
     }
 
-    // -- 聚合面（原 portal board 语义：漏斗=曝光/点击→调用→完成；WAIC=usage 周聚合） --
+    // -- Face agrégat (sémantique de l'ancien board portal : entonnoir = exposition/clics→appels→achèvement ; WAIC = agrégat hebdo usage) --
     const weekAgo = new Date(Date.now() - 7 * 24 * 3600_000).toISOString()
     const behaviorCount = (type: string): number => {
       return soft(ctx, 'behavior')?.query({ type, from: weekAgo }).total ?? 0
@@ -528,9 +528,9 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     return {
       generatedAt: new Date().toISOString(),
       windowDays: 7,
-      // 卡片包面（顶层平铺，控制台工作台卡片消费方零改动换端点即可用）
+      // Face paquets de cartes (mise à plat au sommet, le consommateur de cartes de l'espace de travail console change d'endpoint sans modification)
       platform, label: packs[0]?.label ?? '', roles, cards, totalPacks: packs.length, availablePlatforms: available, droppedDeadRefs,
-      // 聚合面（战略看板）——资产目录缺席（演示态）→ 全 0（看板诚实降级为演示数据视图）
+      // Face agrégat (tableau de bord stratégique) — catalogue d'actifs absent (état démo) → tout à 0 (dégradation honnête du tableau en vue de données de démo)
       assets: {
         appsOnline: soft(ctx, 'resourceCore')?.list('app').filter((item) => item.status === 'online').length ?? 0,
         agentsOnline: soft(ctx, 'resourceCore')?.list('agent').filter((item) => item.status === 'online').length ?? 0,
@@ -546,7 +546,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
         invoked: usageCount,
         completed: completedCalls,
       },
-      // ROI 用工成本模型（WP-14）：估算口径声明随响应下发，看板侧必须展示「估算」字样。
+      // Modèle de coût ROI main-d'œuvre (WP-14) : la déclaration du référentiel d'estimation est délivrée avec la réponse, la face tableau doit afficher la mention « estimation ».
       roi: {
         minutesPerCallEstimate: Number(process.env.ROI_MINUTES_PER_CALL ?? 3),
         laborCostCentsPerHour: Number(process.env.ROI_LABOR_COST_CENTS_PER_HOUR ?? 5000),
@@ -558,7 +558,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
       },
     }
   })
-  // -- 频道与消息 ---------------------------------------------------------------
+  // -- Canaux et messages ---------------------------------------------------------------
 
   guarded('GET', '/api/panel/:dept/channels', 'panel.read', (exchange) => {
     const dept = deptOf(exchange)
@@ -588,7 +588,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     const dept = deptOf(exchange)
     const channelId = exchange.query.get('channelId') ?? ''
     const after = exchange.query.get('after') ?? ''
-    // limit 防护（QA T-05）：非数字/负数/超大值一律收敛到 [1,200]，杜绝 NaN→全量回包
+    // Garde limit (QA T-05) : non numérique/négatif/valeur énorme converge vers [1,200], fini le NaN→renvoi intégral
     const limitRaw = Number(exchange.query.get('limit') ?? 80)
     const limit = Math.min(Math.max(Number.isFinite(limitRaw) ? Math.floor(limitRaw) : 80, 1), 200)
     let rows = panel.messages().find((m) => m.dept === dept.id && (channelId ? m.channelId === channelId : true))
@@ -600,11 +600,11 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     const dept = deptOf(exchange)
     const input = body<{ channelId?: string; text?: string; ddSync?: boolean; uniqueKey?: string; model?: string; streamAgent?: boolean }>(exchange)
     if (!input.text?.trim()) throw new Error('消息内容必填')
-    // 长度上限（QA T-06）：消息正文收敛到 10k 字符，杜绝超大 payload 对落库/SSE/轮询的连锁冲击
+    // Plafond de longueur (QA T-06) : corps du message convergé à 10k caractères, fini l'impact en chaîne d'un payload énorme sur l'inscription/SSE/scrutin
     if (input.text.length > 10_000) throw new Error('消息内容过长（上限 10000 字符）')
     const channelId = input.channelId || panel.channels().find((item) => item.dept === dept.id).at(0)?.id
     if (!channelId) throw new Error('部门暂无频道，请先创建')
-    // 对话框模型切换：显式指定 model 时必须是模型目录已登记的 slug（未指定则跟随 Agent 资产配置）
+    // Bascule de modèle de la boîte de dialogue : un model explicitement spécifié doit être un slug enregistré au catalogue (sinon suit la configuration de l'actif Agent)
     const requestedModel = input.model?.trim() ?? ''
     if (requestedModel && !modelGateway()?.gateway.models().findOne((item) => item.slug === requestedModel)) {
       throw new Error(`模型未在目录登记：${requestedModel}（可在「🧠 模型」中登记）`)
@@ -615,24 +615,24 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
       senderName: info.name, text: input.text.trim(), ddSync: input.ddSync === true,
       ...(input.uniqueKey ? { uniqueKey: input.uniqueKey } : {}),
       ...(requestedModel ? { modelOverride: requestedModel } : {}),
-      // streamAgent（2026-09-11 流式应答卡）：@数字同事 由前端流式端点驱动应答，跳过隐式派发防双跑；
-      // 流式端点不可用时前端回落拉取，应答缺失可由用户重发触发（诚实降级，不假装有人在打字）
+      // streamAgent (carte de réponse en flux 2026-09-11) : @collègue numérique est piloté par l'endpoint de flux du front, saut du dispatch implicite anti double exécution ;
+      // endpoint de flux indisponible = le front retombe sur le tirage, une réponse manquante peut être redéclenchée par renvoi de l'utilisateur (dégradation honnête, sans simulation de saisie)
       ...(input.streamAgent === true ? { skipAgentDispatch: true } : {}),
     })
     return { message }
   })
 
   /**
-   * Agent 流式应答（SSE-over-POST，2026-09-11 用户需求：@数字同事 → 增量卡片渲染）：
-   * 逐事件转发 {type:start|delta|done|fallback|end}；完成后应答照常落库并广播
-   * panel.message.created（其他端经既有 SSE 通道收到持久消息）。鉴权与部门范围校验
-   * 与 REST 面同规（requirePermission + deptOf），权限失败仍是干净 403/401。
+   * Réponse en flux de l'Agent (SSE-sur-POST, besoin utilisateur 2026-09-11 : @collègue numérique → rendu incrémental de la carte) :
+   * transmet événement par événement {type:start|delta|done|fallback|end} ; une fois terminé, la réponse est inscrite et diffusée comme d'habitude
+   * via panel.message.created (les autres bouts reçoivent le message persistant par le canal SSE existant). Authentification et validation de périmètre départemental
+   * aux mêmes règles que la face REST (requirePermission + deptOf), un échec de permission reste un 403/401 propre.
    */
   http.register('POST', '/api/panel/:dept/agent-stream', async (exchange) => {
     if (!requirePermission(exchange, 'panel.write')) return
     const res = exchange.res
     const sse = (payload: Record<string, unknown>) => {
-      try { res.write(`data: ${JSON.stringify(payload)}\n\n`) } catch { /* 连接已断 */ }
+      try { res.write(`data: ${JSON.stringify(payload)}\n\n`) } catch { /* connexion déjà fermée */ }
     }
     try {
       const dept = deptOf(exchange)
@@ -657,7 +657,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
       sse({ type: 'end' })
       res.end()
     } catch (error) {
-      // 流已开则只能在流内报错；未开流走标准错误信封
+      // Flux ouvert : l'erreur ne peut être signalée que dans le flux ; flux non ouvert → enveloppe d'erreur standard
       const message = error instanceof Error ? error.message : String(error)
       if (res.headersSent) {
         sse({ type: 'end', error: message })
@@ -687,7 +687,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     return result
   })
 
-  // -- 技能直调（J1 契约 v1 消费面：对话框 @技能名/斜杠命令） ---------------------------------
+  // -- Appel direct de Skill (face consommatrice du contrat J1 v1 : @nom-de-skill/commande slash dans la boîte de dialogue) ---------------------------------
 
   guarded('GET', '/api/panel/:dept/skills', 'panel.read', (exchange) => {
     deptOf(exchange)
@@ -695,11 +695,11 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
   })
 
   /**
-   * 技能点名直调（/技能名 问题 的服务端）。诚实降级语义（J1 契约 v1）：可预判的失败
-   * （技能不存在/未上架/不可见/网关失败）以 HTTP 200 + ok:false + reason 回包——
-   * 降级是数据不是传输错误；鉴权/部门范围失败仍走 403/400。
-   * 留痕：斜杠原文先落频道（skipAgentDispatch：同一条文本不重复触发 @Agent）；
-   * 成功落技能应答（agent 型消息），失败落系统行——失败原因全频道可见、可回查，不静默。
+   * Appel direct nominatif de Skill (le serveur de /nom-de-skill question). Sémantique de dégradation honnête (contrat J1 v1) : les échecs prévisibles
+   * (skill inexistant/non publié/invisible/échec de passerelle) répondent HTTP 200 + ok:false + reason —
+   * la dégradation est une donnée, pas une erreur de transport ; les échecs d'authentification/périmètre départemental restent en 403/400.
+   * Trace : le texte slash original tombe d'abord dans le canal (skipAgentDispatch : le même texte ne redéclenche pas @Agent) ;
+   * succès tombe dans la réponse du skill (message de type agent), échec dans une ligne système — la raison d'échec est visible dans tout le canal, consultable, pas silencieuse.
    */
   guarded('POST', '/api/panel/:dept/skills/invoke', 'panel.write', async (exchange) => {
     const dept = deptOf(exchange)
@@ -743,7 +743,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     return { ok: true as const, reply: result.reply, model: result.model, skill: result.skill, message: trace, replyMessage: reply, skillLoad: result.skillLoad }
   })
 
-  // -- 任务看板 -----------------------------------------------------------------
+  // -- Tableau des tâches -----------------------------------------------------------------
 
   guarded('GET', '/api/panel/:dept/tasks', 'panel.read', (exchange) => ({
     tasks: panel.tasks().find((item) => item.dept === deptOf(exchange).id),
@@ -754,7 +754,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     const input = body<{ title?: string; detail?: string; lane?: string; assigneeName?: string; assigneeType?: string; sceneCode?: string; execIssueId?: string; goalId?: string; evidenceRefs?: string[]; reworkOf?: string }>(exchange)
     if (!input.title?.trim()) throw new Error('任务标题必填')
     if (input.lane !== undefined && !TASK_LANES.includes(input.lane as TaskLane)) throw new Error(`非法泳道：${input.lane}`)
-    // A-01：任务挂场景时按场景策略裁决创建动作（deny/fail-closed → 403），无策略维持放行
+        // A-01 : une tâche rattachée à un scénario voit sa création arbitrée par la politique du scénario (deny/fail-closed → 403), sans politique le passage est maintenu
     if (!sceneGuard(exchange, input.sceneCode, 'panel.task.create')) return
     const info = caller(exchange)
     const task = panel.createTask({
@@ -764,7 +764,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
       ...(input.assigneeType === 'agent' ? { assigneeType: 'agent' as const } : {}),
       ...(input.assigneeName ? { assigneeName: input.assigneeName } : {}),
       ...(input.sceneCode ? { sceneCode: input.sceneCode } : {}),
-      // 执行中枢血缘（DSH issue#3 修订）：携带即投影 exec-hub 权威，缺席/不存在诚实 400
+      // Lignée centre d'exécution (révision DSH issue#3) : portée = projection de l'autorité exec-hub, absente/inexistante = 400 honnête
       ...(input.execIssueId?.trim() ? { execIssueId: input.execIssueId.trim() } : {}),
       ...(input.goalId?.trim() ? { goalId: input.goalId.trim() } : {}),
       ...(Array.isArray(input.evidenceRefs) && input.evidenceRefs.length ? { evidenceRefs: input.evidenceRefs.map(String) } : {}),
@@ -781,10 +781,10 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     return { task: panel.transitionTask(String(exchange.params.id), lane as TaskLane, info.userId ?? info.principalId) }
   })
 
-  // -- 执行中枢投影（DSH issue#3/#4 修订，2026-10-29） -----------------------------------------
-  // 面板不复制权威状态：目标/任务读透 exec-hub，泳道迁移与验收结论镜像回写（唯一任务事实源）。
+  // -- Projection du centre d'exécution (révision DSH issue#3/#4, 2026-10-29) -----------------------------------------
+  // Le panneau ne copie pas l'état d'autorité : objectifs/tâches lus au travers d'exec-hub, les migrations de couloir et conclusions d'acceptance sont ré-écrites en miroir (source de fait unique des tâches).
 
-  /** 部门目标投影：目标（metric 基线/目标值）+ 任务（goalAncestry 血缘/执行锁）+ 面板关联任务 ID。 */
+  /** Projection des objectifs du département : objectifs (base/valeur cible metric) + tâches (lignée goalAncestry/verrou d'exécution) + IDs des tâches liées au panneau. */
   guarded('GET', '/api/panel/:dept/goals', 'panel.read', (exchange) => {
     const dept = deptOf(exchange)
     const projection = panel.deptGoalsProjection(dept)
@@ -792,7 +792,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     return projection
   })
 
-  /** 验收裁决：签认关闭（accepted）/ 打回返工（rework）；有 exec 血缘时镜像回写 exec-hub。 */
+  /** Verdict d'acceptance : signature-fermeture (accepted)/renvoi-reprise (rework) ; avec lignée exec, ré-écriture en miroir vers exec-hub. */
   guarded('POST', '/api/panel/tasks/:id/verdict', 'panel.task.write', (exchange) => {
     const input = body<{ verdict?: string; opinion?: string }>(exchange)
     if (input.verdict !== 'accepted' && input.verdict !== 'rework') throw new Error("verdict 必填且只能是 'accepted'（签认关闭）或 'rework'（打回返工）")
@@ -800,7 +800,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     return { task: panel.taskVerdict(String(exchange.params.id), input.verdict, { actorId: info.userId ?? info.principalId, ...(input.opinion ? { opinion: input.opinion } : {}) }) }
   })
 
-  // -- 部门知识 ------------------------------------------------------------------
+  // -- Savoir départemental ----------------------------------------------------------------
 
   guarded('GET', '/api/panel/:dept/artifacts', 'panel.read', (exchange) => ({
     artifacts: panel.artifacts().find((item) => item.dept === deptOf(exchange).id).slice(-100).reverse(),
@@ -820,7 +820,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     return { artifact }
   })
 
-  // -- 场景图谱联动 ----------------------------------------------------------------
+  // -- Interconnexion avec la cartographie de scénarios ----------------------------------------------------------------
 
   guarded('POST', '/api/panel/:dept/scenes/:code/diagnose', 'panel.write', async (exchange) => {
     const info = caller(exchange)
@@ -845,7 +845,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     return { ok: true, note: '已请求钉钉桥接投递（未绑定群桥时投递失败会留痕告警）' }
   })
 
-  // -- 行业三态 + 激活申请 + 图谱 -----------------------------------------------------
+  // -- Trois états de secteur + demande d'activation + cartographie -----------------------------------------------------
 
   guarded('GET', '/api/panel/industries', 'panel.read', (exchange) => {
     const orgId = orgIdOf(exchange)
@@ -868,7 +868,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     const info = caller(exchange)
     const approval = audit.createApproval({
       kind: 'industry.activation',
-      // WP-10/L1（QA A-06）：L4 高危统一高风险——通过需二次确认 + 公司级终审标记
+      // WP-10/L1 (QA A-06) : L4 haut risque unifié — l'approbation exige double confirmation + marqueur de revue finale société
       riskLevel: 'high',
       title: `行业功能包授权激活：${registry.name}（${code}）`,
       payload: { code, orgId, requestedBy: info.name, sub: registry.sub, graphLoaded: registry.graphLoaded },
@@ -893,7 +893,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     return result
   })
 
-  // -- 降级轮询 + SSE（钉钉 webview 双通道铁律） --------------------------------------
+  // -- Repli par scrutin + SSE (ligne d'airain du double canal webview DingTalk) --------------------------------------
 
   guarded('GET', '/api/panel/:dept/poll', 'panel.read', (exchange) => {
     const dept = deptOf(exchange)
@@ -910,12 +910,12 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     }
   })
 
-  // -- SSE stream ticket（交接清单 H4 / P2-O-5 架构性收敛） ---------------------------
-  // EventSource 无法携带 Authorization 头，长效 access token 走 ?token= 会进代理/访问日志。
-  // 改为 POST（Bearer + 权限点 + 部门范围校验）换取 ≤60s 一次性 ticket，GET 消费即焚：
-  // URL 里只出现短时一次性凭证。?token= 旧通道保留（fail-closed 同规），供未升级消费方过渡。
+  // -- Ticket de flux SSE (liste de passation H4 / convergence architecturale P2-O-5) ---------------------------
+  // EventSource ne peut pas porter d'en-tête Authorization ; un access token longue durée via ?token= finirait dans les logs de proxy/d'accès.
+  // Remplacé par POST (Bearer + point de permission + validation de périmètre départemental) échangeant un ticket à usage unique ≤60 s, consommé au GET :
+  // seuls des identifiants courts à usage unique apparaissent dans l'URL. L'ancien canal ?token= est conservé (fail-closed aux mêmes règles) pour la transition des consommateurs non montés de version.
 
-  /** SSE 流票据：sha256(ticketRaw) → {principal, dept, 过期时刻}。消费即删；签发时顺手清扫过期。 */
+  /** Ticket de flux SSE : sha256(ticketRaw) → {principal, dept, expiration}. Consommé = supprimé ; l'émission profite du nettoyage des expirés. */
   const streamTickets = new Map<string, { principal: CallerInfo; dept: string; expiresAt: number }>()
   const STREAM_TICKET_TTL_MS = 60_000
 
@@ -938,14 +938,14 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     return { ticket: issueStreamTicket(caller(exchange), dept), expiresInSeconds: STREAM_TICKET_TTL_MS / 1000 }
   })
 
-  // SSE：公开路径（console 白名单）+ ?ticket=（首选，消费即焚）或 ?token=（旧通道）自校验，fail-closed
+  // SSE : chemin public (liste blanche console) + ?ticket= (préféré, consommation unique) ou ?token= (ancien canal) auto-vérifiés, fail-closed
   http.register('GET', '/api/panel/stream', (exchange) => {
     const fail = (status: number, message: string) => exchange.fail(status, 'STREAM_AUTH_FAILED', message)
     let dept = exchange.query.get('dept') ?? ''
     const ticketRaw = exchange.query.get('ticket') ?? ''
     if (!ticketRaw && !exchange.query.get('token')) return fail(401, '缺少 ticket/token 查询参数')
     if (ticketRaw) {
-      // ticket 通道：签发时已完成鉴权 + 权限点 + 部门范围校验，这里只做一次性消费（兑换即焚）
+      // Canal ticket : authentification + point de permission + validation de périmètre départemental déjà faits à l'émission, ici simple consommation unique (brûlé à l'échange)
       const key = createHash('sha256').update(ticketRaw).digest('hex')
       const entry = streamTickets.get(key)
       if (!entry || entry.expiresAt < Date.now()) {
@@ -966,8 +966,8 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
       if (!authn) return fail(401, '认证中心未接入（01门演示态）——连接宿主后可订阅实时流')
       try {
         const verified = authn.verify(token)
-        // principal 形状与 console 鉴权中间件同规（human → userId=refId）：deptScopeAllowed
-        // 的组织子树判定依赖 userId，缺了它所有人类用户都会被误判为无组织归属。
+        // Forme du principal identique au middleware d'authentification console (human → userId=refId) : le jugement
+        // de sous-arbre d'organisation de deptScopeAllowed dépend du userId ; sans lui, tout utilisateur humain serait jugé à tort sans rattachement.
         exchange.principal = {
           kind: verified.principal.type,
           principalId: verified.principal.id,
@@ -982,9 +982,9 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
       }
       if (!requirePermission(exchange, 'panel.read')) return
     }
-    // 部门范围校验（QA 2026-09-08 BUG-A-01/T-01，两通道同规）：stream 握手阶段执行与 REST 面
-    // deptOf 同规的归属校验——本端点曾因 ?token= 自校验逃出 RBAC 断言网，组织受限用户实时收到
-    // 受限部门消息；现握手即断，绝不先订阅。
+        // Validation de périmètre départemental (QA 2026-09-08 BUG-A-01/T-01, mêmes règles pour les deux canaux) : exécutée à la poignée de main stream, au même référentiel que deptOf
+    // de la face REST — cet endpoint avait échappé au réseau d'assertions RBAC via l'auto-vérification ?token=, un utilisateur à organisation restreinte recevait
+    // en direct les messages du département restreint ; désormais la poignée de main coupe immédiatement, jamais d'abonnement d'abord.
     const deptConfig = (() => {
       try { return panel.dept(dept) } catch { return undefined }
     })()
@@ -1001,11 +1001,11 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
       connection: 'keep-alive',
     })
     res.write('retry: 5000\n\n')
-    // 事件名进 data（EventSource.onmessage 只收默认事件；前端按 payload.name 分发）
+    // Nom d'événement dans data (EventSource.onmessage ne reçoit que l'événement par défaut ; le front répartit selon payload.name)
     const unsubscribe = panel.subscribeStream(dept, (event) => {
       try {
         res.write(`data: ${JSON.stringify({ name: event.name, payload: event.payload })}\n\n`)
-      } catch { /* 连接已断，cleanup 兜底 */ }
+      } catch { /* connexion déjà fermée, cleanup en rattrapage */ }
     })
     const heartbeat: ReturnType<typeof setInterval> = setInterval(() => {
       try { res.write(': ping\n\n') } catch { /* ignore */ }
@@ -1016,24 +1016,24 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     })
   }, { access: 'public', selfValidated: true })
 
-  // -- 行业激活审批执行器（审批通过 → 置 active + grantCapabilities + 事件） ----------------
+  // -- Exécuteur d'approbation d'activation de secteur (approbation accordée → pose active + grantCapabilities + événement) ----------------
 
-  // 审批中心缺席（01门演示态）→ 不注册执行器（幂等 no-op 注销函数）
+  // Centre d'approbations absent (état démo porte 01) → pas d'exécuteur enregistré (fonction de désactivation no-op idempotente)
   const offExecutor = soft(ctx, 'audit')?.registerExecutor('industry.activation', panel.buildActivationExecutor()) ?? (() => {})
 
-  // 事件扇出（SSE 数据源）+ 桥接回执联动（ddSync 状态回写）
+  // Éventail d'événements (source de données SSE) + couplage du reçu du pont (ré-écriture de l'état ddSync)
   panel.wireEventBus()
   const offDelivered = ctx.platformBus.on(PlatformEvents.DingtalkDelivered, (payload) => {
     const { messageId, ok, error } = (payload ?? {}) as { messageId?: string; ok?: boolean; error?: string }
     if (!messageId) return
     const message = panel.messages().get(messageId)
     if (!message) return
-    // 投递成功：sent 终态；failed→sent 必须可达（QA BUG-A-02：失败重投成功后界面仍显示失败）
+    // Livraison réussie : état terminal sent ; failed→sent doit être atteignable (QA BUG-A-02 : après échec puis re-livraison réussie, l'interface affichait encore l'échec)
     if (ok) {
       if (message.ddSync !== 'sent') panel.messages().update(messageId, { ddSync: 'sent' })
       return
     }
-    // 投递失败：仅 pending 置 failed（failed 已是终态，重复失败不抖动）；告警只在首次失败留痕
+    // Échec de livraison : seul pending passe à failed (failed est déjà terminal, les échecs répétés ne clignotent pas) ; l'alerte n'est tracée qu'au premier échec
     if (message.ddSync !== 'pending') return
     panel.messages().update(messageId, { ddSync: 'failed' })
     if (error) {
@@ -1046,16 +1046,16 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     offDelivered()
   })
 
-  // -- 01门装态补环（2026-09-11 写通道/模型/钉钉三件套） -----------------------------------
-  // dsh Loader 并发装载 patch entry（app-boot §mountRootInclude）——「apply 期软读兄弟服务」
-  // 是竞态写法，本节全部改为顺序无关：
-  //   a. 登录面无条件注册在 panel 自有命名空间（/api/panel/auth/*，不与 console 的 /api/auth/*
-  //      冲突），authn 缺席时请求期诚实 503——console/authn 在场与否都行为正确；
-  //   b. dws CLI 桥挂 /api/panel/ddws/*（同理不碰 /api/dingtalk/*）；ddSync 投递钩子在事件时
-  //      再查 dingtalkBridge，桥在场即让位，杜绝双投；
-  //   c. 基线管理员种子延迟重试（iam 发布即播种，orgs 非空幂等跳过；与 console seed 双跑安全）。
+  // -- Bouclages de l'état installé porte 01 (trio canal d'écriture/modèles/DingTalk 2026-09-11) -----------------------------------
+  // Le loader dsh charge en concurrence les patch entry (app-boot §mountRootInclude) — « lecture souple des services frères à l'apply »
+  // est une écriture en course ; toute cette section devient indépendante de l'ordre :
+  //   a. la face connexion est enregistrée inconditionnellement dans l'espace de noms propre du panneau (/api/panel/auth/*, sans conflit avec /api/auth/*
+  //      de console) ; authn absent = 503 honnête à la requête — console/authn présents ou non, le comportement est correct ;
+  //   b. le pont CLI dws est monté sur /api/panel/ddws/* (de même sans toucher /api/dingtalk/*) ; le crochet de livraison ddSync ne re-vérifie
+  //      dingtalkBridge qu'au moment de l'événement, cédant la place si le pont est présent, excluant la double livraison ;
+  //   c. graine de l'admin de base à retry différée (semis dès publication d'iam, saut idempotent si orgs non vide ; double exécution sûre avec la graine console).
 
-  /** 面板命名空间登录面：authn 在场即转发（响应形状与 console 逐字段一致，前端零特判）。 */
+  /** Face connexion dans l'espace de noms du panneau : authn présent = transfert (forme de la réponse identique champ à champ à console, zéro cas particulier front). */
   const loginViaAuthn = () => {
     const authn = soft(ctx, 'authn')
     const iam = soft(ctx, 'iam')
@@ -1116,10 +1116,10 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
   }, { access: 'public' })
 
   const dingtalkBridgePresent = Boolean(soft(ctx, 'dingtalkBridge'))
-  // -- 01门本地钉钉面（dws CLI）——无条件注册（2026-09-11 起不再以「桥缺席」为前提） --------------
-  // 命名空间铁律不变：dws 面全部挂在 /api/panel/ddws/*（绝不碰 /api/dingtalk/*，那是
-  // plugin-dingtalk-bridge 的路由面）。宿主桥在场时本面作为「本地直连钉钉」共存——用户可不经
-  // 宿主平台（连接器/iam 扫码）直接用自家钉钉 dws；消息投递归属在事件时裁决（见下方钩子）。
+  // -- Face DingTalk locale porte 01 (CLI dws) — enregistrée inconditionnellement (depuis 2026-09-11, plus de préalable « pont absent ») --------------
+  // Ligne d'airain d'espace de noms inchangée : toute la face dws pend sous /api/panel/ddws/* (jamais /api/dingtalk/*, qui est
+  // la face de routes de plugin-dingtalk-bridge). Quand le pont hôte est présent, cette face coexiste comme « connexion DingTalk locale directe » — l'utilisateur peut,
+  // sans passer par la plateforme hôte (connecteur/scan iam), utiliser directement son DingTalk via dws ; l'appartenance de la livraison de message est arbitrée au moment de l'événement (voir le crochet ci-dessous).
   {
     const dws = new DwsCli(ctx)
     guarded('GET', '/api/panel/ddws/status', 'panel.read', async () => {
@@ -1127,16 +1127,16 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
       return {
         ...status,
         via: 'dws-cli',
-        // 形状兼容（app.js renderTopRight 消费）：bound=false | {displayName,...}
+        // Compatibilité de forme (consommée par app.js renderTopRight) : bound=false | {displayName,...}
         bound: status.bound && status.group ? { displayName: status.group, via: 'dws-cli' } : false,
         connector: { configured: status.installed, name: `dws CLI${status.version ? ` ${status.version}` : ''}`, mode: status.installed ? 'real' : 'mock' },
       }
     })
     guarded('POST', '/api/panel/ddws/install', 'panel.config.write', async () => dws.install())
-    // 登录授权面（2026-09-11 用户需求：不与宿主平台绑定，面板本地代发起 dws 登录）：
-    // POST 发起设备流登录（返回激活指令：授权链接+用户码，前端弹窗直出）；
-    // GET 轮询会话状态（前端 3s 轮询，授权完成即 authenticated:true）；
-    // DELETE 取消进行中的登录会话。授权态归 dws CLI 自身（本面板零凭证铁律不变）。
+    // Face connexion-autorisation (besoin utilisateur 2026-09-11 : sans liaison avec la plateforme hôte, le panneau initie localement la connexion dws) :
+    // POST lance la connexion par flux d'appareil (renvoie l'instruction d'activation : lien d'autorisation + code utilisateur, pop-up front directe) ;
+    // GET scrute l'état de la session (scrutin front 3 s, autorisation faite = authenticated:true) ;
+    // DELETE annule la connexion en cours. L'état d'autorisation appartient au CLI dws lui-même (ligne d'airain : ce panneau est sans identifiants).
     guarded('POST', '/api/panel/ddws/login', 'panel.config.write', async () => dws.startLogin())
     guarded('GET', '/api/panel/ddws/login', 'panel.read', async () => dws.loginState())
     guarded('DELETE', '/api/panel/ddws/login', 'panel.config.write', () => {
@@ -1161,11 +1161,11 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) }
       }
     })
-    // 入向拉取（2026-09-11 用户需求「自动拉取最新消息」）：dws +chat-messages 读绑定群最新消息，
-    // 按 messageId 幂等去重落当前频道（senderType=human + ddSync='origin' + uniqueKey 去重键）。
-    // 拉取失败以 ok:false + error 回包（HTTP 200，降级是数据不是传输错误），前端可重试。
-    // 部门取向自频道反查（前台只传 channelId；移植修正：原实现按 :dept 路径参数解析，
-    // 平铺路径 /api/panel/ddws/pull 下 params.dept 恒空必 400——收编时修正）。
+    // Tirage entrant (besoin utilisateur 2026-09-11 « tirer automatiquement les derniers messages ») : dws +chat-messages lit les derniers messages du groupe lié,
+    // déduplication idempotente par messageId à l'inscription dans le canal courant (senderType=human + ddSync='origin' + uniqueKey comme clé de déduplication).
+    // Un échec de tirage répond ok:false + error (HTTP 200, la dégradation est une donnée, pas une erreur de transport), le front peut réessayer.
+    // L'orientation département remonte du canal (le front ne passe que channelId ; correctif du portage : l'implémentation d'origine résolvait via le paramètre
+    // de chemin :dept, et sous le chemin aplati /api/panel/ddws/pull, params.dept toujours vide = 400 inévitable — corrigé à l'intégration).
     guarded('POST', '/api/panel/ddws/pull', 'panel.write', async (exchange) => {
       const input = body<{ channelId?: string; limit?: number }>(exchange)
       if (!input.channelId?.trim()) throw new Error('channelId 必填（拉取落入的目标频道）')
@@ -1197,10 +1197,10 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
         return { ok: false as const, inserted: 0, error: error instanceof Error ? error.message : String(error) }
       }
     })
-    // 消息 ddSync 出向钩子（投递归属事件时裁决——装配序不可靠，apply 期探测不算数）：
-    //   a. 宿主桥在场且有 channel 群桥 → 桥全权处理（本钩子让位：桥在 deliver 前自查，杜绝双投）；
-    //   b. 否则本钩子负责：dws 已绑群 → dws 投递；未绑群 → 诚实失败回执（QA T-04「无群桥也要
-    //      回执」语义由本钩子承接——钉钉桥无 channel 群桥时不再自行发 ok:false，见其 service.ts）。
+    // Crochet sortant ddSync des messages (appartenance de la livraison arbitrée au moment de l'événement — l'ordre d'assemblage n'est pas fiable, la sonde à l'apply ne compte pas) :
+    //   a. pont hôte présent avec pont de groupe channel → le pont prend tout en charge (ce crochet cède : le pont se vérifie avant deliver, excluant la double livraison) ;
+    //   b. sinon ce crochet assume : groupe dws lié → livraison dws ; pas de groupe lié → reçu d'échec honnête (la sémantique QA T-04 « reçu même sans pont de groupe »
+    //      est reprise par ce crochet — le pont DingTalk sans pont de groupe channel n'émet plus de lui-même ok:false, voir son service.ts).
     ctx.platformBus.on(PlatformEvents.PanelMessageCreated, (payload) => {
       const data = (payload ?? {}) as { messageId?: string; ddSync?: string; text?: string }
       if (!data.messageId || data.ddSync !== 'pending') return
@@ -1217,11 +1217,11 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     ctx.logger('panel-core').info(`01门本地钉钉面已挂载：dws CLI 桥（/api/panel/ddws/*，宿主桥${dingtalkBridgePresent ? '在场共存' : '缺席独任'}；ddSync 投递按群桥归属裁决）`)
   }
 
-  // 基线管理员种子（延迟重试，仅 01门装态）：iam 在场且组织目录为空（01门+authn 首启）→
-  // 与 console seed 同口径初始化。Loader 并发装载下 iam 可能晚于本插件发布，这里轮询等待直至
-  // 可用（上限 30s）。console 在场（全量形态）时由 console seed 负责——本种子以 demoAuth 门控
-  // （回植自底座 2026-10-29）：全量形态下面板与 console 的装配虽分先后，但 console seed 若存在
-  // 延迟执行，双种子竞态会让组织名/口令策略取决于装载顺序——铁律归一：全量形态种子权归 console。
+  // Graine de l'admin de base (retry différée, uniquement en état installé porte 01) : iam présent et catalogue d'organisations vide (premier démarrage porte 01+authn) →
+  // initialisation au même référentiel que la graine console. Sous chargement concurrent du loader, iam peut publier après cette extension ; scrutin d'attente
+  // jusqu'à disponibilité (plafond 30 s). Quand console est présent (forme complète), la graine console est responsable — la présente graine est sous porte demoAuth
+  // (replanté du socle 2026-10-29) : en forme complète, l'assemblage du panneau et de console, bien que séquentiel, pourrait voir la graine console s'exécuter
+  // en différé ; une course de doubles graines ferait dépendre nom d'organisation/politique de mot de passe de l'ordre de chargement — ligne d'airain unifiée : en forme complète, le droit de graine appartient à console.
   if (demoAuth) {
     let seedTries = 0
     const seedTimer = setInterval(() => {
@@ -1264,21 +1264,21 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     ctx.effect(() => () => clearInterval(seedTimer))
   }
 
-  // -- 静态托管（/panel → 对外 /gate01/panel/） ----------------------------------------
+  // -- Hébergement statique (/panel → exposé /gate01/panel/) ----------------------------------------
 
   const publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'public')
   if (existsSync(publicDir)) {
-    // 01门装态着陆归一（config.landingRedirect，2026-09-11 用户实测 MIME 白屏修复）：装配无 console
-    // 时根路径没有控制台可落——302 到面板，杜绝 SPA 兜底把「缺资源的壳页」发给浏览器。
+    // Normalisation de l'atterrissage en état installé porte 01 (config.landingRedirect, correctif de l'écran blanc MIME constaté par l'utilisateur 2026-09-11) : sans console
+    // à l'assemblage, la racine n'a pas de console où atterrir — 302 vers le panneau, excluant que le repli SPA envoie au navigateur « la page coquille sans ressources ».
     if (config.landingRedirect) {
       http.register('GET', '/', (exchange) => {
         exchange.res.writeHead(302, { location: `${http.externalBase}/panel/` }).end()
       })
     }
-    // 目录形态归一：/panel（无尾斜杠）伺服 index.html 后相对资源 ./js/* 会解析到 /js/*（404→SPA 兜底→白屏），
-    // 与 dsh-bridge 的 /gate01→/gate01/ 302 同语义；Location 带 externalBase（挂载形态 = /gate01/panel/）。
-    // 注意路由按 split('/').filter(Boolean) 匹配，/panel 与 /panel/ 命中同一路由节点——
-    // 带尾斜杠的请求必须原地伺服 index.html，不得 302（自指循环）。
+    // Normalisation en forme répertoire : /panel (sans barre de queue) sert index.html puis les ressources relatives ./js/* se résoudraient en /js/* (404→repli SPA→écran blanc),
+    // même sémantique que le 302 /gate01→/gate01/ de dsh-bridge ; Location porte externalBase (forme montée = /gate01/panel/).
+    // Note : les routes s'apparient par split('/').filter(Boolean), /panel et /panel/ atteignent le même nœud de route —
+    // une requête avec barre de queue doit servir index.html sur place, jamais 302 (boucle auto-référente).
     http.register('GET', '/panel', (exchange) => {
       if (exchange.path.endsWith('/')) {
         exchange.file(join(publicDir, 'index.html'))
@@ -1289,12 +1289,12 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     http.serveStatic('/panel', publicDir, '/index.html')
   }
 
-  // -- 种子（基线骨架 + DEMO_SEED=1 演示内容） ---------------------------------------
+  // -- Graines (squelettes de base + contenu de démo DEMO_SEED=1) ---------------------------------------
 
-  // 演示内容播种：demoAuth 装态自动演示（决策 2），全量形态维持 DEMO_SEED=1 显式门控
+  // Semis du contenu de démo : démo automatique en état installé demoAuth (décision 2), la forme complète garde la porte explicite DEMO_SEED=1
   void seedPanel(ctx, panel, demoAuth)
 
-  // -- panel_* 工具族（共享 tools 键，dsh 下即原生 ToolRuntime） ------------------------
+  // -- Famille d'outils panel_* (clé tools partagée, sous dsh ToolRuntime natif) ------------------------
 
   const renderJson = (args: unknown, value: unknown) => [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }]
 
@@ -1421,7 +1421,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     },
   })
 
-  // -- J1 契约 v1：dsh 标准对话点名调用面板 Agent 阵容与已上架 Skill（其他 Agent 协作的主通道） --
+  // -- Contrat J1 v1 : le dialogue standard dsh appelle nominativement la ligne-up d'Agents du panneau et les Skills publiés (canal principal de collaboration avec les autres Agents) --
   ctx.tools.register({
     name: 'panel_agent_invoke',
     description: '点名调用部门面板的某个 Agent 提问并同步取回应答（dsh 标准对话协作主通道）：按部门名册全名匹配，'
@@ -1473,7 +1473,7 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     },
   })
 
-  // -- M3 对话打通：战略看板聚合摘要（对话接地的轻量读法） --
+  // -- Ouverture du dialogue M3 : résumé agrégé du tableau de bord stratégique (lecture légère ancrée dans la conversation) --
   ctx.tools.register({
     name: 'panel_board_digest',
     description: '读取战略看板聚合摘要（近 7 天）：资产在线数、调用漏斗（曝光→点击→调用→完成）、计量与 ROI 估算、'
@@ -1537,11 +1537,11 @@ export function apply(ctx: Context, config: PanelConfig = {}) {
     },
   })
 
-  // -- 制造工具箱（自「制造业 AI 工具集」并入，2026-10-19） --------------------------
-  // 13 个确定性计算内核 + 3 个 AI 工具（Skill 放行制）+ 100 项选题清单。
-  // 路由：/api/panel/mfg/*（读 panel.read / 执行 panel.write / 放行 panel.config.write）；
-  // 工具：panel_mfg_*（共享 tools 键 → dsh 下即原生 ToolRuntime）。
-  // 模型面经平台网关（modelgw / dsh llm 桥），面板零密钥；无网关时 AI 工具诚实 503。
+  // -- Boîte à outils manufacture (intégrée depuis « jeu d'outils IA manufacture », 2026-10-19) --------------------------
+  // 13 noyaux de calcul déterministes + 3 outils IA (régime de libération des Skills) + liste des 100 sujets.
+  // Routes : /api/panel/mfg/* (lecture panel.read / exécution panel.write / libération panel.config.write) ;
+  // outils : panel_mfg_* (clé tools partagée → sous dsh, ToolRuntime natif).
+  // Face modèle via la passerelle de la plateforme (modelgw / pont llm dsh), panneau sans clé ; sans passerelle, les outils IA répondent honnêtement 503.
   applyMfgModule(ctx, { guarded, changeLog, renderJson })
 }
 

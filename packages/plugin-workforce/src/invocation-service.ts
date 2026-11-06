@@ -1,14 +1,14 @@
 /**
- * 受控调用账本服务（实施路径 §9.3/§9.4/§11.5/§11.6 的权威实现）。
+ * Service de registre des appels contrôlés (implémentation de référence du chemin d'implémentation §9.3/§9.4/§11.5/§11.6).
  *
- * 调用状态机（§9.3）：reserved → completed / denied / approval_required /
- * rate_limited / failed / outcome_unknown / cancelled。HTTP 状态与领域状态分开保留，
- * 不以 HTTP 200 冒充业务成功。
+ * Machine à états d'appel (§9.3) : reserved → completed / denied / approval_required /
+ * rate_limited / failed / outcome_unknown / cancelled. L'état HTTP et l'état du domaine sont conservés séparément,
+ * un HTTP 200 ne fait pas passer un succès métier.
  *
- * 步骤幂等（§11.5）：runId+stepKey 唯一约束；同步骤同参数已完成→回放原结果；
- * 执行中→返回当前状态；同步骤不同参数→STEP_ARGUMENT_CONFLICT（409）。
- * 网络调用一律在 txnStore 事务外（§9.4）：事务只做短检查/预留/提交。
- * usage 关联（§11.1）：只做 invocation↔usageEvent 映射，不复制消费流水、不双计。
+ * Idempotence d'étape (§11.5) : contrainte unique runId+stepKey ; même étape, mêmes paramètres, déjà achevée → rejeu du résultat d'origine ;
+ * en cours d'exécution → renvoi de l'état courant ; même étape, paramètres différents → STEP_ARGUMENT_CONFLICT (409).
+ * Les appels réseau sont toujours hors transaction txnStore (§9.4) : la transaction ne fait que courts contrôles/réservation/commit.
+ * Association usage (§11.1) : simple mapping invocation↔usageEvent, pas de duplication des écritures de consommation, pas de double comptage.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
@@ -31,7 +31,7 @@ import { t } from '../../platform-i18n/src/index.ts'
 import { argsHashOf, validateAgainstSchema } from './domain.ts'
 import type { WorkCallerRef, WorkDenyCode, WorkExecutionContext } from '../../platform-core/src/workforce-port.ts'
 
-/** 命中即视为「外部写请求已发出但结果不确定」（§11.5-4：先核验，禁止自动重写）。 */
+/** Toute correspondance vaut « requête d'écriture externe déjà émise mais résultat incertain » (§11.5-4 : vérifier d'abord, réécriture automatique interdite). */
 const UNCERTAIN_TIMEOUT_PATTERN = /超时|timeout|abort|aborted|ECONNRESET|ETIMEDOUT/i
 
 export class InvocationService extends Service implements WorkforceInvocations {
@@ -41,7 +41,7 @@ export class InvocationService extends Service implements WorkforceInvocations {
     super(ctx, 'workforceInvocations')
   }
 
-  // -- 依赖 -------------------------------------------------------------
+  // -- Dépendances -------------------------------------------------------------
 
   private get store(): WorkforceStore {
     const store = (this.ctx as unknown as { workforceStore?: WorkforceStore }).workforceStore
@@ -92,30 +92,30 @@ export class InvocationService extends Service implements WorkforceInvocations {
       ;(this.ctx as unknown as { platformBus?: { emit(name: string, payload: unknown): unknown } })
         .platformBus?.emit(event, payload)
     } catch {
-      // platformBus 未注入当前 fiber 时跳过
+      // platformBus non injecté dans la fiber courante : ignoré
     }
   }
 
-  // -- 受控调用（§9.3/§9.4 权威实现） ---------------------------------------
+  // -- Appel contrôlé (implémentation de référence §9.3/§9.4) ---------------------------------------
 
   async invoke(caller: WorkCallerRef, request: InvocationRequest): Promise<InvocationOutcome> {
     const started = Date.now()
-    // 1. permit 校验（存在/active/未过期/主体一致/run+租约绑定）
+    // 1. Vérification du permit (existence/active/non expiré/sujet concordant/liaison run+bail)
     const permit = await this.admission().verifyPermit(caller, request.permitId, { requireRun: true })
     const capabilities = this.capabilities()
     const manifest = capabilities.get(permit.manifestId)
     const tool = capabilities.resolveTool(permit.manifestId, request.toolHandle)
     if (!tool) {
-      // 清单在而句柄不在＝未授予；清单本身缺失＝句柄无法解析
+      // inventaire présent mais poignée absente = non accordée ; inventaire lui-même manquant = poignée non résoluble
       throw new WorkforceError('TOOL_NOT_GRANTED', t('工具句柄 {handle} 未列入本任用能力清单（manifest v{version}）', { handle: request.toolHandle, version: manifest.version }))
     }
-    // 2. stepKey 词法校验（§9.3：调用方提出的业务引用，不是可信身份）＋参数 schema＋业务范围
+    // 2. Validation lexicale du stepKey (§9.3 : référence métier proposée par l'appelant, pas une identité de confiance) ＋ schéma de paramètres ＋ périmètre métier
     if (!STEP_KEY_PATTERN.test(request.stepKey)) {
       throw new WorkforceError('ARGUMENT_SCOPE_DENIED', t('stepKey 非法：须为 1-96 位字母/数字/点/下划线/连字符，且以字母或数字开头'))
     }
     let args: Record<string, unknown>
-    // validateAgainstSchema(值, schema) 返回「首条中文错误消息 | null」（非转换器）：
-    // 先做 object 根检查，再校验；原实现把实参顺序与返回约定同时误用，invoke 恒拒（selftest 实证）
+    // validateAgainstSchema(valeur, schéma) renvoie « première erreur en chinois | null » (pas un convertisseur) :
+    // d'abord le contrôle de racine object, puis la validation ; l'implémentation d'origine détourait à la fois l'ordre des paramètres et la convention de retour, invoke refusait systématiquement (avéré par le selftest)
     const rawArgs = request.arguments ?? {}
     if (!rawArgs || typeof rawArgs !== 'object' || Array.isArray(rawArgs)) {
       throw new WorkforceError('ARGUMENT_SCOPE_DENIED', t('参数必须为 JSON 对象（object 根）'))
@@ -128,7 +128,7 @@ export class InvocationService extends Service implements WorkforceInvocations {
     this.assertBusinessScope(tool, args)
     const argsHash = argsHashOf(args)
 
-    // 3. 事务内预留（网络调用严禁入内，§9.4）：runId+stepKey 唯一约束承载步骤幂等
+    // 3. Réservation dans la transaction (tout appel réseau y est strictement interdit, §9.4) : la contrainte unique runId+stepKey porte l'idempotence d'étape
     const reserved = this.store.txn(() => {
       const prior = this.store.invocations.findWhere({ runId: permit.runId, stepKey: request.stepKey })[0]
       if (prior) {
@@ -137,7 +137,7 @@ export class InvocationService extends Service implements WorkforceInvocations {
         }
         return { replay: true as const, record: prior }
       }
-      // TableStore.insert 为 void（落库副作用）——记录以本地变量返回，不得返回 insert() 结果
+      // TableStore.insert renvoie void (effet de bord d'écriture) — l'enregistrement est renvoyé via la variable locale, jamais le résultat d'insert()
       const record: InvocationRecord = {
         id: `wfinv_${permit.runId}_${request.stepKey.replace(/[^A-Za-z0-9]/g, '')}_${Date.now().toString(36)}`,
         employeeId: permit.employeeId,
@@ -170,7 +170,7 @@ export class InvocationService extends Service implements WorkforceInvocations {
       return this.replayOutcome(reserved.record)
     }
 
-    // 4. 事务外：任用/租约复核（§9.4 revalidate）→ 适配器缺席 denied → 网络调用
+    // 4. Hors transaction : revérification nomination/bail (revalidate §9.4) → adaptateur absent = denied → appel réseau
     const appointment = this.store.appointments.get(permit.appointmentId)
     if (!appointment || appointment.status !== 'effective') {
       return this.settle(reserved.record, 'denied', {
@@ -194,11 +194,11 @@ export class InvocationService extends Service implements WorkforceInvocations {
       result = { ok: false, message: t('适配器执行异常：{message}', { message: error instanceof Error ? error.message : String(error) }) }
     }
 
-    // 5. settle：AdapterInvokeResult → InvocationOutcome（§9.3 状态语义）
+    // 5. settle : AdapterInvokeResult → InvocationOutcome (sémantique d'états §9.3)
     return this.settleFromAdapter(reserved.record, result, started)
   }
 
-  /** 步骤回放（§11.5-1/2）：同 run 同步骤同参数的既有事实。 */
+  /** Rejeu d'étape (§11.5-1/2) : fait existant du même run, même étape, mêmes paramètres. */
   private replayOutcome(record: InvocationRecord): InvocationOutcome {
     switch (record.status) {
       case 'completed':
@@ -206,8 +206,8 @@ export class InvocationService extends Service implements WorkforceInvocations {
           status: 'completed',
           invocationId: record.id,
           ...(record.gatewayRefJson !== '{}' ? { gatewayRef: this.parseJson(record.gatewayRefJson, {}) } : {}),
-          // D2 修复：回放与原完成路径（settle）同源——workContextFromRecord 从记录关联的
-          // permit/任用重建可信执行上下文；此前误引用作用域外标识符 tool，completed 步骤回放即抛错
+          // Correctif D2 : le rejeu et le chemin d'achèvement d'origine (settle) sont de même source — workContextFromRecord reconstruit le contexte d'exécution de confiance depuis le
+          // permit/la nomination liés à l'enregistrement ; auparavant une référence erronée à l'identifiant tool hors de portée faisait échouer le rejeu des étapes completed
           work: this.workContextFromRecord(record),
         }
       case 'outcome_unknown':
@@ -224,7 +224,7 @@ export class InvocationService extends Service implements WorkforceInvocations {
         return { status: 'failed', invocationId: record.id, message: record.message || t('该步骤此前确认失败') }
       case 'reserved':
       default:
-        // 上次尝试中断（进程崩溃）：写入类风险按结果未知处理（§11.7：已发送未确认的写动作不重执行）
+        // Dernière tentative interrompue (plantage de processus) : un risque de type écriture est traité en résultat inconnu (§11.7 : une action d'écriture envoyée sans confirmation n'est pas réexécutée)
         if (record.risk !== 'read') {
           return { status: 'outcome_unknown', invocationId: record.id, message: t('该步骤存在中断残留的执行记录，请先核验外部结果') }
         }
@@ -232,18 +232,18 @@ export class InvocationService extends Service implements WorkforceInvocations {
     }
   }
 
-  /** 业务范围约束（§9.2/§D.10：factoryIds/pathPrefixes/maxRows/allowedModels 基础项，服务端执行）。 */
+  /** Contraintes de périmètre métier (§9.2/§D.10 : éléments de base factoryIds/pathPrefixes/maxRows/allowedModels, exécution côté serveur). */
   private assertBusinessScope(tool: ManifestToolHandle, args: Record<string, unknown>): void {
     const constraints = tool.constraints ?? {}
     const deny = (detail: string): never => {
       throw new WorkforceError('ARGUMENT_SCOPE_DENIED', t('参数超出任用边界：{detail}', { detail }))
     }
-    // 工厂范围：声明 factoryIds 时 args.factoryId 必须命中
+    // Périmètre d'usine : si factoryIds est déclaré, args.factoryId doit correspondre
     const factoryIds = constraints['factoryIds']
     if (Array.isArray(factoryIds) && factoryIds.length > 0 && typeof args['factoryId'] === 'string') {
       if (!factoryIds.includes(args['factoryId'])) deny(t('factoryId {factoryId} 不在授权工厂范围内', { factoryId: String(args['factoryId']) }))
     }
-    // 目录范围：声明 pathPrefixes 时 args.path 必须命中前缀（NAS 适配器再复核一次）
+    // Périmètre de répertoires : si pathPrefixes est déclaré, args.path doit correspondre à un préfixe (l'adaptateur NAS revérifie une fois de plus)
     const pathPrefixes = constraints['pathPrefixes']
     if (Array.isArray(pathPrefixes) && pathPrefixes.length > 0 && typeof args['path'] === 'string') {
       const path = String(args['path'])
@@ -251,7 +251,7 @@ export class InvocationService extends Service implements WorkforceInvocations {
         deny(t('路径 {path} 超出授权目录范围', { path }))
       }
     }
-    // 行数上限：服务端钳制（不信任客户端自觉）
+    // Plafond de lignes : bridage côté serveur (la vigilance du client n'est pas crue)
     const maxRows = constraints['maxRows']
     if (typeof maxRows === 'number' && maxRows > 0) {
       for (const key of ['limit', 'maxRows', 'size']) {
@@ -259,14 +259,14 @@ export class InvocationService extends Service implements WorkforceInvocations {
         if (typeof value === 'number' && value > maxRows) args[key] = maxRows
       }
     }
-    // 模型白名单：声明 allowedModels 时 args.model 必须命中（缺省按句柄 registryId）
+    // Liste blanche de modèles : si allowedModels est déclaré, args.model doit correspondre (défaut = registryId de la poignée)
     const allowedModels = constraints['allowedModels']
     if (tool.kind === 'model' && Array.isArray(allowedModels) && allowedModels.length > 0 && typeof args['model'] === 'string') {
       if (!allowedModels.includes(args['model'])) deny(t('模型 {model} 不在授权模型范围内', { model: String(args['model']) }))
     }
   }
 
-  /** 参数摘要（§11.4：规范参数摘要入审计，敏感值脱敏，不复制原始敏感内容）。 */
+  /** Résumé de paramètres (§11.4 : résumé canonique des paramètres vers l'audit, valeurs sensibles masquées, pas de copie du contenu sensible brut). */
   private summarizeArgs(args: Record<string, unknown>, depth = 0): Record<string, unknown> {
     if (depth > 3) return { '…': '（摘要截断）' }
     const out: Record<string, unknown> = {}
@@ -287,7 +287,7 @@ export class InvocationService extends Service implements WorkforceInvocations {
     return out
   }
 
-  /** AdapterInvokeResult → InvocationOutcome + 落账 + 事件（§9.3 全状态语义）。 */
+  /** AdapterInvokeResult → InvocationOutcome + écriture au registre + événement (sémantique d'états complète §9.3). */
   private settleFromAdapter(record: InvocationRecord, result: AdapterInvokeResult, started: number): InvocationOutcome {
     const message = result.message ?? ''
     if (result.ok && !result.outcomeUnknown) {
@@ -311,7 +311,7 @@ export class InvocationService extends Service implements WorkforceInvocations {
     if (result.approvalRef) {
       return this.settle(record, 'approval_required', { message: message || t('该动作需要业务审批，请展示审批单并等待'), approvalRef: result.approvalRef, gatewayRef: result.gatewayRef }, started)
     }
-    // 资源级拒绝（网关原有授权链/熔断）→ denied（停止，不换入口重试）；其余为 failed
+    // Refus au niveau ressource (chaîne d'autorisation d'origine de la passerelle/disjoncteur) → denied (arrêt, pas de nouvelle tentative par une autre entrée) ; le reste est failed
     const denied = result.gatewayRef?.['outcome'] === 'denied'
     return this.settle(record, denied ? 'denied' : 'failed', {
       code: denied ? 'TOOL_NOT_GRANTED' : undefined,
@@ -320,7 +320,7 @@ export class InvocationService extends Service implements WorkforceInvocations {
     }, started)
   }
 
-  /** 落账（事务外单行 update）+ usage 关联 + 事件。 */
+  /** Écriture au registre (update d'une ligne hors transaction) + association usage + événement. */
   private settle(
     record: InvocationRecord,
     status: Exclude<InvocationStatus, 'reserved'>,
@@ -347,7 +347,7 @@ export class InvocationService extends Service implements WorkforceInvocations {
       settledAt: new Date().toISOString(),
     })
     for (const usageEventId of detail.usageEventIds ?? []) {
-      // usage 增量关联（§11.1/§11.3）：只做映射不复制流水；同对唯一约束保证幂等
+      // Association incrémentale de l'usage (§11.1/§11.3) : simple mapping sans copie des écritures ; la contrainte unique sur la paire garantit l'idempotence
       this.linkUsage(record.id, usageEventId, String(detail.gatewayRef?.['resource'] ?? ''))
     }
     this.emit('workforce.invocation.settled', {
@@ -381,9 +381,9 @@ export class InvocationService extends Service implements WorkforceInvocations {
     }
   }
 
-  // -- 归属与查询 ---------------------------------------------------------
+  // -- Appartenance et requêtes ---------------------------------------------------------
 
-  /** 归属判定：员工本人，或 human（入口已把守 workforce.read）且与工作组织同组织。 */
+  /** Jugement d'appartenance : l'employé lui-même, ou un human (l'entrée a déjà gardé workforce.read) de la même organisation que l'organisation de travail. */
   private async assertReadable(caller: WorkCallerRef, workOrgId: string, subject: string): Promise<void> {
     const resolution = await this.identity.resolveByCaller(caller)
     if (resolution && resolution.employee.id === subject) return
@@ -394,7 +394,7 @@ export class InvocationService extends Service implements WorkforceInvocations {
     throw new WorkforceError('RUN_NOT_OWNED', t('无权查看该调用记录（仅本人或同组织 workforce.read 主体）'))
   }
 
-  /** human 组织反查（结构化探测 iam；解析失败一律 fail-closed 拒绝）。 */
+  /** Recherche inverse de l'organisation du human (sondage structuré iam ; échec de résolution toujours refusé en fail-closed). */
   private humanOrgId(caller: WorkCallerRef): string | null {
     if (!caller.userId) return null
     try {
@@ -436,7 +436,7 @@ export class InvocationService extends Service implements WorkforceInvocations {
     })
   }
 
-  /** outcome_unknown 核验回写（人工/对账后调用；仅允许从 outcome_unknown 迁移）。 */
+  /** Écriture retour après vérification d'un outcome_unknown (appel après vérification humaine/réconciliation ; migration autorisée uniquement depuis outcome_unknown). */
   reconcile(id: string, status: 'completed' | 'failed', message: string, gatewayRef?: Record<string, unknown>): void {
     const record = this.store.invocations.get(id)
     if (!record) throw new WorkforceError('RUN_NOT_OWNED', t('调用记录不存在：{id}', { id }), 404)
@@ -456,7 +456,7 @@ export class InvocationService extends Service implements WorkforceInvocations {
     })
   }
 
-  // -- 内部 ---------------------------------------------------------------
+  // -- Interne ---------------------------------------------------------------
 
   private workContextOf(permit: PermitRecord, appointment: { orgId: string; dataClass: WorkExecutionContext['dataClass'] }, traceId?: string): WorkExecutionContext {
     return {

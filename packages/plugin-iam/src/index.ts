@@ -1,8 +1,8 @@
 /**
- * @dsh-ops/plugin-iam —— 组织账号管理（IAM）。
+ * @dsh-ops/plugin-iam — gestion des comptes et organisations (IAM).
  *
- * 覆盖方案 §二：组织/账号、三方认证绑定、三方接入配置、角色/用户组。
- * 三方连接器（钉钉/飞书/企微）实现统一 OrgConnector 接口，新增 IM 平台只需新增连接器。
+ * Couvre le plan §2 : organisations/comptes, liaison d'authentification tierce, configuration des accès tierces, rôles/groupes d'utilisateurs.
+ * Les connecteurs tierces (DingTalk/Feishu/WeCom) implémentent l'interface unifiée OrgConnector ; ajouter une plateforme IM = ajouter un connecteur.
  */
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
@@ -16,7 +16,7 @@ import * as iamTools from './tools.ts'
 import { DingTalkAuthAdapter, RealDingTalkAuthAdapter, type DingTalkCredentials, type IdentityProviderAdapter } from './providers.ts'
 
 // ---------------------------------------------------------------------------
-// 数据模型
+// Modèle de données
 // ---------------------------------------------------------------------------
 
 export interface OrgRecord extends RecordBase {
@@ -25,26 +25,26 @@ export interface OrgRecord extends RecordBase {
   order: number
   status: 'active' | 'archived'
   customFields: Record<string, string>
-  /** 所属租户（多租户最小集，v1.2 第 2 步；缺省 t_default 兜底存量数据）。 */
+  /** Tenant de rattachement (jeu minimal multi-tenant, v1.2 étape 2 ; repli t_default pour les données préexistantes). */
   tenantId?: string
   /**
-   * 组织负责人（NAS 数据权限 P/D/T 角色推导依据，dev-plan-nas-authz §2.1）。
-   * 事实源：钉钉连接器同步 dept_manager_userid_list；兼容 customFields['leaderUserIds'] 逗号分隔旧口径。
-   * 多负责人全部推导为对应负责人角色（co-leader）；为空时 nasAuthz 发 leaderVacant 告警。
+   * Responsable d'organisation (base de dérivation des rôles P/D/T des permissions de données NAS, dev-plan-nas-authz §2.1).
+   * Source de fait : dept_manager_userid_list synchronisé par le connecteur DingTalk ; compatibilité avec l'ancien référentiel customFields['leaderUserIds'] séparé par virgules.
+   * Tous les responsables sont dérivés en rôle responsable correspondant (co-leader) ; si vide, nasAuthz émet une alerte leaderVacant.
    */
   leaderUserIds?: string[]
   /**
-   * 负责人口径（缺省 = 'sync' 跟随连接器同步）：'manual' 表示控制台手动绑定锁定，
-   * 连接器同步不再覆盖该组织的负责人（远端没配负责人的部门靠它补录）；清空负责人即恢复 'sync'。
+   * Référentiel du responsable (défaut = 'sync', suit la synchronisation du connecteur) : 'manual' signifie verrouillage d'une liaison manuelle depuis la console,
+   * la synchronisation du connecteur ne remplace plus le responsable de cette organisation (il sert à compléter les départements sans responsable côté distant) ; vider le responsable restaure 'sync'.
    */
   leaderSource?: 'sync' | 'manual'
 }
 
-/** 租户（多租户最小集）：计量/用量报表的租户维度载体。 */
+/** Tenant (jeu minimal multi-tenant) : vecteur de la dimension tenant des rapports de metering/usage. */
 export interface TenantRecord extends RecordBase {
   name: string
   status: 'active' | 'suspended'
-  /** 套餐档位（后续计费档位扩展位，schema v1 已含 tenant 维度）。 */
+  /** Palier d'offre (emplacement d'extension future des paliers de facturation, le schéma v1 contient déjà la dimension tenant). */
   plan: 'trial' | 'standard' | 'enterprise'
 }
 
@@ -57,7 +57,7 @@ export interface ThirdPartyBinding {
   unionId: string
   displayName: string
   boundAt: string
-  /** 主体企业 corpId（多主体隔离维度；缺省/空串视为同一旧主体）。 */
+  /** corpId de l'entreprise principale (dimension d'isolement multi-entité ; vide/absent = considéré comme l'ancienne entité unique). */
   corpId?: string
 }
 
@@ -77,30 +77,30 @@ export interface UserRecord extends RecordBase {
   lastLoginAt?: string
   frozenReason?: string
   /**
-   * 账号类型（NAS 数据权限特殊账号规则，dev-plan-nas-authz §2.1）：
-   * internal=正式员工（缺省）；external=外部顾问/合作方（白名单目录只读）；
-   * suspended-review=可疑标记（全 deny + 审计转人工复核）。
+   * Type de compte (règles des comptes spéciaux des permissions de données NAS, dev-plan-nas-authz §2.1) :
+   * internal = employé officiel (défaut) ; external = consultant externe/partenaire (liste blanche en lecture seule) ;
+   * suspended-review = marque suspect (deny global + audit renvoyé vers revue humaine).
    */
   accountType?: 'internal' | 'external' | 'suspended-review'
   /**
-   * 主归属组织（跨部门兼任语义，dev-plan-nas-authz §2.1）：缺省取组织链最深者。
-   * orgId ≠ primaryOrgId 时，orgId 组织子树仅授只读（兼任只读，避免双写冲突）。
+   * Organisation de rattachement principale (sémantique de cumul inter-départements, dev-plan-nas-authz §2.1) : par défaut, la plus profonde de la chaîne d'organisations.
+   * Quand orgId ≠ primaryOrgId, le sous-arbre de orgId ne reçoit que la lecture (cumul en lecture seule, contre les conflits de double écriture).
    */
   primaryOrgId?: string
   /**
-   * 三方绑定豁免（2026-10-22 解绑能力）：被人工解绑/更换过的「provider|corpId」，连接器同步
-   * 不再自动重建该主体的身份链接。
+   * Exemption de liaison tierce (capacité de déliaison 2026-10-22) : un « provider|corpId » délié/remplacé manuellement ne voit plus
+   * ses liens d'identité reconstruits automatiquement par la synchronisation du connecteur.
    *
-   * 为什么必须有：同步逻辑按「bindings 里有没有该 provider+corpId」决定是否补链，
-   * 解绑后下一次同步（默认 60 分钟一次）会立刻按工号把人的钉钉身份绑回来——用户看到的是
-   * 「点了没反应」。与部门负责人 leaderSource='manual' 的「手动绑定锁定，同步不覆盖」同构：
-   * 人工决定优先于同步事实，要恢复自动绑定需显式解除豁免（重新扫码绑定即自动清除）。
+   * Pourquoi c'est indispensable : la logique de synchronisation décide de réparer le lien selon « bindings contient-il ce provider+corpId »,
+   * la synchronisation suivante après déliaison (par défaut toutes les 60 minutes) relierait immédiatement l'identité DingTalk de la personne via son matricule — l'utilisateur verrait
+   * « clic sans effet ». Structurellement identique au leaderSource='manual' du responsable de département : « liaison manuelle verrouillée, pas d'écrasement par la synchronisation » :
+   * la décision humaine prime sur le fait de synchronisation ; pour restaurer la liaison automatique, lever explicitement l'exemption (un nouveau scan suffit à l'effacer automatiquement).
    */
   bindingExemptions?: string[]
   /**
-   * 人类已知口令（2026-10-22 解绑护栏的事实源）：仅在「有人拿到过明文口令」时为 true——
-   * 创建时显式指定口令、管理员重置口令、本人改密。SSO 自注册与通讯录同步创建的账号
-   * 口令是随机值且从未下发，此标记为 false，此时三方身份是唯一可用的登录方式。
+   * Mot de passe humain connu (source de fait du garde-fou de déliaison 2026-10-22) : true seulement si « quelqu'un a déjà eu le mot de passe en clair » —
+   * mot de passe explicitement fixé à la création, réinitialisé par l'admin, changé par la personne. Les comptes créés par auto-enregistrement SSO et synchronisation d'annuaire
+   * ont un mot de passe aléatoire jamais distribué, cette marque est false : dans ce cas l'identité tierce est la seule voie de connexion disponible.
    */
   passwordKnown?: boolean
 }
@@ -110,28 +110,28 @@ export interface RoleRecord extends RecordBase {
   name: string
   builtin: boolean
   description: string
-  /** '*' 表示全部权限点。 */
+  /** '*' signifie tous les points de permission. */
   permissions: string[]
 }
 
 /**
- * 账号管理操作者上下文（QA A-03）：外部入口（REST 管理路由与工具桥）必须携带可归因 actor，
- * 组织归属校验 fail-closed（N1）。permissions 取操作者令牌实时解析结果（'*'=平台管理员）；
- * orgId 为显式组织归属（工具桥 `_actor` 注入形态），缺省按 userId 反查账号档案定位归属组织。
+ * Contexte d'opérateur des actions de gestion de comptes (QA A-03) : les entrées externes (routes REST de gestion et pont d'outils) doivent porter un actor attribuable,
+ * validation du rattachement organisationnel fail-closed (N1). permissions = résultat d'analyse temps réel du jeton de l'opérateur ('*' = admin plateforme) ;
+ * orgId est un rattachement organisationnel explicite (forme injectée `_actor` du pont d'outils) ; par défaut, l'organisation est retrouvée via le dossier du compte userId.
  */
 export interface UserManageActor {
   userId?: string
-  /** 操作者归属组织（组织子树判定根；缺省按 userId 反查账号档案）。 */
+  /** Organisation de rattachement de l'opérateur (racine du jugement de sous-arbre ; par défaut retrouvée via le dossier du compte userId). */
   orgId?: string
   permissions: string[]
 }
 
-/** 内部系统身份（基线迁移/种子初始化/三方同步等服务内部链路）：显式平台级操作者，替代无归因放行。 */
+/** Identité système interne (migrations de base/initialisation des graines/synchronisation tierce et autres chaînes internes de service) : opérateur explicite de niveau plateforme, remplaçant les passages sans attribution. */
 export const SYSTEM_ACTOR: UserManageActor = { permissions: ['*'] }
 
 /**
- * 跨组织操作拒绝（QA A-03/N4）：领域语义为 403 FORBIDDEN——控制台路由层捕获后经
- * exchange.fail(403) 回写（guarded 兜底对裸 Error 一律 400，跨组织拒绝不属请求格式错误）。
+ * Refus d'action inter-organisations (QA A-03/N4) : la sémantique du domaine est 403 FORBIDDEN — la couche de routage de la console l'attrape et la réécrit via
+ * exchange.fail(403) (le rattrapage guarded traite toute Error nue en 400 ; un refus inter-organisations n'est pas une erreur de format de requête).
  */
 export class OrgScopeDeniedError extends Error {
   readonly status = 403
@@ -155,18 +155,18 @@ export interface UserGroupRecord extends RecordBase {
   memberIds: string[]
   description: string
   /**
-   * 是否为 NAS 数据权限 C 角色关联的动态用户组（dev-plan-nas-authz §2.2）。
-   * 由 nasAuthz 规则导入/更新时回写标记；重算漂移时无论幅度大小都发 cGroupDrift 告警。
+   * Si le groupe est un groupe d'utilisateurs dynamique lié au rôle C des permissions de données NAS (dev-plan-nas-authz §2.2).
+   * Marque réécrite à l'import/mise à jour des règles nasAuthz ; au recalcul de dérive, une alerte cGroupDrift est émise quelle que soit l'amplitude.
    */
   authzRoleC?: boolean
-  /** 成员重算漂移告警阈值（人数，缺省 5；仅对未标记 authzRoleC 的组生效）。 */
+  /** Seuil d'alerte de dérive au recalcul des membres (nombre de personnes, défaut 5 ; ne s'applique qu'aux groupes sans marque authzRoleC). */
   driftAlertThreshold?: number
 }
 
 export interface ConnectorConfigRecord extends RecordBase {
   id: string
   provider: 'dingtalk' | 'feishu' | 'wecom'
-  /** 主体名称（多主体展示维度；缺省 `${provider}-${corpId}`）。 */
+  /** Nom de l'entité (dimension d'affichage multi-entité ; défaut `${provider}-${corpId}`). */
   name: string
   enabled: boolean
   corpId: string
@@ -178,30 +178,30 @@ export interface ConnectorConfigRecord extends RecordBase {
   callbackUrl: string
   loginEnabled: boolean
   conflictStrategy: 'third_party_wins' | 'platform_wins' | 'manual'
-  /** real=真实 OpenAPI；mock=演示降级（显式标注）。 */
+  /** real = OpenAPI réel ; mock = repli de démonstration (explicitement marqué). */
   mode: 'real' | 'mock'
-  /** OpenAPI 基址覆盖（测试/专有部署指向本地）。 */
+  /** Surcharge de l'URL de base OpenAPI (tests/déploiements dédiés pointant en local). */
   apiBase?: string
-  /** 通讯录 topapi 基址覆盖（默认 https://oapi.dingtalk.com）。 */
+  /** Surcharge de l'URL de base topapi d'annuaire (défaut https://oapi.dingtalk.com). */
   oapiBase?: string
-  /** 同步树挂载的目标组织 ID（空=平台根；多主体各自挂到自己的根组织）。 */
+  /** ID de l'organisation cible où monte l'arbre synchronisé (vide = racine plateforme ; chaque entité monte sur sa propre racine). */
   targetOrgId?: string
   lastSyncAt?: string
   lastSyncResult?: { ok: boolean; created: number; updated: number; conflicts: number; frozen: number; message: string }
 }
 
 /**
- * 三方身份链接（融合 auth-identity 的 user_identity_links 设计）。
- * 活跃链接在 (provider, corpId, providerUserId) 上引擎级唯一——「一人一号」按主体隔离，
- * 由唯一约束兜底，禁止以「先查后插」替代约束（红线）。解绑即物理删除记录（等价 WHERE unlinked_at IS NULL 的部分唯一索引）。
+ * Liens d'identité tierce (fusion de la conception user_identity_links de auth-identity).
+ * Les liens actifs sont uniques au niveau moteur sur (provider, corpId, providerUserId) — « une personne, un compte » isolé par entité,
+ * garanti par la contrainte d'unicité ; interdiction de remplacer la contrainte par du « chercher-puis-insérer » (ligne rouge). Délier = suppression physique de l'enregistrement (équivalent d'un index unique partiel WHERE unlinked_at IS NULL).
  *
- * kind（2026-10-22 解绑能力新增）：同一 provider+corpId 下同一个自然人可能同时存在两条链，
- * 用途不同、可独立存废：
- *   - login（缺省）：登录身份链，providerUserId 是 unionId。用于「这个人是谁」的判定与 SSO 登录。
- *   - staff：任职身份链，providerUserId 是 userid(staffId)。用于通讯录任职/负责人反查
- *     （部门负责人映射、NAS 数据权限身份反查）——它描述的是「此人在组织里的岗位」，不是登录凭据。
- * 两者并存是既有设计（同步时同时写入）。解绑登录身份不应连带抹掉任职事实：
- * 抹掉会让部门负责人反查断链、审批路由回退到父部门（2026-10-22 实测回归）。
+ * kind (ajouté avec la capacité de déliaison 2026-10-22) : sous un même provider+corpId, une même personne physique peut avoir simultanément deux liens,
+ * d'usages différents, indépendamment préservables :
+ *   - login (défaut) : lien d'identité de connexion, providerUserId est l'unionId. Sert au jugement « qui est cette personne » et à la connexion SSO.
+ *   - staff : lien d'identité de fonction, providerUserId est le userid (staffId). Sert aux recherches inverses fonction/responsable d'annuaire
+ *     (cartographie des responsables de département, recherche d'identité des permissions de données NAS) — il décrit « le poste de cette personne dans l'organisation », pas un identifiant de connexion.
+ * La coexistence des deux relève de la conception existante (écrits simultanément à la synchronisation). Délier l'identité de connexion ne doit pas effacer le fait de fonction :
+ * l'effacer casserait la recherche inversée des responsables de département et ferait retomber le routage d'approbation sur le département parent (régression constatée 2026-10-22).
  */
 export interface IdentityLinkRecord extends RecordBase {
   provider: 'dingtalk' | 'feishu' | 'wecom'
@@ -211,7 +211,7 @@ export interface IdentityLinkRecord extends RecordBase {
   displayName: string
   linkedAt: string
   linkedBy: string
-  /** 链路用途：login=登录身份（缺省）；staff=任职身份。缺省按 login 解读（存量数据兼容）。 */
+  /** Usage du lien : login = identité de connexion (défaut) ; staff = identité de fonction. Par défaut lu comme login (compatibilité des données préexistantes). */
   kind?: 'login' | 'staff'
 }
 
@@ -226,36 +226,36 @@ export interface SyncConflictRecord extends RecordBase {
   resolvedAt?: string
 }
 
-/** 动态用户组成员快照（C 组漂移可观测，dev-plan-nas-authz §2.2）。 */
+/** Instantané des membres de groupes d'utilisateurs dynamiques (observabilité de la dérive du groupe C, dev-plan-nas-authz §2.2). */
 export interface GroupSnapshotRecord extends RecordBase {
   groupId: string
   memberIds: string[]
   computedAt: string
 }
 
-/** 组成员漂移告警默认阈值（人数）。 */
+/** Seuil par défaut de l'alerte de dérive des membres de groupe (nombre de personnes). */
 export const DEFAULT_GROUP_DRIFT_THRESHOLD = 5
 
-/** 连接器自动同步巡检 tick：到期判定按各配置自身 intervalMinutes，不在此处定周期。 */
+/** Tick d'inspection de la synchronisation automatique des connecteurs : l'échéance se juge selon l'intervalMinutes propre à chaque configuration, la période n'est pas fixée ici. */
 const AUTO_SYNC_TICK_MS = 60_000
-/** 启动后首跑延迟：错开平台装载窗口，超期/从未同步的连接器启动即补同步。
- * 90s 口径（2026-10-13 R4 复盘）：原 15s 在 boot 较慢的环境会抢先于 SSO 兑换断言把演示名册
- * （dd_u003 等）自动同步建身份链接，「未命中签发待绑定票据」判定被污染为 hit——
- * 演示环境本就带 intervalMinutes=60 的演示连接器，boot 即触发属合理，拉长延迟让交互窗口先行。 */
+/** Délai du premier tour après démarrage : décale la fenêtre de chargement de la plateforme ; les connecteurs en retard/jamais synchronisés rattrapent au démarrage.
+ * Référentiel 90 s (retour d'expérience R4 2026-10-13) : l'ancien 15 s devançait l'assertion d'échange SSO sur des environnements à boot lent et synchronisait automatiquement
+ * la liste de démonstration (dd_u003 etc.) en créant des liens d'identité, polluant le jugement « billet en attente de liaison non atteint » ;
+ * l'environnement de démonstration porte de toute façon un connecteur de démonstration intervalMinutes=60, son déclenchement au boot est légitime — allonger le délai laisse passer la fenêtre interactive d'abord. */
 const AUTO_SYNC_BOOT_DELAY_MS = 90_000
-/** 单连接器最小生效间隔（防误配高频拖垮钉钉 OpenAPI 配额；0=该连接器关闭自动同步）。 */
+/** Intervalle effectif minimal par connecteur (contre les mauvaises configurations à haute fréquence épuisant le quota DingTalk OpenAPI ; 0 = synchronisation automatique désactivée pour ce connecteur). */
 const AUTO_SYNC_MIN_INTERVAL_MINUTES = 5
 
 // ---------------------------------------------------------------------------
-// 权限点目录
+// Catalogue des points de permission
 // ---------------------------------------------------------------------------
 
 export const PermissionCatalog: Array<{ point: string; label: string; group: string }> = [
   { point: 'console.login', label: '登录控制台', group: '基础' },
-  // 控制台只读基线（2026-10-17 演示模式批次）：工作台聚合/通知/平台信息/工具目录/最近调用
-  // 五个纯读路由的声明点。被 console.login 蕴含（判定面规则见 platform-core rest-gate.ts
-  // IMPLIED_POINTS），任何可登录角色无需显式授予即通过；单独授予本点不构成登录能力。
-  // 免登演示态的只读白名单收录本点（访客可读工作台，拿不到 console.login 本身）。
+  // Base en lecture seule de la console (lot mode démo 2026-10-17) : lieu de déclaration des cinq routes purement lecture
+  // agrégat espace de travail/notifications/infos plateforme/catalogue d'outils/appels récents. Impliqué par console.login (règles de dérivation voir
+  // IMPLIED_POINTS dans platform-core rest-gate.ts) : tout rôle connectable passe sans octroi explicite ; octroyer ce point seul ne confère pas la connexion.
+  // La liste blanche en lecture seule du mode démo sans connexion inclut ce point (le visiteur peut lire l'espace de travail sans obtenir console.login lui-même).
   { point: 'console.read', label: '控制台只读（工作台/通知/平台信息/工具目录）', group: '基础' },
   { point: 'iam.org.read', label: '查看组织', group: '组织账号' },
   { point: 'iam.org.write', label: '管理组织', group: '组织账号' },
@@ -273,17 +273,17 @@ export const PermissionCatalog: Array<{ point: string; label: string; group: str
   { point: 'authn.oidc.read', label: '查看 OIDC 客户端', group: '统一认证' },
   { point: 'authn.oidc.write', label: '管理 OIDC 客户端（签发/轮换/禁用）', group: '统一认证' },
   { point: 'mcp.service.read', label: '查看 MCP 服务', group: 'MCP' },
-  // W3-T5（MCP 治理契约 §12/§15）：scope 模板读取点（POST /api/mcp/perm-groups/:id/scope-template，
-  // dry 语义不落库）——目录缺此点时 resource_admin 的 mcp.* 通配无法展开到它（全量 403）
+  // W3-T5 (contrat de gouvernance MCP §12/§15) : point de lecture du gabarit de scope (POST /api/mcp/perm-groups/:id/scope-template,
+  // sémantique dry sans écriture) — sans ce point au catalogue, le joker mcp.* de resource_admin ne peut s'y déplier (403 intégral)
   { point: 'mcp.permgroup.read', label: '读取 MCP 权限组与 scope 模板', group: 'MCP' },
   { point: 'mcp.service.write', label: '管理 MCP 服务', group: 'MCP' },
   { point: 'mcp.service.deploy', label: '部署/灰度 MCP', group: 'MCP' },
   { point: 'mcp.service.offline', label: '下线 MCP', group: 'MCP' },
   { point: 'mcp.permgroup.write', label: '管理 MCP 权限组', group: 'MCP' },
   { point: 'mcp.invoke', label: '调用 MCP 网关', group: 'MCP' },
-  // W 批次 W1（2026-10-15，V11 根治）：MCP 工具可信风险登记审批面——登记/两级审批/重审清单/退场
+  // Lot W, W1 (2026-10-15, correction de racine V11) : face d'approbation de l'enregistrement des risques de confiance des outils MCP — enregistrement/approbation à deux niveaux/liste de ré-examen/retrait
   { point: 'mcp.risk.admin', label: 'MCP 工具风险登记审批（登记/两级审批/重审清单）', group: 'MCP' },
-  // 连接器纳管（SaaS 数据面网关；invoke 独立权限点对齐 mcp.invoke 先例）
+  // Gestion des connecteurs (passerelle du plan de données SaaS ; invoke en point de permission indépendant, aligné sur le précédent mcp.invoke)
   { point: 'connector.gateway.write', label: '配置连接器网关与健康操作', group: '连接器' },
   { point: 'connector.catalog.read', label: '浏览连接器目录', group: '连接器' },
   { point: 'connector.connection.read', label: '查看连接器连接（org 内）', group: '连接器' },
@@ -291,8 +291,8 @@ export const PermissionCatalog: Array<{ point: string; label: string; group: str
   { point: 'connector.invoke', label: '调用连接器 action', group: '连接器' },
   { point: 'connector.permgroup.write', label: '管理连接器权限组', group: '连接器' },
   { point: 'connector.runs.read', label: '查看连接器运行日志/对账视图', group: '连接器' },
-  // connector.market.publish 移除（E-06 权限点卫生）：全仓无任何消费闸门（无 guarded/requirePermission/
-  // hasPermission 引用），亦无内置角色持有；上架动作由 market.submit 契约 + 市场审批流承载。
+  // connector.market.publish retiré (hygiène des points de permission E-06) : aucune barrière de consommation dans tout le dépôt (aucune référence
+  // guarded/requirePermission/hasPermission), aucun rôle intégré ne le détient ; l'action de publication est portée par le contrat market.submit + le flux d'approbation du marché.
   { point: 'skill.read', label: '浏览 Skill 市场', group: 'Skill 市场' },
   { point: 'skill.submit', label: '提交 Skill', group: 'Skill 市场' },
   { point: 'skill.approve', label: '审批 Skill', group: 'Skill 市场' },
@@ -301,12 +301,12 @@ export const PermissionCatalog: Array<{ point: string; label: string; group: str
   { point: 'skill.storage.write', label: '配置 Skill 包存储后端（本地/NAS）', group: 'Skill 市场' },
   { point: 'nas.read', label: '查看 NAS 存储', group: 'NAS 存储' },
   { point: 'nas.write', label: '管理 NAS 存储（纳管/上线/文件读写）', group: 'NAS 存储' },
-  // NAS 数据权限（dev-plan-nas-authz §2.3）：check 供网关/hermes 专用资源账号调用，read/write 供规则管理
+  // Permissions de données NAS (dev-plan-nas-authz §2.3) : check pour les appels des comptes de service dédiés passerelle/hermes, read/write pour la gestion des règles
   { point: 'nas.authz.check', label: 'NAS 数据权限判定（check/scope）', group: 'NAS 存储' },
   { point: 'nas.authz.read', label: '查看 NAS 数据权限规则与判定留痕', group: 'NAS 存储' },
   { point: 'nas.authz.write', label: '管理 NAS 数据权限规则/例外（含破窗 override）', group: 'NAS 存储' },
-  // 孤儿权限点补录（R10 总表发现，2026-10-13）：plugin-nas/manifest/permissions.yaml 已声明、
-  // console 两处 guarded 路由（所有权登记/改写）实际校验，但目录此前未收录——自定义角色无法勾选
+  // Rattrapage des points de permission orphelins (découvert au tableau R10, 2026-10-13) : déclarés dans plugin-nas/manifest/permissions.yaml,
+  // réellement vérifiés par deux routes guarded de la console (enregistrement/réécriture de propriété), mais absents du catalogue jusqu'ici — les rôles personnalisés ne pouvaient pas les cocher
   { point: 'nas.ownership.write', label: '管理 NAS 文件所有权（上传登记/重命名改写/删除移除）', group: 'NAS 存储' },
   { point: 'agent.read', label: '查看 Agent', group: 'Agent 本体' },
   { point: 'agent.write', label: '管理 Agent', group: 'Agent 本体' },
@@ -316,10 +316,10 @@ export const PermissionCatalog: Array<{ point: string; label: string; group: str
   { point: 'app.read', label: '查看 AI 应用', group: 'AI 应用' },
   { point: 'app.write', label: '管理 AI 应用', group: 'AI 应用' },
   { point: 'app.offline', label: '下线 AI 应用', group: 'AI 应用' },
-  // 应用外部凭证取值（issue #19，2026-10-31）：独立权限点——登记/轮换沿用 app.write，
-  // 取值（拿到明文）单独授权 + 逐次审计；缺省无内置角色持有（按需显式授权，最小披露面）
+  // Lecture des valeurs des identifiants externes d'application (issue #19, 2026-10-31) : point de permission indépendant — enregistrement/rotation suivent app.write,
+  // la lecture (obtenir le clair) exige une autorisation séparée + audit à chaque fois ; aucun rôle intégré par défaut (octroi explicite au besoin, surface de divulgation minimale)
   { point: 'app.credential.fetch', label: '取用应用外部凭证（每次取用落审计）', group: 'AI 应用' },
-  // 数据要素域（IAW 交接 2-1..2-4）：数据集登记/质量分/血缘/指标字典
+  // Domaine des données (livraison IAW 2-1..2-4) : enregistrement de jeux de données/score qualité/lignée/dictionnaire d'indicateurs
   { point: 'resource.dataset.write', label: '管理数据要素（数据集/质量分/血缘/指标字典）', group: '数据要素' },
   { point: 'audit.read', label: '查看审计日志', group: '审计' },
   { point: 'audit.rule.write', label: '管理告警规则', group: '审计' },
@@ -332,37 +332,37 @@ export const PermissionCatalog: Array<{ point: string; label: string; group: str
   { point: 'modelgw.invoke', label: '调用模型网关', group: '模型网关' },
   { point: 'modelgw.admin', label: '管理模型目录', group: '模型网关' },
   { point: 'market.read', label: '浏览插件市场', group: '插件市场' },
-  // market.submit 移除（E-06 权限点卫生）：提交面 POST /api/market/submit 走开发者身份自校验
-  // （access=authenticated + developerCaller），该权限点全仓无消费、无角色持有。
+  // market.submit retiré (hygiène E-06) : la face de soumission POST /api/market/submit passe par l'auto-vérification d'identité développeur
+  // (access=authenticated + developerCaller) ; ce point de permission est sans consommation ni détenteur de rôle dans tout le dépôt.
   { point: 'market.approve', label: '审批插件', group: '插件市场' },
   { point: 'market.install', label: '安装插件', group: '插件市场' },
   { point: 'market.developer', label: '开发者门户', group: '插件市场' },
   { point: 'connect.manage', label: '管理平台接入（接入码/远程客户端）', group: '平台接入' },
   { point: 'platform.update.read', label: '查看/触发平台更新检查', group: '平台维护' },
   { point: 'platform.update.apply', label: '执行平台升级（git pull + npm install）', group: '平台维护' },
-  // 部门面板（review-dsh-agent-panel-v2 Phase 0：D3 裁决——无 dingtalk.* 事件权限点、总线订阅不需权限点）
+  // Panneau départemental (review-dsh-agent-panel-v2 Phase 0 : arbitrage D3 — pas de point de permission d'événement dingtalk.*, la souscription au bus n'exige pas de point)
   { point: 'panel.read', label: '查看部门面板（会话/看板/知识/图谱）', group: '部门面板' },
   { point: 'panel.write', label: '面板协作（发消息/建频道/卡片动作/激活申请）', group: '部门面板' },
   { point: 'panel.task.write', label: '面板任务流转（创建/泳道迁移）', group: '部门面板' },
   { point: 'panel.config.write', label: '面板配置（widget/KPI 布局/图谱重载）', group: '部门面板' },
   { point: 'scenegraph.read', label: '查看行业场景图谱', group: '部门面板' },
-  // scenegraph.activate 移除（E-06 权限点卫生）：行业激活的实际闸门是 panel.write（激活申请）
-  // 与 market.approve（审批执行），该点全仓无消费；org_admin 迁移批次同步摘除（存量库已
-  // 落库的点由管理员按角色编辑回收，迁移只补缺不删改）。
+  // scenegraph.activate retiré (hygiène E-06) : la vraie barrière de l'activation de secteur est panel.write (demande d'activation)
+  // et market.approve (exécution d'approbation) ; ce point est sans consommation dans tout le dépôt ; le lot de migration org_admin le retire aussi (les points déjà
+  // en base seront repris par l'admin via l'édition de rôle ; la migration ne fait que combler les manques, sans suppression ni modification).
   { point: 'dingtalk.message.send', label: '钉钉桥接消息投递（群桥绑定/推送/回决回调）', group: '部门面板' },
-  // 事务流引擎（IAW 交接 3-1..3-4，宿主新域 flow）
+  // Moteur de flux de dossiers (livraison IAW 3-1..3-4, nouveau domaine hôte flow)
   { point: 'flow.read', label: '查看事务流（编排/模板/SLA）', group: '事务流' },
   { point: 'flow.write', label: '事务流流转（创建实例/步骤推进/取消）', group: '事务流' },
   { point: 'flow.admin', label: '管理事务流模板库', group: '事务流' },
-  // 执行中枢（2026-10-14 路线图 R5/R10 前置，plugin-exec-hub 域）：权限点此前只在
-  // plugin-exec-hub/plugin.yaml 声明、目录未收录（自定义角色无法勾选，同 nas.ownership.write
-  // 孤儿点先例）——收录后内置角色与自定义角色才能按粒度授权
+  // Centre d'exécution (préambule feuille de route R5/R10 2026-10-14, domaine plugin-exec-hub) : les points de permission n'étaient auparavant déclarés que dans
+  // plugin-exec-hub/plugin.yaml, absents du catalogue (rôles personnalisés incapables de les cocher, même précédent que l'orphelin nas.ownership.write)
+  // — une fois recensés, rôles intégrés et personnalisés peuvent autoriser à la bonne granularité
   { point: 'exec.read', label: '查看执行中枢（目标/任务/唤醒/心跳）', group: '执行中枢' },
   { point: 'exec.write', label: '操作执行中枢任务', group: '执行中枢' },
   { point: 'exec.admin', label: '执行中枢运维（手动 tick 等）', group: '执行中枢' },
-  // 数字员工域（W 批次，plugin-workforce）：权限点此前只在 plugin.yaml/permissions.yaml 声明、
-  // 目录未收录（exec.* 孤儿点同先例）——收录后 authn 机器凭证才能签发 workforce.* scope、
-  // 内置角色与自定义角色才能按粒度授权（W5 运维面 workforce.admin 同批销账）
+  // Domaine de l'employé numérique (lot W, plugin-workforce) : points de permission auparavant déclarés seulement dans plugin.yaml/permissions.yaml,
+  // absents du catalogue (même précédent que les orphelins exec.*) — une fois recensés, les identifiants machine authn peuvent émettre des scopes workforce.*,
+  // et rôles intégrés et personnalisés peuvent autoriser à la bonne granularité (face opérationnelle workforce.admin soldée dans le même lot W5)
   { point: 'workforce.read', label: '查看数字员工域（员工/任用/调用/交付）', group: '数字员工' },
   { point: 'workforce.write', label: '管理数字员工域（员工/绑定/任用）', group: '数字员工' },
   { point: 'workforce.admin', label: '数字员工运维（批量停复职/审计报表/台账清理）', group: '数字员工' },
@@ -372,12 +372,12 @@ export const PermissionCatalog: Array<{ point: string; label: string; group: str
 
 export const BuiltinRoles: Array<Omit<RoleRecord, 'id' | 'createdAt' | 'updatedAt'>> = [
   { code: 'super_admin', name: '平台超级管理员', builtin: true, description: '拥有全部权限点', permissions: ['*'] },
-  // org_admin 补 exec.*（2026-10-14 执行中枢纳管）：组织管理员对本组织执行中枢全权（与 iam.* 同口径）
-  // + workforce.*（W 批次 2026-10-15）：本组织数字员工域全权（与 BUILTIN_ROLE_MIGRATION 两处同步）
+  // org_admin reçoit exec.* (gestion du centre d'exécution 2026-10-14) : pleins pouvoirs de l'admin d'organisation sur le centre d'exécution (même référentiel que iam.*)
+  // + workforce.* (lot W 2026-10-15) : pleins pouvoirs sur le domaine de l'employé numérique de l'organisation (synchronisés aux deux endroits avec BUILTIN_ROLE_MIGRATION)
   { code: 'org_admin', name: '组织管理员', builtin: true, description: '管理本组织账号与用户组', permissions: ['console.login', 'iam.*', 'approval.read', 'exec.*', 'workforce.*'] },
-  // resource_admin 补 exec.read + modelgw.read（2026-10-14）：资源管理员可查看执行中枢（操作 Agent 的运行面）
-  // 与模型目录（R2-B：渠道分级/预算治理需要看到模型清单，写面仍归 modelgw.admin）
-  // + workforce.read（W 批次 2026-10-15）：资源管理员可查看数字员工域（员工消费其所管资源，运维面仍归 org_admin）
+  // resource_admin reçoit exec.read + modelgw.read (2026-10-14) : l'admin de ressources peut consulter le centre d'exécution (la face de marche des Agents opérés)
+  // et le catalogue de modèles (R2-B : la gradation de canaux/la gouvernance de budget exige de voir la liste des modèles, la face écriture reste modelgw.admin)
+  // + workforce.read (lot W 2026-10-15) : l'admin de ressources peut consulter le domaine de l'employé numérique (les employés consomment les ressources qu'il gère, la face opérationnelle reste org_admin)
   { code: 'resource_admin', name: '资源管理员', builtin: true, description: '管理 MCP/Skill/Agent/应用/NAS/连接器资源与数据要素', permissions: ['console.login', 'mcp.*', 'skill.*', 'agent.*', 'app.*', 'nas.*', 'authn.oidc.*', 'connector.*', 'resource.dataset.write', 'panel.read', 'flow.read', 'approval.read', 'modelgw.read', 'exec.read', 'workforce.read'] },
   { code: 'developer', name: '开发者', builtin: true, description: '提交与调试资源（应用限自身 owner 范围，服务端校验）', permissions: ['console.login', 'iam.user.read', 'iam.org.read', 'mcp.service.read', 'mcp.invoke', 'skill.read', 'skill.submit', 'skill.install', 'agent.read', 'agent.write', 'app.read', 'app.write', 'nas.read', 'connector.catalog.read', 'connector.connection.read', 'connector.invoke', 'exec.read', 'exec.write'] },
   { code: 'member', name: '普通用户', builtin: true, description: '浏览市场与可用资源', permissions: ['console.login', 'skill.read', 'agent.read', 'app.read', 'panel.read', 'panel.write', 'panel.task.write', 'scenegraph.read', 'flow.read', 'flow.write', 'exec.read', 'exec.write'] },
@@ -385,42 +385,42 @@ export const BuiltinRoles: Array<Omit<RoleRecord, 'id' | 'createdAt' | 'updatedA
 ]
 
 /**
- * 内置角色的一次性幂等权限迁移：ensureBuiltinRoles 只插不更新——生产已落库角色不会自动
- * 获得后续版本新增的权限点。迁移只做「缺则补」，不触碰用户自定义角色；每次启动都会
- * 重新比对（幂等），历史标记（connector-permissions-v1）仅作观测。
+ * Migration de permissions unique et idempotente des rôles intégrés : ensureBuiltinRoles insère sans mettre à jour — les rôles déjà en base en production n'obtiennent
+ * pas automatiquement les points de permission ajoutés dans les versions suivantes. La migration ne fait que « combler les manques », sans toucher aux rôles personnalisés ; à chaque
+ * démarrage la comparaison est refaite (idempotent), les marques historiques (connector-permissions-v1) ne servent qu'à l'observation.
  */
 export const BUILTIN_ROLE_MIGRATION: Record<string, string[]> = {
-  // resource_admin 补治理读面（外部 QA-20261014 QA-03）：数据集/指标/血缘等读路由挂 panel.read、
-  // 事务流模板与实例列表挂 flow.read——此前资源管理员"能写（resource.dataset.write/flow.admin）不能读"
-  // + exec.read/modelgw.read（2026-10-14 执行中枢与模型目录读面，与 BuiltinRoles 两处必须同步）
+  // resource_admin reçoit la face lecture de gouvernance (QA-03 externe QA-20261014) : les routes de lecture jeux de données/indicateurs/lignée etc. portent panel.read,
+  // modèles et instances de flux portent flow.read — l'admin de ressources pouvait « écrire (resource.dataset.write/flow.admin) sans lire »
+  // + exec.read/modelgw.read (face lecture centre d'exécution et catalogue de modèles 2026-10-14, doit rester synchronisée avec BuiltinRoles aux deux endroits)
   resource_admin: ['connector.gateway.write', 'connector.catalog.read', 'connector.connection.read', 'connector.connection.write', 'connector.invoke', 'connector.permgroup.write', 'connector.runs.read', 'resource.dataset.write', 'flow.admin', 'panel.read', 'flow.read', 'modelgw.read', 'exec.read'],
-  // developer 补 agent.write：与 app.write 对称——开发者应能注册/提报更新 Agent（2026-08 修复"总是报没有 agent.write 权限"）
-  // + exec.read/exec.write（2026-10-14）：开发者可在执行中枢查看与操作自己发起的任务
+  // developer reçoit agent.write : symétrique d'app.write — le développeur doit pouvoir enregistrer/déclarer la mise à jour d'un Agent (correctif 2026-08 « toujours une erreur faute de agent.write »)
+  // + exec.read/exec.write (2026-10-14) : le développeur peut consulter et opérer dans le centre d'exécution les tâches qu'il a lancées
   developer: ['connector.catalog.read', 'connector.connection.read', 'connector.invoke', 'agent.write', 'panel.read', 'scenegraph.read', 'flow.read', 'exec.read', 'exec.write'],
-  // auditor 补 nas.authz.read：审计员可查看 NAS 数据权限规则与判定留痕（dev-plan-nas-authz §2.3）
-  // + exec.read（2026-10-14）：执行中枢任务/唤醒留痕纳入只读审计面
+  // auditor reçoit nas.authz.read : l'auditeur peut consulter les règles de permissions de données NAS et les traces de jugement (dev-plan-nas-authz §2.3)
+  // + exec.read (2026-10-14) : les traces tâches/réveils du centre d'exécution entrent dans la face audit en lecture seule
   auditor: ['connector.runs.read', 'connector.connection.read', 'nas.authz.read', 'panel.read', 'scenegraph.read', 'flow.read', 'exec.read'],
-  // 部门面板（review-dsh-agent-panel-v2 Phase 0）：业务成员=member 直用面板；org_admin 增配置；
-  // 存量库经迁移补点，新装库直接来自 BuiltinRoles 定义（两处必须同步）
-  // + exec.read/exec.write（2026-10-14）：普通用户可在执行中枢发起/查看自己的任务
+  // Panneau départemental (review-dsh-agent-panel-v2 Phase 0) : membre métier = member utilise directement le panneau ; org_admin reçoit la configuration ;
+  // les bases préexistantes reçoivent les points par migration, les bases neuves les tiennent directement de la définition BuiltinRoles (les deux endroits doivent rester synchronisés)
+  // + exec.read/exec.write (2026-10-14) : l'utilisateur ordinaire peut lancer/consulter ses propres tâches dans le centre d'exécution
   member: ['panel.read', 'panel.write', 'panel.task.write', 'scenegraph.read', 'flow.read', 'flow.write', 'exec.read', 'exec.write'],
-  // org_admin 增 exec.*（2026-10-14）：本组织执行中枢全权（读/写/运维 tick，与 iam.* 通配同口径）
-  // scenegraph.activate 摘除（E-06）：全仓无消费死点（见 PermissionCatalog 内注）
-  // + workforce.*（W 批次 2026-10-15）：本组织数字员工域全权（运维面 workforce.admin 与 exec.admin 同口径）
+  // org_admin reçoit exec.* (2026-10-14) : pleins pouvoirs sur le centre d'exécution de l'organisation (lecture/écriture/tick opérationnel, même référentiel que le joker iam.*)
+  // scenegraph.activate retiré (E-06) : point mort sans consommation dans le dépôt (voir la note interne du PermissionCatalog)
+  // + workforce.* (lot W 2026-10-15) : pleins pouvoirs sur le domaine de l'employé numérique de l'organisation (face opérationnelle workforce.admin, même référentiel qu'exec.admin)
   org_admin: ['panel.read', 'panel.write', 'panel.task.write', 'panel.config.write', 'scenegraph.read', 'flow.read', 'flow.write', 'flow.admin', 'exec.*', 'workforce.*'],
 }
 
-/** 兼容别名：迁移通道创建时的历史命名（仅 connector 批次）。 */
+/** Alias de compatibilité : nommage historique du canal de migration (lot connector uniquement). */
 export const CONNECTOR_ROLE_MIGRATION = BUILTIN_ROLE_MIGRATION
 
 // ---------------------------------------------------------------------------
-// 场景级授权（IAW 交接 6-1：角色 L1-L5 × 场景 ABAC 细粒度）
+// Autorisation au niveau scénario (livraison IAW 6-1 : rôles L1-L5 × ABAC de scénario à grain fin)
 // ---------------------------------------------------------------------------
 
 /**
- * 场景授权策略条目：按角色/用户 × 动作 × allow/deny 的 ABAC 规则行。
- * action 键与权限点同形（panel.read/panel.task.write…）或业务自定义动作键（如 'scene.export'）；
- * principalId='*' 为通配。
+ * Entrée de politique d'autorisation de scénario : ligne de règle ABAC selon rôle/utilisateur × action × allow/deny.
+ * La clé d'action a la même forme qu'un point de permission (panel.read/panel.task.write…) ou une clé d'action métier personnalisée (ex. 'scene.export') ;
+ * principalId='*' sert de joker.
  */
 export interface ScenePolicyEntry {
   principalType: 'role' | 'user'
@@ -430,14 +430,14 @@ export interface ScenePolicyEntry {
 }
 
 /**
- * 场景授权策略：挂 sceneCode 维度（ScenegraphScene.code，如 QB01-A-2-5）。
- * 判定语义（fail-closed）：场景无任何策略 → default（回落角色 RBAC 与部门范围权限，存量行为不变）；
- * 有策略 → deny 条目优先命中即拒，allow 命中即放行，都不命中一律拒绝。
- * version 乐观锁：并发编辑以 expectedVersion 对账（冲突抛错，先读后写）。
+ * Politique d'autorisation de scénario : accrochée à la dimension sceneCode (ScenegraphScene.code, ex. QB01-A-2-5).
+ * Sémantique de jugement (fail-closed) : scénario sans aucune politique → default (retombe sur le RBAC de rôle et les permissions de périmètre départemental, comportement historique inchangé) ;
+ * avec politique → une entrée deny atteinte = refus ; une entrée allow atteinte = passage ; aucune atteinte = refus systématique.
+ * Verrou optimiste version : l'édition concurrente se réconcilie par expectedVersion (conflit = erreur, lire-puis-écrire).
  */
 export interface ScenePolicyRecord extends RecordBase {
   sceneCode: string
-  /** 组织维度收敛（缺省=全组织通用策略）；同场景可按组织各挂一条。 */
+  /** Resserrage organisationnel (défaut = politique commune à toutes les organisations) ; un même scénario peut porter une entrée par organisation. */
   orgId?: string
   entries: ScenePolicyEntry[]
   note?: string
@@ -445,7 +445,7 @@ export interface ScenePolicyRecord extends RecordBase {
 }
 
 export interface SceneCheckDecision {
-  /** default=场景未配置策略（回落 RBAC）；allow/deny=场景策略裁决。 */
+  /** default = scénario sans politique configurée (retombe sur RBAC) ; allow/deny = arbitrage par la politique du scénario. */
   decision: 'allow' | 'deny' | 'default'
   reason: string
   policyId?: string
@@ -454,22 +454,22 @@ export interface SceneCheckDecision {
 }
 
 // ---------------------------------------------------------------------------
-// 三方连接器接口
+// Interface des connecteurs tierces
 // ---------------------------------------------------------------------------
 
 export interface RemoteDirectory {
-  orgs: Array<{ remoteId: string; name: string; parentRemoteId: string | null; /** 部门负责人三方 userId 列表（钉钉 dept_manager_userid_list），nasAuthz 角色推导依据。 */ managerRemoteIds?: string[] }>
+  orgs: Array<{ remoteId: string; name: string; parentRemoteId: string | null; /** Liste des userId tiers des responsables de département (dept_manager_userid_list DingTalk), base de dérivation des rôles nasAuthz. */ managerRemoteIds?: string[] }>
   users: Array<{
     remoteId: string
-    /** 钉钉 userid（staffId）：hermes X-On-Behalf-User 身份头与 dept_manager_userid_list 的口径；与 remoteId(unionId) 并存为两条 identityLinks。 */
+    /** userid DingTalk (staffId) : référentiel de l'en-tête d'identité hermes X-On-Behalf-User et de dept_manager_userid_list ; coexiste avec remoteId(unionId) en deux identityLinks. */
     remoteUserId?: string
     name: string
     jobNumber: string
     title: string
     orgRemoteId: string
-    /** 一人多部门：orgRemoteId 为主归属（优先 deptRemoteIds[0]=钉钉主部门，缺省取目录首见），其余部门记兼任挂靠（引擎 orgId 子树兼任只读）。 */
+    /** Une personne, plusieurs départements : orgRemoteId est le rattachement principal (priorité à deptRemoteIds[0] = département principal DingTalk, sinon le premier vu dans l'annuaire), les autres départements sont notés cumul/attache (le sous-arbre orgId du moteur est en lecture de cumul). */
     extraOrgRemoteIds?: string[]
-    /** 钉钉 dept_id_list 原序（首位=主部门），多部门时用于校正主归属。 */
+    /** Ordre original du dept_id_list DingTalk (premier = département principal), sert à corriger le rattachement principal en multi-département. */
     deptRemoteIds?: string[]
     email: string
     active: boolean
@@ -483,7 +483,7 @@ export interface OrgConnector {
   healthCheck(): Promise<{ ok: boolean; latencyMs: number; message: string; mock?: boolean }>
 }
 
-/** 钉钉连接器（演示环境内置模拟目录服务，接口与真实 OpenAPI 对齐）。 */
+/** Connecteur DingTalk (annuaire simulé intégré en environnement de démonstration, interface alignée sur la vraie OpenAPI). */
 export class DingTalkConnector implements OrgConnector {
   provider = 'dingtalk'
   label = '钉钉'
@@ -525,19 +525,19 @@ export class DingTalkConnector implements OrgConnector {
 }
 
 /**
- * 钉钉连接器（真实 OpenAPI）：通讯录分页拉取，目录映射到 RemoteDirectory。
- * 链路：企业内部应用 accessToken（POST api.dingtalk.com/v1.0/oauth2/accessToken）
- *   → 部门树（oapi topapi/v2/department/listsubid + department/get，自根 BFS）
- *   → 部门成员（oapi topapi/v2/user/list 分页）。
- * 接口失败（HTTP 非 2xx 或 errcode != 0）一律抛出带 errmsg 的错误——
- * 历史教训：静默返回空目录会让同步「成功」但 0 条数据，故障无法察觉。
+ * Connecteur DingTalk (vraie OpenAPI) : tirage paginé de l'annuaire, cartographie de l'annuaire vers RemoteDirectory.
+ * Chaîne : accessToken d'application interne d'entreprise (POST api.dingtalk.com/v1.0/oauth2/accessToken)
+ *   → arbre des départements (oapi topapi/v2/department/listsubid + department/get, BFS depuis la racine)
+ *   → membres des départements (oapi topapi/v2/user/list paginé).
+ * Tout échec d'interface (HTTP non 2xx ou errcode != 0) lève une erreur portant l'errmsg —
+ * leçon historique : un annuaire vide renvoyé silencieusement fait une synchronisation « réussie » mais 0 donnée, panne indétectable.
  */
 export class RealDingTalkConnector implements OrgConnector {
   provider = 'dingtalk'
   label = '钉钉'
   private corpTokenCache: { token: string; expiresAt: number } | undefined
   private readonly credentials: DingTalkCredentials
-  /** 同步根部门 ID（缺省 1=企业根）。 */
+  /** ID du département racine de synchronisation (défaut 1 = racine d'entreprise). */
   private readonly syncOrgRoot: string
 
   constructor(credentials: DingTalkCredentials, options: { syncOrgRoot?: string } = {}) {
@@ -570,7 +570,7 @@ export class RealDingTalkConnector implements OrgConnector {
     return payload.accessToken
   }
 
-  /** 调 oapi topapi：access_token 走 query；errcode != 0 即抛错（不静默吞错）。 */
+  /** Appel oapi topapi : access_token en query ; errcode != 0 = erreur levée (pas d'engloutissement silencieux). */
   private async topapi<T>(path: string, body: Record<string, unknown>): Promise<T & { errcode?: number; errmsg?: string }> {
     const token = await this.corpAccessToken()
     const response = await fetch(`${this.oapiBase}${path}?access_token=${encodeURIComponent(token)}`, {
@@ -590,7 +590,7 @@ export class RealDingTalkConnector implements OrgConnector {
     const rootInfo = await this.getDepartment(rootId)
     const orgs: RemoteDirectory['orgs'] = [{ remoteId: rootId, name: rootInfo.name, parentRemoteId: null, ...(rootInfo.managerRemoteIds ? { managerRemoteIds: rootInfo.managerRemoteIds } : {}) }]
     const users: RemoteDirectory['users'] = []
-    // 自根部门 BFS（上限 3 层 / 每层 50 部门，防御异常目录）
+    // BFS depuis le département racine (plafond 3 niveaux / 50 départements par niveau, défense contre annuaire anormal)
     let frontier = [rootId]
     for (let depth = 0; depth < 3 && frontier.length > 0; depth++) {
       const next: string[] = []
@@ -608,7 +608,7 @@ export class RealDingTalkConnector implements OrgConnector {
       for (const member of members) {
         const existing = users.find((user) => user.remoteId === member.remoteId)
         if (existing) {
-          // 一人多部门（兼任语义数据源）：首见部门记入 extraOrgRemoteIds，收尾按 deptRemoteIds 校正主归属
+          // Une personne, plusieurs départements (source de la sémantique de cumul) : le premier département vu entre dans extraOrgRemoteIds, le rattachement principal est corrigé en fin selon deptRemoteIds
           if (existing.orgRemoteId !== org.remoteId && !(existing.extraOrgRemoteIds ?? []).includes(org.remoteId)) {
             existing.extraOrgRemoteIds = [...(existing.extraOrgRemoteIds ?? []), org.remoteId]
           }
@@ -617,7 +617,7 @@ export class RealDingTalkConnector implements OrgConnector {
         users.push({ ...member, orgRemoteId: org.remoteId })
       }
     }
-    // 主归属校正：钉钉 dept_id_list 首位=主部门（目录遍历序 ≠ 用户主部门序，首见可能误判）
+    // Correction du rattachement principal : le premier du dept_id_list DingTalk = département principal (l'ordre de parcours de l'annuaire ≠ l'ordre des départements de l'utilisateur, le premier vu peut induire en erreur)
     for (const user of users) {
       const deptIds = (user.deptRemoteIds ?? []).filter((id) => id === user.orgRemoteId || orgs.some((org) => org.remoteId === id))
       if (deptIds.length > 0 && deptIds[0] !== user.orgRemoteId) {
@@ -629,14 +629,14 @@ export class RealDingTalkConnector implements OrgConnector {
     return { orgs, users }
   }
 
-  /** 部门详情（取名 + 负责人列表；根部门 dept_id=1 返回企业名）。 */
+  /** Détail d'un département (nom + liste de responsables ; le département racine dept_id=1 renvoie le nom de l'entreprise). */
   private async getDepartment(deptId: string): Promise<{ name: string; managerRemoteIds?: string[] }> {
     const payload = await this.topapi<{ result?: { name?: string; dept_manager_userid_list?: string[] } }>('/topapi/v2/department/get', { dept_id: Number(deptId) })
     const managerRemoteIds = (payload.result?.dept_manager_userid_list ?? []).filter((id) => Boolean(id))
     return { name: payload.result?.name ?? t('部门 {deptId}', { deptId }), ...(managerRemoteIds.length > 0 ? { managerRemoteIds } : {}) }
   }
 
-  /** 下一级子部门 ID 列表（不受授权范围限制）。 */
+  /** Liste des IDs des sous-départements de niveau suivant (hors limite du périmètre autorisé). */
   private async listSubDepartmentIds(deptId: string): Promise<string[]> {
     const payload = await this.topapi<{ result?: { dept_id_list?: number[] } }>('/topapi/v2/department/listsubid', { dept_id: Number(deptId) })
     return (payload.result?.dept_id_list ?? []).map(String)
@@ -693,43 +693,43 @@ function delay(ms: number): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 export class IamService extends Service {
   static readonly provide = 'iam'
 
   /**
-   * 内置连接器实现范围（applyConnectorMode 能直接实例化的 provider）。
-   * 配置保存以「可实现」为准放行，而非「当前已注册」——否则生产基线（无 DEMO_SEED、
-   * 注册表为空）首次保存钉钉凭证会被守卫拦死，形成「先有配置才能注册、先注册才能存配置」死锁。
+   * Périmètre des implémentations de connecteurs intégrées (providers que applyConnectorMode peut instancier directement).
+   * La sauvegarde de configuration est admise au titre « instanciable » et non « actuellement enregistré » — sinon la base de production (sans DEMO_SEED,
+   * registre vide) verrait son premier enregistrement d'identifiants DingTalk bloqué par la garde, une impasse « il faut une config pour s'enregistrer, il faut s'enregistrer pour sauver la config ».
    */
   private static readonly BUILTIN_CONNECTOR_PROVIDERS: ReadonlySet<string> = new Set(['dingtalk'])
 
-  /** 运行时注册表：key 为配置实例 ID（DEMO_SEED 内置 mock 用 'demo:dingtalk'），provider 仅表示平台类型。 */
+  /** Registre d'exécution : clé = ID d'instance de configuration (le mock intégré DEMO_SEED utilise 'demo:dingtalk'), provider ne désigne que le type de plateforme. */
   private connectors = new Map<string, OrgConnector>()
   private authProviders = new Map<string, IdentityProviderAdapter>()
-  /** 自动同步去重：同一配置实例上一轮尚未结束时跳过（同步耗时超过巡检周期时不叠加并发）。 */
+  /** Déduplication de la synchronisation automatique : saute si un tour n'est pas terminé sur la même instance de configuration (une synchro plus longue que la période d'inspection n'empile pas de concurrence). */
   private autoSyncing = new Set<string>()
   private autoSyncTimer: ReturnType<typeof setInterval> | undefined
 
   constructor(ctx: Context) {
     super(ctx, 'iam')
-    // 默认不注册任何三方身份源：生产基线三方登录入口自动隐藏（未配置连接器时 sso 不可用）。
-    // mock 钉钉 IdP 仅在显式 DEMO_SEED=1 演示环境下注册，避免生产基线暴露演示身份/匿名注册入口。
+    // Par défaut, aucune source d'identité tierce enregistrée : la base de production masque automatiquement l'entrée de connexion tierce (sso indisponible sans connecteur configuré).
+    // L'IdP DingTalk simulé n'est enregistré que dans l'environnement de démonstration DEMO_SEED=1 explicite, pour éviter d'exposer identités de démo/inscription anonyme en base de production.
     if (process.env.DEMO_SEED === '1') {
       this.registerConnector('demo:dingtalk', new DingTalkConnector())
       this.registerAuthProvider('demo:dingtalk', new DingTalkAuthAdapter())
     }
     this.ensureDefaultTenant()
-    // 连接器/身份源注册表仅存内存：重启后须按持久化配置重建，否则 real 模式的
-    // Real*Adapter 不会恢复（扫码登录/同步将报「未注册」）。多主体：按配置实例 id 逐条恢复。
+    // Le registre de connecteurs/sources d'identité ne vit qu'en mémoire : après redémarrage, il doit être reconstruit depuis la configuration persistée, sinon les
+    // Real*Adapter du mode real ne se rétablissent pas (scan/synchronisation diront « non enregistré »). Multi-entité : restauration entrée par entrée selon l'id d'instance de configuration.
     for (const config of this.connectorConfigs().all()) {
       this.applyConnectorMode(config.id)
     }
-    // 连接器定时自动同步（intervalMinutes 落地）：控制台「同步频率」此前只存不跑，
-    // 通讯录变动（新入职/离职/调岗）需人工点同步才进平台。启动后首跑补同步超期配置，
-    // 此后每分钟巡检到期；IAM_CONNECTOR_AUTO_SYNC=off 一键停用（对齐 PORTAL_SYNC 惯例）。
+    // Synchronisation automatique planifiée des connecteurs (atterrissage d'intervalMinutes) : la « fréquence de synchronisation » de la console était auparavant stockée sans s'exécuter,
+    // les changements d'annuaire (arrivée/départ/mutation) n'entraient dans la plateforme qu'après un clic manuel. Après démarrage, le premier tour rattrape les configurations en retard,
+    // puis inspection de l'échéance chaque minute ; IAM_CONNECTOR_AUTO_SYNC=off désactive tout (aligné sur l'usage PORTAL_SYNC).
     this.autoSyncTimer = setInterval(() => void this.runDueAutoSyncs(), AUTO_SYNC_TICK_MS)
     this.autoSyncTimer.unref?.() // OPT-P3-02
     setTimeout(() => void this.runDueAutoSyncs(), AUTO_SYNC_BOOT_DELAY_MS)
@@ -738,22 +738,22 @@ export class IamService extends Service {
     })
   }
 
-  /** 注册连接器实例：key 为配置实例 id（多主体各自独立注册/注销）。 */
+  /** Enregistre une instance de connecteur : clé = id d'instance de configuration (multi-entité : enregistrement/désactivation indépendants par entité). */
   registerConnector(key: string, connector: OrgConnector): () => void {
     this.connectors.set(key, connector)
     return () => this.connectors.delete(key)
   }
 
-  /** 注册身份源 Adapter 实例：登录主流程面向接口编程，新增平台零侵入。 */
+  /** Enregistre une instance d'Adapter de source d'identité : le flux principal de connexion programme contre l'interface, une nouvelle plateforme n'intruse nulle part. */
   registerAuthProvider(key: string, adapter: IdentityProviderAdapter): () => void {
     this.authProviders.set(key, adapter)
     return () => this.authProviders.delete(key)
   }
 
   /**
-   * 按平台类型取身份源（旧调用兼容；多主体请用 getAuthProviderByConfig）。
-   * 优先配置实例注册的身份源（按配置创建顺序取第一）；`demo:` 前缀的 DEMO_SEED 引导注册
-   * 仅作「尚无配置」窗口的兜底——否则演示实例长期占据首位，会遮蔽配置切换后的真实/新 mock 实例。
+   * Source d'identité par type de plateforme (compatibilité des anciens appels ; en multi-entité, utiliser getAuthProviderByConfig).
+   * Priorité à la source enregistrée par instance de configuration (la première dans l'ordre de création) ; l'enregistrement d'amorçage DEMO_SEED préfixé `demo:`
+   * n'est qu'un repli pour la fenêtre « pas encore de configuration » — sinon l'instance de démo resterait en tête et masquerait l'instance réelle/nouveau mock après bascule de configuration.
    */
   getAuthProvider(type: string): IdentityProviderAdapter {
     let demoFallback: IdentityProviderAdapter | undefined
@@ -769,14 +769,14 @@ export class IamService extends Service {
     throw new Error(t('未注册的身份源：{type}', { type }))
   }
 
-  /** 按配置实例 id 取身份源（多主体登录/绑定按主体发起）。 */
+  /** Source d'identité par id d'instance de configuration (connexion/liaison multi-entité initiées par entité). */
   getAuthProviderByConfig(configId: string): IdentityProviderAdapter {
     const adapter = this.authProviders.get(configId)
     if (!adapter) throw new Error(t('未注册的身份源：{type}', { type: configId }))
     return adapter
   }
 
-  /** 三方身份链接集合（活跃唯一约束：同一主体下的同一三方身份只能映射一个平台账号）。 */
+  /** Collection des liens d'identité tierce (contrainte d'unicité des liens actifs : sous une même entité, une même identité tierce ne peut mapper qu'un compte plateforme). */
   identityLinks(): Collection<IdentityLinkRecord> {
     const collection = this.ctx.opsStorage.collection<IdentityLinkRecord>('iam:identityLinks')
     collection.uniqueOn('identity_link_active', (record) => `${record.provider}|${record.corpId}|${record.providerUserId}`)
@@ -784,9 +784,9 @@ export class IamService extends Service {
   }
 
   /**
-   * 命中查找：按归一化档案定位已绑定的平台账号。
-   * 传 corpId 时精确命中优先；无精确命中回落任意 corp 的同三方身份——钉钉 unionId 跨企业同人，
-   * 且兼容单主体部署在 mock/real 间切换（corpId 变化）后的身份连续性。多主体下同身份多链接时精确匹配生效。
+   * Recherche par correspondance : localise le compte lié via le dossier normalisé.
+   * Avec corpId, la correspondance exacte prime ; sans elle, repli sur la même identité tierce d'un corp quelconque — l'unionId DingTalk désigne la même personne à travers les entreprises,
+   * et cela reste compatible avec la continuité d'identité d'un déploiement mono-entité basculant entre mock/real (corpId changeant). En multi-entité avec plusieurs liens pour une même identité, la correspondance exacte l'emporte.
    */
   findLinkByProfile(provider: string, providerUserId: string, corpId?: string): IdentityLinkRecord | undefined {
     const links = this.identityLinks().find((link) => link.provider === provider && link.providerUserId === providerUserId)
@@ -794,7 +794,7 @@ export class IamService extends Service {
     return links.find((link) => link.corpId === corpId) ?? links[0]
   }
 
-  /** 建立身份链接（唯一约束兜底；user.bindings 保持为投影，便于列表展示）。 */
+  /** Établit un lien d'identité (contrainte d'unicité en dernier recours ; user.bindings reste une projection, pratique pour l'affichage de liste). */
   linkIdentity(userId: string, profile: { provider: IdentityLinkRecord['provider']; providerUserId: string; corpId: string; displayName: string; kind?: 'login' | 'staff' }, actor: string): IdentityLinkRecord {
     const user = this.users().get(userId)
     if (!user) throw new Error(t('账号不存在：{id}', { id: userId }))
@@ -809,33 +809,33 @@ export class IamService extends Service {
       linkedBy: actor,
       ...(profile.kind ? { kind: profile.kind } : {}),
     })
-    // 人工绑定意图覆盖此前的解绑决定：同步不再把它当作「用户不想要」的主体。
-    // 只在写「登录链」时清除豁免——同步补写任职链（staff）不构成人工绑定意图，
-    // 否则解绑后一次同步就会把解绑决定冲掉（用户看到「点了没反应」）。
+    // L'intention de liaison manuelle recouvre la décision de déliaison antérieure : la synchronisation ne la considère plus comme une entité « que l'utilisateur ne veut pas ».
+    // L'exemption n'est levée qu'en écrivant le « lien de connexion » — la synchronisation réécrivant un lien de fonction (staff) ne constitue pas une intention de liaison manuelle,
+    // sinon une seule synchronisation suffirait à balayer la décision de déliaison (l'utilisateur verrait « clic sans effet »).
     if (profile.kind !== 'staff') {
       this.clearBindingExemption(userId, profile.provider, profile.corpId)
     }
-    // 投影重建（bindings 仅作展示，事实源是 identityLinks）：统一由登录链重算，
-    // 不在此处增量追加——增量追加会把任职链（staff）也算成「绑定的三方账号」，
-    // 且与解绑后的重建口径不一致（解绑清空、写入又加回，用户看到解绑没生效）。
-    // 必须在豁免处理之后：重建会按豁免过滤主体，先清豁免才能把新绑定显示出来。
+    // Reconstruction de la projection (bindings n'est qu'un affichage, la source de fait est identityLinks) : toujours recalculée depuis les liens de connexion,
+    // pas d'ajout incrémental ici — un ajout incrémental compterait aussi les liens de fonction (staff) comme « comptes tierces liés »,
+    // et divergerait du référentiel de reconstruction post-déliaison (déliaison vide, écriture rajoute, l'utilisateur voit une déliaison sans effet).
+    // Doit venir après le traitement d'exemption : la reconstruction filtre les entités selon les exemptions, il faut d'abord lever l'exemption pour afficher la nouvelle liaison.
     this.rebuildBindingsProjection(userId)
     return link
   }
 
   /**
-   * 解除身份链接（同时按事实源重建投影）。
+   * Délie un lien d'identité (et reconstruit la projection depuis la source de fait).
    *
-   * 四个必须做对的点（2026-10-22 解绑/更换能力上线时的整改）：
-   *   1. 多主体：同一 provider 可能有多个 corpId 的链接（unionId 链 + userid 链），
-   *      传 corpId 只删该主体的链接；不传=删该 provider 全部（显式语义，调用方负责确认）。
-   *   2. 事实源：`findOne` + `remove` 只删到一条，其余同 provider 链接会变成幽灵——按 provider
-   *      （或 provider+corpId）全量删除。
-   *   3. 投影：bindings 必须由剩余 identityLinks 重算，不能按 provider 一刀切过滤——
-   *      否则「解绑一个主体」会把另一个主体的展示行一起清掉，而链接还在。
-   *   4. 链路角色：只解「登录身份链」（kind≠staff）。任职身份链（staff）描述的是此人在组织里的
-   *      岗位事实（部门负责人映射、NAS 数据权限身份反查都依赖它），不是登录凭据——
-   *      连带抹掉会让部门负责人反查断链、审批路由回退到父部门（实测回归）。
+   * Quatre points à faire absolument juste (mise en conformité lors de la mise en ligne de la capacité de déliaison/remplacement 2026-10-22) :
+   *   1. Multi-entité : un même provider peut avoir des liens de plusieurs corpId (lien unionId + lien userid),
+   *      passer corpId ne supprime que les liens de cette entité ; sans corpId = suppression de tous les liens du provider (sémantique explicite, l'appelant confirme).
+   *   2. Source de fait : `findOne` + `remove` ne supprime qu'un lien, les autres liens du même provider deviennent fantômes — suppression intégrale par provider
+   *      (ou provider+corpId).
+   *   3. Projection : bindings doit être recalculé depuis les identityLinks restants, sans filtre par provider couperet —
+   *      sinon « délier une entité » effacerait aussi la ligne d'affichage de l'autre entité alors que le lien existe toujours.
+   *   4. Rôle du lien : ne délier que le « lien d'identité de connexion » (kind≠staff). Le lien d'identité de fonction (staff) décrit le fait de poste
+   *      de la personne dans l'organisation (cartographie des responsables de département et recherche d'identité des permissions de données NAS en dépendent), ce n'est pas un identifiant de connexion —
+   *      l'effacer aussi casserait la recherche inversée des responsables et ferait retomber le routage d'approbation sur le département parent (régression constatée).
    */
   unlinkIdentity(userId: string, provider: IdentityLinkRecord['provider'], corpId?: string, kind?: 'login' | 'staff'): boolean {
     const targets = this.identityLinks().find((item) => item.userId === userId
@@ -843,18 +843,18 @@ export class IamService extends Service {
       && (corpId === undefined || (item.corpId ?? '') === corpId)
       && (kind === undefined ? item.kind !== 'staff' : item.kind === kind))
     if (targets.length === 0) return false
-    // 记录豁免（按实际删掉的主体粒度）：否则下一次连接器同步会按工号把链接补回来。
+    // Consigne l'exemption (à la granularité d'entité réellement supprimée) : sinon la synchronisation du connecteur suivante recollerait le lien via le matricule.
     const exempted = new Set<string>((this.users().get(userId)?.bindingExemptions ?? []))
     for (const link of targets) exempted.add(`${provider}|${link.corpId ?? ''}`)
     for (const link of targets) this.identityLinks().remove(link.id)
     this.users().update(userId, { bindingExemptions: [...exempted] })
-    // 投影重建时排除被豁免的主体：解绑后该主体不再显示为「已绑定」，
-    // 即使任职链仍在（任职事实没被抹掉，只是不再作为「可登录的绑定」展示）。
+    // La reconstruction de la projection exclut les entités exemptées : après déliaison, l'entité ne s'affiche plus comme « liée »,
+    // même si le lien de fonction subsiste (le fait de fonction n'a pas été effacé, il n'est simplement plus affiché comme « liaison connectable »).
     this.rebuildBindingsProjection(userId)
     return true
   }
 
-  /** 清除绑定豁免（重新扫码/手工绑定成功时调用：人工绑定的意图覆盖此前的解绑决定）。 */
+  /** Lève l'exemption de liaison (appelé en cas de succès de re-scan/liaison manuelle : l'intention de liaison humaine recouvre la décision de déliaison antérieure). */
   private clearBindingExemption(userId: string, provider: string, corpId: string): void {
     const user = this.users().get(userId)
     if (!user?.bindingExemptions?.length) return
@@ -864,22 +864,22 @@ export class IamService extends Service {
     this.users().update(userId, { bindingExemptions: next.length ? next : undefined })
   }
 
-  /** 由 identityLinks（事实源）重建 user.bindings 投影：多主体按 provider+corpId 一行。 */
+  /** Reconstruit la projection user.bindings depuis identityLinks (source de fait) : une ligne par entité provider+corpId. */
   private rebuildBindingsProjection(userId: string): void {
     const user = this.users().get(userId)
     if (!user) return
     const links = this.identityLinks().find((item) => item.userId === userId)
-    // 被豁免的主体不再展示（人工解绑的决定优先于任职链的存在）
+    // Les entités exemptées ne sont plus affichées (la décision de déliaison humaine prime sur l'existence du lien de fonction)
     const exempted = new Set<string>(this.users().get(userId)?.bindingExemptions ?? [])
     const visible = links.filter((link) => !exempted.has(`${link.provider}|${link.corpId ?? ''}`))
-    // 每个主体（provider+corpId）取一条代表链：登录链优先；没有登录链时回落任职链
-    // （存量数据在 kind 回填前只有未标记的链，回落后维持「该主体仍绑定」的既有展示语义）。
+    // Une chaîne représentative par entité (provider+corpId) : lien de connexion prioritaire ; à défaut, repli sur le lien de fonction
+    // (les données préexistantes n'ont que des liens non marqués avant le remplissage de kind ; le repli maintient la sémantique d'affichage existante « l'entité reste liée »).
     const seen = new Map<string, IdentityLinkRecord>()
     for (const link of visible) {
       const key = `${link.provider}|${link.corpId ?? ''}`
       const current = seen.get(key)
       if (!current) { seen.set(key, link); continue }
-      // 登录链优先于任职链
+      // Lien de connexion prioritaire sur lien de fonction
       if (current.kind === 'staff' && link.kind !== 'staff') seen.set(key, link)
     }
     this.users().update(userId, {
@@ -893,7 +893,7 @@ export class IamService extends Service {
     })
   }
 
-  /** 已注册连接器实例清单（多主体：携带 configId/主体名，provider 仅表示平台类型）。 */
+  /** Liste des instances de connecteurs enregistrées (multi-entité : porte configId/nom d'entité, provider ne désigne que le type de plateforme). */
   connectorProviders(): Array<{ configId: string; provider: string; label: string; name?: string }> {
     return [...this.connectors.entries()].map(([configId, connector]) => {
       const name = this.connectorConfigById(configId)?.name
@@ -901,12 +901,12 @@ export class IamService extends Service {
     })
   }
 
-  // -- 集合 ---------------------------------------------------------------
+  // -- Collections ---------------------------------------------------------------
 
   orgs(): Collection<OrgRecord> {
     const collection = this.ctx.opsStorage.collection<OrgRecord>('iam:orgs')
-    // 同级同名唯一按连接器分区：手工/历史组织（无 connectorId）维持旧口径，
-    // 不同主体同步下来的同名部门（两家企业很可能同名）各自落库不撞键。
+    // L'unicité de nom au même niveau est partitionnée par connecteur : les organisations manuelles/historiques (sans connectorId) gardent l'ancien référentiel,
+    // les départements homonymes synchronisés par des entités différentes (deux entreprises ont souvent le même nom) tombent chacune en base sans collision de clé.
     collection.uniqueOn('org_same_level_name', (org) => `${String(org.customFields['connectorId'] ?? '')}|${org.parentId ?? '-'}|${org.name}`)
     return collection
   }
@@ -927,7 +927,7 @@ export class IamService extends Service {
 
   connectorConfigs(): Collection<ConnectorConfigRecord> {
     const collection = this.ctx.opsStorage.collection<ConnectorConfigRecord>('iam:connectors')
-    // 多主体：同一 provider 可接入多家企业，但 provider|corpId 引擎级唯一（重复主体拒绝）
+    // Multi-entité : un même provider peut connecter plusieurs entreprises, mais provider|corpId est unique au niveau moteur (entité dupliquée rejetée)
     collection.uniqueOn('connector_provider_corp', (config) => `${config.provider}|${config.corpId}`)
     return collection
   }
@@ -942,7 +942,7 @@ export class IamService extends Service {
     return collection
   }
 
-  /** 多租户最小集：默认租户兜底（存量数据全部落 t_default）。 */
+  /** Jeu minimal multi-tenant : tenant par défaut de repli (toutes les données préexistantes tombent dans t_default). */
   ensureDefaultTenant(): TenantRecord {
     const existing = this.tenants().get(DEFAULT_TENANT_ID)
     if (existing) return existing
@@ -954,7 +954,7 @@ export class IamService extends Service {
     })
   }
 
-  // -- 场景级授权（IAW 交接 6-1） ---------------------------------------------
+  // -- Autorisation au niveau scénario (livraison IAW 6-1) ---------------------------------------------
 
   scenePolicies(): Collection<ScenePolicyRecord> {
     const collection = this.ctx.opsStorage.collection<ScenePolicyRecord>('iam:scenePolicies')
@@ -963,8 +963,8 @@ export class IamService extends Service {
   }
 
   /**
-   * 登记场景授权策略（upsert by sceneCode+orgId，version 乐观锁）：
-   * expectedVersion 与存量 version 不一致时拒绝（并发编辑对账）；新建不带 expectedVersion。
+   * Enregistre une politique d'autorisation de scénario (upsert par sceneCode+orgId, verrou optimiste version) :
+   * refuse si expectedVersion diffère du version existant (réconciliation d'éditions concurrentes) ; la création ne porte pas expectedVersion.
    */
   upsertScenePolicy(input: { sceneCode: string; orgId?: string; entries: ScenePolicyEntry[]; note?: string; expectedVersion?: number }): ScenePolicyRecord {
     if (!input.sceneCode?.trim()) throw new Error(t('场景策略 sceneCode 必填（如 QB01-A-2-5）'))
@@ -1014,10 +1014,10 @@ export class IamService extends Service {
   }
 
   /**
-   * iam.check(scene, action)（IAW 交接 6-1）：场景维度 ABAC 判定。
-   * 判定序：①场景无策略 → default（回落 hasPermission 角色链路，存量行为不变）；
-   * ②deny 条目命中（用户/角色/通配 × 动作）→ deny；③allow 命中 → allow；④其余 → deny（fail-closed）。
-   * 本判定是场景维度的**细粒度收敛**，不替代角色 RBAC：调用方应同时满足 hasPermission(基础权限点)。
+   * iam.check(scene, action) (livraison IAW 6-1) : jugement ABAC à la dimension scénario.
+   * Ordre de jugement : ① scénario sans politique → default (retombe sur hasPermission, chaîne de rôles, comportement historique inchangé) ;
+   * ② entrée deny atteinte (utilisateur/rôle/joker × action) → deny ; ③ entrée allow atteinte → allow ; ④ le reste → deny (fail-closed).
+   * Ce jugement est un resserrage à grain fin par scénario, il ne remplace pas le RBAC de rôles : l'appelant doit aussi satisfaire hasPermission(point de permission de base).
    */
   checkScene(userId: string, sceneCode: string, action: string): SceneCheckDecision {
     const user = this.users().get(userId)
@@ -1063,12 +1063,12 @@ export class IamService extends Service {
     })
   }
 
-  /** 租户解析：org → tenant；缺省 t_default（usage/用量报表统一入口）。 */
+  /** Résolution du tenant : org → tenant ; défaut t_default (entrée unifiée des rapports usage/consommation). */
   tenantOfOrg(orgId: string): string {
     return this.orgs().get(orgId)?.tenantId ?? DEFAULT_TENANT_ID
   }
 
-  // -- 组织 ---------------------------------------------------------------
+  // -- Organisations ---------------------------------------------------------------
 
   orgTree(): OrgTreeNode[] {
     const nodes = new Map<string, OrgTreeNode>()
@@ -1095,9 +1095,9 @@ export class IamService extends Service {
     if (!input.name?.trim()) throw new Error(t('组织名称不能为空'))
     const parentId = input.parentId ?? null
     if (parentId && !this.orgs().get(parentId)) throw new Error(t('父组织不存在：{id}', { id: parentId }))
-    // 挂载点受操作者组织子树约束（N1 与账号管理同口径）；顶级组织（parentId=null）仅平台管理员可建
+    // Le point de montage est contraint au sous-arbre organisationnel de l'opérateur (même référentiel que la gestion de comptes N1) ; les organisations de premier niveau (parentId=null) ne sont créables que par l'admin plateforme
     this.assertManageScope(actor, parentId ?? undefined, t('创建组织'))
-    // 同级同名判重与引擎唯一键同口径：按连接器归属分区（无 connectorId 的手工组织一个分区）。
+    // Détection des doublons homonymes au même niveau selon le même référentiel que la clé unique moteur : partition par rattachement connecteur (les organisations manuelles sans connectorId forment une partition).
     const ownerKey = input.customFields?.['connectorId'] ?? ''
     const duplicate = this.orgs().findOne((org) => org.name === input.name && org.parentId === parentId
       && (org.customFields['connectorId'] ?? '') === ownerKey)
@@ -1116,20 +1116,20 @@ export class IamService extends Service {
     return record
   }
 
-  /** 维护组织负责人（控制台补录 / leaderVacant 告警后的处置入口）。传空数组即清空并恢复跟随同步。 */
+  /** Maintient le responsable d'organisation (complétion console / issue de sortie après alerte leaderVacant). Un tableau vide vide le champ et restaure le suivi de synchronisation. */
   setOrgLeaders(id: string, leaderUserIds: string[]): OrgRecord {
     this.requireOrg(id)
     const unique = [...new Set(leaderUserIds)]
     for (const userId of unique) {
       if (!this.users().get(userId)) throw new Error(t('负责人账号不存在：{id}', { id: userId }))
     }
-    // 手动绑定即锁定：连接器同步不再覆盖（钉钉侧没配负责人的部门靠它补录）；清空 = 恢复跟随同步。
+    // Liaison manuelle = verrouillage : la synchronisation du connecteur ne remplace plus (il sert à compléter les départements sans responsable côté DingTalk) ; vider = restaure le suivi de synchronisation.
     return unique.length > 0
       ? this.orgs().update(id, { leaderUserIds: unique, leaderSource: 'manual' })
       : this.orgs().update(id, { leaderUserIds: [], leaderSource: 'sync' })
   }
 
-  /** 兼容读取：负责人历史口径 customFields['leaderUserIds']（逗号分隔），结构化字段优先。 */
+  /** Lecture de compatibilité : ancien référentiel du responsable customFields['leaderUserIds'] (séparé par virgules), le champ structuré prime. */
   leadersOf(orgId: string): string[] {
     const org = this.orgs().get(orgId)
     if (!org) return []
@@ -1143,7 +1143,7 @@ export class IamService extends Service {
     this.assertManageScope(actor, id, t('重命名组织'))
     if (!name?.trim()) throw new Error(t('组织名称不能为空'))
     const trimmed = name.trim()
-    // 判重口径同 createOrg：只在同一连接器归属分区内拒绝同名。
+    // Détection de doublons même référentiel que createOrg : refus des homonymes seulement au sein de la même partition de rattachement connecteur.
     const duplicate = this.orgs().findOne((item) => item.id !== id && item.name === trimmed && item.parentId === org.parentId
       && (item.customFields['connectorId'] ?? '') === (org.customFields['connectorId'] ?? ''))
     if (duplicate) throw new Error(t('同级下已存在同名组织「{name}」', { name: trimmed }))
@@ -1152,14 +1152,14 @@ export class IamService extends Service {
     return updated
   }
 
-  /** 移动组织（拖拽调岗），含环检测；组织与新上级均须落在操作者子树内（防借移动越界挂载）。 */
+  /** Déplace une organisation (glisser-déposer de mutation), détection de cycle incluse ; l'organisation et le nouveau parent doivent tomber dans le sous-arbre de l'opérateur (contre le montage hors périmètre par déplacement). */
   moveOrg(id: string, newParentId: string | null, actor?: UserManageActor): OrgRecord {
     this.requireOrg(id)
     this.assertManageScope(actor, id, t('移动组织'))
     this.assertManageScope(actor, newParentId ?? undefined, t('移动组织到目标上级'))
     if (newParentId) {
       if (newParentId === id) throw new Error(t('不能将组织移动到自身之下'))
-      // 父组织存在性校验（QA SEC-03）：不存在时下方环检测会静默放行，产生悬挂 parentId
+      // Validation d'existence du parent (QA SEC-03) : s'il n'existe pas, la détection de cycle ci-dessous laisserait passer silencieusement et produirait un parentId suspendu
       if (!this.orgs().get(newParentId)) throw new Error(t('父组织不存在：{id}', { id: newParentId }))
       let cursor: string | null = newParentId
       while (cursor) {
@@ -1173,9 +1173,9 @@ export class IamService extends Service {
   }
 
   /**
-   * 删除组织。默认仅允许空组织（无子组织且无直属账号）；
-   * cascade=true 一键删除整棵子树：子树内组织全部移除，直接挂载的账号上移到
-   * 存活的最近上级组织（被删根的父组织；删除根组织时上移到首个存活根组织）。
+   * Supprime une organisation. Par défaut, seules les organisations vides sont permises (sans sous-organisations ni comptes directs) ;
+   * cascade=true supprime tout le sous-arbre : les organisations du sous-arbre sont retirées, les comptes directement montés remontent vers
+   * la plus proche organisation parente survivante (le parent de la racine supprimée ; en supprimant une organisation racine, remonte vers la première racine survivante).
    */
   deleteOrg(id: string, options?: { cascade?: boolean }, actor?: UserManageActor): { deleted: boolean; removedOrgs: number; movedUsers: number; fallbackOrgId?: string } {
     const org = this.requireOrg(id)
@@ -1189,7 +1189,7 @@ export class IamService extends Service {
     }
     const subtree = this.orgSubtreeIds(id)
     const subtreeSet = new Set(subtree)
-    // 账号落点：被删根的父组织必然不在子树内（树无环）；删根组织时落到首个存活根组织
+    // Destination des comptes : le parent de la racine supprimée est nécessairement hors sous-arbre (arbre sans cycle) ; en supprimant une racine, les comptes tombent sur la première racine survivante
     const fallbackOrgId = org.parentId ?? this.orgs().find((item) => !subtreeSet.has(item.id) && !item.parentId)[0]?.id ?? null
     const movedUsers = this.users().find((user) => subtreeSet.has(user.orgId))
     if (!fallbackOrgId && movedUsers.length > 0) throw new Error(t('删除后将没有任何组织可挂载账号，请先把账号迁移到其他组织再删除'))
@@ -1212,7 +1212,7 @@ export class IamService extends Service {
     return org
   }
 
-  /** 组织子树 id 集合（数据权限范围）。 */
+  /** Ensemble des ids du sous-arbre organisationnel (périmètre des permissions de données). */
   orgSubtreeIds(rootId: string): string[] {
     const result: string[] = [rootId]
     const walk = (parentId: string): void => {
@@ -1225,13 +1225,13 @@ export class IamService extends Service {
     return result
   }
 
-  // -- 账号 ---------------------------------------------------------------
+  // -- Comptes ---------------------------------------------------------------
 
   /**
-   * 组织归属校验（QA A-03/N1 fail-closed）：非平台管理员（无 '*'）只允许管理本组织子树内的
-   * 账号/组织；机器主体与无法定位组织归属者一律拒绝。actor.orgId（工具桥 `_actor` 注入）
-   * 优先，缺省按 userId 反查账号档案。actor 缺失一律拒绝：外部入口（REST 管理路由与工具桥）
-   * 必须携带真实调用者身份，服务内部链路（种子/三方同步/SSO 自注册）显式传 SYSTEM_ACTOR。
+   * Validation du rattachement organisationnel (QA A-03/N1 fail-closed) : un non-admin plateforme (sans '*') ne gère que les comptes/organisations de son sous-arbre ;
+   * les principaux machine et quiconque sans organisation localisable sont refusés. actor.orgId (injection `_actor` du pont d'outils)
+   * prime ; à défaut, organisation retrouvée via le dossier du compte userId. Actor absent = refus systématique : les entrées externes (routes REST de gestion et pont d'outils)
+   * doivent porter l'identité réelle de l'appelant ; les chaînes internes de service (graines/synchronisation tierce/auto-enregistrement SSO) passent explicitement SYSTEM_ACTOR.
    */
   private assertManageScope(actor: UserManageActor | undefined, targetOrgId: string | undefined, action: string): void {
     if (!actor) {
@@ -1244,13 +1244,13 @@ export class IamService extends Service {
     }
   }
 
-  /** 口令强度（QA A-08）：建号与重置统一口径——≥8 位且不含中文（此前建号无校验，'123' 可建可登）。 */
+  /** Robustesse du mot de passe (QA A-08) : référentiel unifié création/réinitialisation — ≥8 caractères sans chinois (la création n'avait auparavant aucun contrôle, '123' était créable et connectable). */
   private assertPasswordStrength(password: string): void {
     if (password.trim().length < 8) throw new Error(t('口令长度不得少于 8 位'))
     if (/[\u4e00-\u9fff]/.test(password)) throw new Error(t('口令不得包含中文'))
   }
 
-  /** 创建账号：未显式指定口令时生成随机初始口令（仅本次调用返回，须安全传达给本人）。 */
+  /** Crée un compte : sans mot de passe explicite, génère un mot de passe initial aléatoire (renvoyé une seule fois à cet appel, à transmettre sûrement à la personne). */
   createUser(input: {
     username: string
     displayName: string
@@ -1267,7 +1267,7 @@ export class IamService extends Service {
     if (this.users().findOne((user) => user.username === input.username)) throw new Error(t('用户名已存在：{username}', { username: input.username }))
     if (!this.orgs().get(input.orgId)) throw new Error(t('组织不存在：{id}', { id: input.orgId }))
     this.assertManageScope(actor, input.orgId, t('创建账号'))
-    // P0-02：建号携带 roleIds 时同样受可授权上限约束（否则绕过 assignRoles 直写角色）
+    // P0-02 : la création de compte avec roleIds subit aussi le plafond d'autorisabilité (sinon contournement d'assignRoles en écriture directe de rôles)
     if (input.roleIds?.length) this.assertGrantCeiling(actor, this.resolveRolePermissions(input.roleIds), t('创建账号'))
     if (input.password !== undefined) this.assertPasswordStrength(input.password)
     const password = input.password ?? generateSecret('init')
@@ -1284,25 +1284,25 @@ export class IamService extends Service {
       passwordSalt: '',
       passwordHash: hashPasswordScrypt(password),
       bindings: [],
-      // 仅当调用方显式给了口令（有人拿到明文）才标记；随机生成的初始口令未下发，不算已知
+      // Marqué seulement si l'appelant a explicitement donné un mot de passe (quelqu'un a le clair) ; un initial aléatoire non distribué ne compte pas comme connu
       ...(input.password !== undefined ? { passwordKnown: true } : {}),
       ...(input.jobNumber !== undefined ? { jobNumber: input.jobNumber } : {}),
     })
     return input.password ? { user } : { user, initialPassword: password }
   }
 
-  /** 重置口令：不传 password 则生成随机初始口令；传入则设置为指定口令（均仅本次返回明文）。 */
+  /** Réinitialise le mot de passe : sans password, génère un initial aléatoire ; avec, fixe le mot de passe indiqué (le clair n'est renvoyé que cette fois dans les deux cas). */
   resetPassword(id: string, password?: string, actor?: UserManageActor): { user: UserRecord; initialPassword: string } {
     const user = this.requireUser(id)
     this.assertManageScope(actor, user.orgId, t('重置口令'))
     if (user.status === 'deactivated') throw new Error(t('账号已注销，无法重置口令'))
     if (password !== undefined) this.assertPasswordStrength(password)
     const next = password ?? generateSecret('init')
-    // 重置口令的明文会一次性回显给操作者（由人转达），因此视为「已知口令」
+    // Le clair du mot de passe réinitialisé est réaffiché une fois à l'opérateur (transmis par un humain), donc considéré « mot de passe connu »
     this.users().update(id, { passwordSalt: '', passwordHash: hashPasswordScrypt(next), passwordKnown: true })
-    // P1-08（安全审查 2026-10-31）：重置口令联动撤销该账号全部既有会话——旧 access 即时失效、
-    // 旧 refresh 不得再换新令牌、以其为 sub 的委托令牌同批吊销。经平台事件解耦（跨插件联动
-    // 不直连，authn 侧订阅后执行吊销并落审计），与「冻结即吊销」同一通道。
+    // P1-08 (revue de sécurité 2026-10-31) : la réinitialisation révoque en cascade toutes les sessions existantes du compte — l'ancien access expire immédiatement,
+    // l'ancien refresh ne peut plus échanger de jeton, les jetons délégués adossés sont révoqués dans le même lot. Découplé par événement de plateforme (le couplage
+    // inter-plugins ne se câble pas en direct, authn souscrit puis exécute la révocation avec audit), même canal que « geler = révoquer ».
     this.ctx.platformBus.emit(PlatformEvents.UserPasswordReset, { userId: id, username: user.username })
     return { user: this.users().get(id)!, initialPassword: next }
   }
@@ -1354,9 +1354,9 @@ export class IamService extends Service {
   }
 
   updateUser(id: string, patch: Partial<Pick<UserRecord, 'displayName' | 'email' | 'phone' | 'title' | 'orgId' | 'accountType' | 'primaryOrgId'>>, actor?: UserManageActor): UserRecord {
-    // 白名单收敛（QA SEC-01）：PATCH 编辑仅接受档案类字段，与上方 TS 签名一致；
-    // status/passwordHash/passwordSalt/username/id 等字段原样落库会造成越权改状态、植入口令
-    // （账号接管），此处显式拒绝并点名被拒字段（诚实拒绝，不静默忽略）。
+    // Convergence de la liste blanche (QA SEC-01) : l'édition PATCH n'accepte que les champs de dossier, cohérent avec la signature TS ci-dessus ;
+    // laisser passer status/passwordHash/passwordSalt/username/id tels quels en base permettrait le changement d'état non autorisé, l'injection de mot de passe
+    // (prise de contrôle du compte) — refus explicite en nommant les champs rejetés (refus honnête, pas d'ignorance silencieuse).
     const allowedFields = ['displayName', 'email', 'phone', 'title', 'orgId', 'accountType', 'primaryOrgId']
     const rejected = Object.keys(patch ?? {}).filter((key) => !allowedFields.includes(key))
     if (rejected.length > 0) {
@@ -1366,7 +1366,7 @@ export class IamService extends Service {
     this.assertManageScope(actor, user.orgId, t('修改账号'))
     if (patch.orgId) {
       if (!this.orgs().get(patch.orgId)) throw new Error(t('组织不存在：{id}', { id: patch.orgId }))
-      // 迁移目标组织同样受操作者组织子树约束（防止借「改归属」把账号挪出隔离域）
+      // L'organisation cible de migration subit aussi la contrainte de sous-arbre de l'opérateur (contre le déplacement d'un compte hors du domaine d'isolement via « changer le rattachement »)
       this.assertManageScope(actor, patch.orgId, t('迁移账号组织'))
     }
     if (patch.primaryOrgId && !this.orgs().get(patch.primaryOrgId)) throw new Error(t('主归属组织不存在：{id}', { id: patch.primaryOrgId }))
@@ -1384,15 +1384,15 @@ export class IamService extends Service {
   }
 
   /**
-   * 绑定三方身份：事实源为 identityLinks（引擎级唯一约束），user.bindings 为投影。
+   * Lie une identité tierce : la source de fait est identityLinks (contrainte d'unicité moteur), user.bindings est une projection.
    *
-   * 安全审查 P1-05（2026-10-31）：
-   *   ① 代他人绑定收敛为平台超级管理员（'*'）——手工绑定写入的是调用方声明的任意 unionId，
-   *      组织管理员若能给他人账号挂自己的三方身份，即可经三方登录接管该账号（含超管）。
-   *      组织管理员的合规通道是扫码授权（/api/auth/sso/bind/authorize，被绑定身份=扫码人本人）
-   *      与连接器同步；本端点自绑（id=操作者本人）不受限。
-   *   ② 移除伪「二次验证码」校验——旧逻辑只查 '000000'/6 位格式，从未对应真实挑战
-   *      （验证码形同虚设）。verifyCode 参数保留接收（前端兼容），不再声明安全语义。
+   * Revue de sécurité P1-05 (2026-10-31) :
+   *   ① La liaison pour autrui est resserrée au super-admin plateforme ('*') — la liaison manuelle écrit un unionId quelconque déclaré par l'appelant,
+   *      si un admin d'organisation pouvait accrocher sa propre identité tierce au compte d'autrui, il pourrait prendre ce compte via la connexion tierce (super-admin inclus).
+   *      La voie conforme de l'admin d'organisation est le scan d'autorisation (/api/auth/sso/bind/authorize, l'identité liée = la personne qui scanne)
+   *      et la synchronisation du connecteur ; l'auto-liaison sur ce endpoint (id = l'opérateur lui-même) n'est pas limitée.
+   *   ② Suppression du faux « code de vérification secondaire » — l'ancienne logique ne vérifiait que '000000'/6 chiffres, sans jamais correspondre à un défi réel
+   *      (le code ne servait à rien). Le paramètre verifyCode reste reçu (compatibilité front), sans sémantique de sécurité déclarée.
    */
   bindThirdParty(id: string, binding: { provider: ThirdPartyBinding['provider']; unionId: string; displayName: string; corpId?: string; verifyCode?: string }, actor?: UserManageActor): UserRecord {
     const user = this.requireUser(id)
@@ -1401,12 +1401,12 @@ export class IamService extends Service {
     if (!selfBind && !actor?.permissions.includes('*')) {
       throw new OrgScopeDeniedError(t('为其他账号手工绑定三方身份仅限平台超级管理员（防借三方登录接管他人账号，安全审查 P1-05）；请走扫码授权或连接器同步通道'))
     }
-    // corpId 缺省取该 provider 已配置主体的 corpId（控制台手工绑定即针对已接入主体），
-    // 保证「一人一号」唯一约束（provider|corpId|providerUserId）对存量链接生效。
+    // corpId prend par défaut le corpId de l'entité déjà configurée du provider (la liaison manuelle de la console vise une entité déjà connectée),
+    // garantissant la contrainte d'unicité « une personne, un compte » (provider|corpId|providerUserId) vis-à-vis des liens existants.
     const corpId = binding.corpId ?? this.connectorConfig(binding.provider)?.corpId ?? ''
-    // 已占用判定以 identityLinks 的「登录链」为准（投影可能因解绑重建而滞后）：
-    // 同一 provider+corpId 已有登录链即视为已绑定。任职链（staff）不算占用——
-    // 它描述的是岗位事实，用户解绑登录身份后重新绑定登录身份是允许的（任职链保留不动）。
+    // Le jugement d'occupation se fonde sur les « liens de connexion » d'identityLinks (la projection peut être en retard après reconstruction de déliaison) :
+    // un lien de connexion existant pour le même provider+corpId = déjà lié. Le lien de fonction (staff) n'occupe pas —
+    // il décrit un fait de poste ; après déliaison de l'identité de connexion, relier une nouvelle identité de connexion est permis (le lien de fonction reste intact).
     const occupied = this.identityLinks().findOne((link) => link.userId === id
       && link.provider === binding.provider
       && link.kind !== 'staff'
@@ -1414,9 +1414,9 @@ export class IamService extends Service {
     if (occupied) {
       throw new Error(t('该账号已绑定{provider}身份，请先解绑', { provider: binding.provider }))
     }
-    // 一人一号：目标三方身份若已绑定其他账号，提前给出可读错误（引擎唯一约束仍兜底）。
-    // 只看登录链：任职链（staff）是岗位事实，同一自然人在别的主体/岗位出现属正常，
-    // 拿它判「一人一号」会误报。
+    // Une personne, un compte : si l'identité tierce cible est déjà liée à un autre compte, erreur lisible dès maintenant (la contrainte moteur reste en dernier recours).
+    // Ne regarder que le lien de connexion : le lien de fonction (staff) est un fait de poste, la même personne physique apparaissant chez un autre entité/poste est normal,
+    // en juger « une personne, un compte » dessus produirait des faux positifs.
     const taken = this.identityLinks().findOne((link) => link.provider === binding.provider
       && link.providerUserId === binding.unionId
       && link.kind !== 'staff'
@@ -1424,7 +1424,7 @@ export class IamService extends Service {
     if (taken && taken.userId !== id) {
       throw new Error(t('该三方身份已绑定其他平台账号（一人一号），请先解除对方绑定'))
     }
-    // 唯一约束冲突由存储引擎兜底（同一主体下同一三方身份只能映射一个账号）
+    // Le conflit de contrainte d'unicité est rattrapé par le moteur de stockage (une même identité tierce sous une même entité ne mappe qu'un compte)
     this.linkIdentity(id, {
       provider: binding.provider,
       providerUserId: binding.unionId,
@@ -1435,11 +1435,11 @@ export class IamService extends Service {
   }
 
   /**
-   * 解除三方绑定（管理面）。corpId 缺省=该 provider 全部主体（管理员显式选择「解绑钉钉」）。
-   * 解绑后写入豁免，避免连接器同步把链接自动补回。
-   * 安全审查 P1-05：移除伪验证码校验（旧逻辑只查 6 位格式、从未对应真实挑战）；解绑本身
-   * 不授予访问权（只影响登录方式，且「最后登录方式需先设口令」反锁定护栏在 performUnbind），
-   * 配合 bindThirdParty 收敛为 '*' 后，解绑不再构成账号接管链的一环。
+   * Délie une liaison tierce (face gestion). corpId par défaut = toutes les entités du provider (l'admin choisit explicitement « délier DingTalk »).
+   * La déliaison écrit une exemption, pour éviter que la synchronisation du connecteur recolle automatiquement le lien.
+   * Revue de sécurité P1-05 : suppression du faux code de vérification (l'ancienne logique ne vérifiait qu'un format à 6 chiffres, sans défi réel) ; la déliaison elle-même
+   * n'accorde pas d'accès (elle ne touche qu'une voie de connexion, et le garde-fou anti-verrouillage « dernière voie de connexion exige d'abord un mot de passe » est dans performUnbind),
+   * une fois bindThirdParty resserrée à '*', la déliaison ne constitue plus un maillon d'une chaîne de prise de contrôle.
    */
   unbindThirdParty(id: string, provider: ThirdPartyBinding['provider'], verifyCode: string, actor?: UserManageActor, corpId?: string): UserRecord {
     const user = this.requireUser(id)
@@ -1449,9 +1449,9 @@ export class IamService extends Service {
   }
 
   /**
-   * 本人自助解绑（无 iam.user.write 的业务同学在面板里解绑自己的钉钉）。
-   * 与 unbindThirdParty 的唯一差别是不做组织子树校验——操作对象恒为调用者本人，
-   * 由路由层从会话取 userId（不接受请求体指定），因此不存在越权面。
+   * Auto-déliaison par la personne (un collègue métier sans iam.user.write délie son propre DingTalk dans le panneau).
+   * Seule différence avec unbindThirdParty : pas de validation de sous-arbre — l'objet opéré est toujours l'appelant lui-même,
+   * userId tiré de la session par la couche de routage (le corps de requête ne peut pas le désigner), donc pas de surface d'élévation.
    */
   unbindOwnThirdParty(userId: string, provider: ThirdPartyBinding['provider'], verifyCode: string, corpId?: string): UserRecord {
     const user = this.requireUser(userId)
@@ -1459,7 +1459,7 @@ export class IamService extends Service {
     return this.performUnbind(user, provider, corpId)
   }
 
-  /** 解绑实际执行（含反锁定护栏：先判后删，不留中间态）。 */
+  /** Exécution réelle de la déliaison (avec garde-fou anti-verrouillage : juger avant de supprimer, sans état intermédiaire). */
   private performUnbind(user: UserRecord, provider: ThirdPartyBinding['provider'], corpId?: string): UserRecord {
     const targets = this.identityLinks().find((link) => link.userId === user.id
       && link.provider === provider
@@ -1468,9 +1468,9 @@ export class IamService extends Service {
     if (targets.length === 0) {
       throw new Error(t('该账号未绑定{provider}身份', { provider }))
     }
-    // 反锁定护栏：三方身份是 SSO 自注册/通讯录同步账号唯一已知的登录凭据
-    // （创建时的随机口令从未下发给人）。解绑后若既不剩任何三方绑定、又没有已知口令，
-    // 账号将永久无法登录且管理员无从补救——在这里拦住，并告知先设口令。
+    // Garde-fou anti-verrouillage : l'identité tierce est le seul identifiant de connexion connu des comptes auto-enregistrés SSO/synchronisés d'annuaire
+    // (le mot de passe aléatoire de création n'a jamais été distribué). Si après déliaison il ne reste ni liaison tierce ni mot de passe connu,
+    // le compte devient définitivement inconnectable et sans recours admin — on bloque ici, en invitant à définir d'abord un mot de passe.
     const remainingLinks = this.identityLinks().find((link) => link.userId === user.id
       && link.kind !== 'staff'
       && !targets.some((target) => target.id === link.id))
@@ -1482,18 +1482,18 @@ export class IamService extends Service {
   }
 
   /**
-   * 账号是否有可用口令（可用于账号密码登录）。
-   * 依据是 passwordKnown 标记（有人拿到过明文），不是用户名形态——通讯录同步创建的账号
-   * 用户名是工号、口令同为随机值，按形态判断会把它们误判成「有已知口令」而放行解绑。
+   * Si le compte dispose d'un mot de passe utilisable (connexion compte-mot de passe possible).
+   * Fondé sur la marque passwordKnown (quelqu'un a eu le clair), pas sur la forme de l'identifiant — les comptes créés par synchronisation d'annuaire
+   * ont un identifiant matricule et un mot de passe tout aussi aléatoire ; juger sur la forme les classerait à tort « mot de passe connu » et laisserait passer la déliaison.
    */
   private hasUsablePassword(user: UserRecord): boolean {
     return Boolean(user.passwordHash) && user.passwordKnown === true
   }
 
   /**
-   * 账号清单（N3 组织管理员读面收敛）：orgId 展开为其组织子树过滤；scopeOrgIds（调用方可见
-   * 组织集合，控制台层由 scopedOrgIdsOf 计算）传入时做交集——非平台管理员只看得到管辖子树
-   * 内的账号。两者缺省不过滤（平台管理员/服务内部调用，保持既有全量口径）。
+   * Liste des comptes (resserrage de la face lecture N3 admin d'organisation) : orgId étendu en filtre de sous-arbre ; scopeOrgIds (ensemble d'organisations visible
+   * de l'appelant, calculé côté console par scopedOrgIdsOf) intersecte quand il est passé — un non-admin plateforme ne voit que les comptes de son sous-arbre.
+   * Absents l'un et l'autre = pas de filtre (admin plateforme/appel interne de service, l'ancien référentiel intégral est maintenu).
    */
   listUsers(input: { orgId?: string; status?: string; q?: string; scopeOrgIds?: string[] } = {}): UserRecord[] {
     const orgScope = input.orgId ? new Set(this.orgSubtreeIds(input.orgId)) : undefined
@@ -1512,12 +1512,12 @@ export class IamService extends Service {
     const user = this.users().findOne((item) => item.username === username)
     if (!user) throw new Error(t('用户名或密码错误'))
     if (!verifyPasswordHash(user, password)) throw new Error(t('用户名或密码错误'))
-    // 透明升级（A-09）：旧格式（裸 sha256）验证通过即重哈希为 scrypt——存量用户无感迁移，
-    // 下一次登录起新格式生效；升级失败不阻断登录（下次再试）。
+    // Montée transparente (A-09) : l'ancien format (sha256 nu) qui vérifie est immédiatement re-haché en scrypt — migration invisible des utilisateurs existants,
+    // le nouveau format prend effet à la connexion suivante ; un échec de montée ne bloque pas la connexion (nouvelle tentative la fois suivante).
     if (!user.passwordHash.startsWith(SCRYPT_PREFIX)) {
       try {
         this.users().update(user.id, { passwordSalt: '', passwordHash: hashPasswordScrypt(password) })
-      } catch { /* 升级失败保持旧哈希，验证已通过不阻断 */ }
+      } catch { /* échec de mise à niveau : conserve l'ancien hachage, la vérification ayant réussi ne bloque pas */ }
     }
     if (user.status === 'frozen') throw new Error(t('账号已冻结：{reason}', { reason: user.frozenReason ?? t('联系管理员') }))
     if (user.status === 'deactivated') throw new Error(t('账号已注销'))
@@ -1535,16 +1535,16 @@ export class IamService extends Service {
     return user
   }
 
-  // -- 角色 ---------------------------------------------------------------
+  // -- Rôles ---------------------------------------------------------------
 
   /**
-   * 存量账号口令已知性回填（幂等，2026-10-22 解绑护栏配套）：
-   * `passwordKnown` 是本批次新增字段，存量账号没有它。若把「缺字段」直接当成 false，
-   * 所有既有账号都会被判成「只能靠三方登录」，解绑功能对它们等于全程被拒。
+   * Remplissage rétroactif de la connaissance du mot de passe des comptes existants (idempotent, volet du garde-fou de déliaison 2026-10-22) :
+   * `passwordKnown` est un champ nouveau du lot ; les comptes existants ne l'ont pas. Traiter « champ absent » comme false
+   * classerait tous les comptes existants « only connexion tierce », leur refusant la déliaison de bout en bout.
    *
-   * 回填口径（保守向可用性倾斜，但不放宽真正的风险面）：
-   *   - 已有任意三方绑定的账号 → 不标记（解绑护栏照常生效，只有当它是唯一登录方式时拦）；
-   *   - 没有任何三方绑定的账号 → 标记 true（它本来就只能靠口令登录，说明口令是已知的）。
+   * Référentiel de remplissage (prudent penché vers l'utilisabilité, sans relâcher la vraie face de risque) :
+   *   - compte avec liaison tierce quelconque → non marqué (le garde-fou de déliaison s'applique normalement, ne bloque que si c'est la seule voie) ;
+   *   - compte sans aucune liaison tierce → marqué true (il ne peut se connecter que par mot de passe, donc le mot de passe est connu).
    */
   backfillPasswordKnown(): number {
     const collection = this.ctx.opsStorage.collection<RecordBase & { key: string }>('iam:migrations')
@@ -1562,13 +1562,13 @@ export class IamService extends Service {
   }
 
   /**
-   * 存量身份链的 kind 回填（幂等，2026-10-22 解绑能力配套）。
+   * Remplissage rétroactif du kind des liens d'identité existants (idempotent, volet de la capacité de déliaison 2026-10-22).
    *
-   * 本批次新增了 kind 字段区分「登录链」与「任职链」，存量链没有该字段。回填依据两条事实：
-   *   1. 同一 (provider, corpId, userId) 下若有多条链，则登录链是 unionId 形态、任职链是 userid 形态
-   *      （钉钉 unionId 形如 dd_uXXX，userid 形如 staff_XXX）——这是同步写链的既有约定；
-   *   2. 形态判据兜底：providerUserId 命中该主体任一部门的负责人 userid 列表（managerRemoteIds）→ 任职链。
-   * 回填后解绑只动登录链，任职链（部门负责人反查、NAS 数据权限身份反查）保持不动。
+   * Ce lot a ajouté le champ kind distinguant « lien de connexion » et « lien de fonction » ; les liens existants ne l'ont pas. Le remplissage s'appuie sur deux faits :
+   *   1. sous un même (provider, corpId, userId), s'il y a plusieurs liens, le lien de connexion a la forme unionId, le lien de fonction la forme userid
+   *      (l'unionId DingTalk ressemble à dd_uXXX, le userid à staff_XXX) — convention existante d'écriture des liens à la synchronisation ;
+   *   2. critère de forme en dernier recours : providerUserId atteignant la liste des userid de responsables d'un département de l'entité (managerRemoteIds) → lien de fonction.
+   * Après remplissage, la déliaison ne touche que le lien de connexion ; le lien de fonction (recherche inversée de responsables, recherche d'identité des permissions de données NAS) reste intact.
    */
   backfillIdentityLinkKinds(): number {
     const links = this.identityLinks().all()
@@ -1580,17 +1580,17 @@ export class IamService extends Service {
       list.push(link)
       groups.set(key, list)
     }
-    // 部门负责人引用的是三方 userid（managerRemoteIds 口径）→ 这些 id 属任职链
+    // Le responsable de département référence des userid tierces (référentiel managerRemoteIds) → ces ids relèvent du lien de fonction
     const staffIds = new Set<string>()
     for (const org of this.orgs().all()) {
       for (const id of this.leadersOf(org.id)) {
-        // 负责人已反查为平台 userId，无法据此判定；此处仅收集形如 staff_ 的三方 id（同步前的旧口径残留）
+        // Responsable déjà résolu en userId plateforme, indécidable ici ; on ne collecte que les ids tierces en staff_ (résidu de l'ancien référentiel d'avant synchronisation)
         if (/^(staff|user|ou_)/i.test(id)) staffIds.add(id)
       }
     }
     let touched = 0
     for (const group of groups.values()) {
-      // 多链组：unionId 形态=登录链，其余=任职链
+      // Groupe multi-liens : forme unionId = lien de connexion, le reste = lien de fonction
       const isUnionShape = (id: string) => /^(dd_u|ou_|union)/i.test(id) || !/^(staff|user)/i.test(id)
       for (const link of group) {
         if (link.kind !== undefined) continue
@@ -1613,8 +1613,8 @@ export class IamService extends Service {
   }
 
   /**
-   * 内置角色权限迁移（幂等）：给已落库的 resource_admin/developer/auditor 补齐连接器纳管
-   * 权限点。只补缺不覆盖；迁移标记入 iam:migrations 集合供观测（P2 修正⑯）。
+   * Migration de permissions idempotente des rôles intégrés : complète pour resource_admin/developer/auditor déjà en base les points de permission
+   * de gestion des connecteurs. Ne fait que combler les manques ; la marque de migration entre dans la collection iam:migrations pour observation (correctif P2 ⑯).
    */
   ensureConnectorPermissionsMigration(): { applied: boolean; touched: string[] } {
     const collection = this.ctx.opsStorage.collection<RecordBase & { key: string; note?: string }>('iam:migrations')
@@ -1630,8 +1630,8 @@ export class IamService extends Service {
         touched.push(`${code}+${missing.join(',')}`)
       }
     }
-    // 通配语义复查：resource_admin 持有 mcp.* 形态的通配时 userPermissions 已可展开 connector.*
-    // （旧库存量不含 connector.*），故此处显式并入该通配保证无需逐点追加。
+    // Revue de la sémantique joker : quand resource_admin détient un joker de forme mcp.*, userPermissions déplie déjà connector.*
+    // (l'ancien stock ne contient pas connector.*), d'où la fusion explicite de ce joker pour éviter un ajout point par point.
     const resourceAdmin = this.roles().findOne((item) => item.code === 'resource_admin')
     if (resourceAdmin && !resourceAdmin.permissions.includes('connector.*')) {
       this.roles().update(resourceAdmin.id, { permissions: [...resourceAdmin.permissions, 'connector.*'] })
@@ -1648,11 +1648,11 @@ export class IamService extends Service {
   }
 
   /**
-   * 可授权权限上限（安全审查 P0-02，2026-10-31）：非平台超级管理员（无 '*'）的操作者，
-   * 只能授予/管理自己本身已持有的权限点——组织管理员（iam.*）不得把任何账号提为平台超管、
-   * 不得授予自己没有的跨域能力、不得创建/编辑含 '*' 或超出自身权限集的角色。
-   * actor.permissions 为解析后的字面量点集（'*' 仅平台超管持有）；requested 允许通配形态，
-   * 逐点展开后比对。REST 与工具桥等一切外部入口共用（服务层单点裁决）。
+   * Plafond des permissions autorisables (revue de sécurité P0-02, 2026-10-31) : un opérateur non super-admin plateforme (sans '*')
+   * ne peut octroyer/gérer que les points de permission qu'il détient lui-même — un admin d'organisation (iam.*) ne peut élever aucun compte en super-admin,
+   * ni octroyer une capacité inter-domaine qu'il n'a pas, ni créer/éditer un rôle contenant '*' ou dépassant son propre jeu de permissions.
+   * actor.permissions est le jeu littéral résolu ('*' détenu seulement par le super-admin) ; requested admet la forme joker,
+   * comparé après dépliage point par point. Toutes les entrées externes (REST, pont d'outils, etc.) partagent ce point unique (arbitrage unique en couche service).
    */
   private assertGrantCeiling(actor: UserManageActor | undefined, requested: string[], action: string): void {
     if (!actor) {
@@ -1676,7 +1676,7 @@ export class IamService extends Service {
     }
   }
 
-  /** 非平台超管不得改动「组织子树外账号仍挂载的角色」——防止借编辑共享角色影响其他组织持有人（P0-02）。 */
+  /** Un non-super-admin ne peut modifier « un rôle encore porté par des comptes hors de son sous-arbre » — contre l'influence sur les autres détenteurs via l'édition d'un rôle partagé (P0-02). */
   private assertRoleHolderScope(actor: UserManageActor | undefined, roleId: string, action: string): void {
     if (!actor || actor.permissions.includes('*')) return
     const actorOrgId = actor.orgId ?? (actor.userId ? this.users().get(actor.userId)?.orgId : undefined)
@@ -1709,8 +1709,8 @@ export class IamService extends Service {
     if (role.builtin && patch.permissions) throw new Error(t('内置角色的权限不可修改'))
     if (patch.permissions) this.assertPermissions(patch.permissions)
     if (patch.permissions) {
-      // P0-02：编辑角色等价于对全部持有人一次性改权——上限校验用「改后权限集」整体裁决，
-      // 并拒绝改动组织子树外账号仍挂载的角色（防止借共享角色跨组织提权）
+      // P0-02 : éditer un rôle équivaut à changer les permissions de tous les détenteurs d'un coup — le contrôle de plafond arbitre sur « le jeu de permissions après modification »,
+      // et refuse de modifier un rôle encore porté par des comptes hors du sous-arbre (contre l'élévation inter-organisation via un rôle partagé)
       this.assertGrantCeiling(actor, patch.permissions, t('编辑角色'))
       this.assertRoleHolderScope(actor, id, t('编辑角色'))
     }
@@ -1720,17 +1720,17 @@ export class IamService extends Service {
   }
 
   /**
-   * 删除自定义角色（2026-10-14 路线图 R4 删除面补齐）：角色治理此前只增不改不删——
-   * 试错/演示产生的废角色永久滞留目录。三重护栏：
-   *   ① 内置角色不可删（平台基线，删掉会让新装库与存量库 RBAC 面分叉）；
-   *   ② 仍有账号挂载时不可删（删了会把挂载者权限整体蒸发，须先解绑）；
-   *   ③ 不存在即拒（与 updateRole 同口径，不静默成功）。
+   * Supprime un rôle personnalisé (complément de la face suppression feuille de route R4, 2026-10-14) : la gouvernance des rôles n'ajoutait auparavant que sans modifier ni supprimer —
+   * les rôles morts nés d'essais/démonstrations s'accumulaient à vie. Triple garde-fou :
+   *   ① les rôles intégrés sont non supprimables (base de plateforme, les supprimer ferait diverger la face RBAC des bases neuves et existantes) ;
+   *   ② non supprimable tant que des comptes le portent (le supprimer ferait s'évaporer toutes leurs permissions, délier d'abord) ;
+   *   ③ inexistant = refus (même référentiel qu'updateRole, pas de succès silencieux).
    */
   deleteRole(id: string, actor?: UserManageActor): void {
     const role = this.roles().get(id)
     if (!role) throw new Error(t('角色不存在：{id}', { id }))
     if (role.builtin) throw new Error(t('内置角色「{name}」不可删除（平台基线；如需收敛权限请走角色编辑）', { name: role.name }))
-    // P0-02：删除前校验持有人作用域（当前无挂载时恒过；与编辑同口径防跨组织治理干扰）
+    // P0-02 : contrôle du périmètre des détenteurs avant suppression (passe toujours sans porteur ; même référentiel que l'édition, contre l'interférence de gouvernance inter-organisation)
     this.assertRoleHolderScope(actor, id, t('删除角色'))
     const holders = this.users().all().filter((user) => user.roleIds.includes(id))
     if (holders.length > 0) {
@@ -1755,15 +1755,15 @@ export class IamService extends Service {
     for (const roleId of roleIds) {
       if (!this.roles().get(roleId)) throw new Error(t('角色不存在：{id}', { id: roleId }))
     }
-    // P0-02：按「角色解析后的实际权限点」做可授权上限裁决——角色粒度绕不过（把 super_admin
-    // 或任何含操作者未持权限点的角色分配给本组织任意账号，均在此拒绝；含 '*' 的角色解析即 '*'）
+    // P0-02 : l'arbitrage du plafond d'autorisabilité se fonde sur « les points de permission réels après résolution du rôle » — la granularité rôle ne contourne pas (attribuer super_admin
+    // ou tout rôle contenant des points que l'opérateur ne détient pas à un compte de l'organisation est refusé ici ; un rôle contenant '*' se résout en '*')
     this.assertGrantCeiling(actor, this.resolveRolePermissions(roleIds), t('分配角色'))
     const updated = this.users().update(userId, { roleIds })
     this.ctx.platformBus.emit(PlatformEvents.PermissionChanged, { kind: 'user_roles', userId })
     return updated
   }
 
-  /** 解析一组角色的实际权限点集合（并集，支持通配）；人机两侧共用同一解析规则。 */
+  /** Résout le jeu de points de permission réels d'un ensemble de rôles (union, joker supporté) ; humains et machines partagent la même règle de résolution. */
   resolveRolePermissions(roleIds: string[]): string[] {
     const result = new Set<string>()
     for (const roleId of roleIds) {
@@ -1784,7 +1784,7 @@ export class IamService extends Service {
     return [...result]
   }
 
-  /** 计算用户的实际权限点集合（角色并集，支持通配）。 */
+  /** Calcule le jeu de points de permission effectifs d'un utilisateur (union de rôles, joker supporté). */
   userPermissions(userId: string): string[] {
     const user = this.users().get(userId)
     if (!user) return []
@@ -1796,7 +1796,7 @@ export class IamService extends Service {
     return permissions.includes('*') || permissions.includes(point)
   }
 
-  // -- 用户组 -------------------------------------------------------------
+  // -- Groupes d'utilisateurs ---------------------------------------------------------------
 
   createGroup(input: { name: string; type: 'static' | 'dynamic'; rule?: UserGroupRule; memberIds?: string[]; description?: string }): UserGroupRecord {
     if (!input.name?.trim()) throw new Error(t('用户组名称不能为空'))
@@ -1822,7 +1822,7 @@ export class IamService extends Service {
     return this.groups().remove(id)
   }
 
-  /** 解析用户组成员（动态组按规则实时圈人）。 */
+  /** Résout les membres d'un groupe (les groupes dynamiques cerclent les personnes selon la règle en temps réel). */
   resolveGroupMembers(id: string): UserRecord[] {
     const group = this.groups().get(id)
     if (!group) throw new Error(t('用户组不存在：{id}', { id }))
@@ -1848,16 +1848,16 @@ export class IamService extends Service {
     })
   }
 
-  /** 动态用户组成员快照（dev-plan-nas-authz §2.2：重算结果落快照，漂移可观测）。 */
+  /** Instantané des membres de groupes dynamiques (dev-plan-nas-authz §2.2 : le recalcul tombe dans un instantané, la dérive est observable). */
   groupSnapshots(): Collection<GroupSnapshotRecord> {
     return this.ctx.opsStorage.collection<GroupSnapshotRecord>('iam:groupSnapshots')
   }
 
   /**
-   * 重算全部动态用户组成员并与快照比对（连接器同步收尾 / REST 手动触发）。
-   * 漂移人数 ≥ 阈值（组上 driftAlertThreshold，缺省 5）或组被标记为 NAS C 关联组（authzRoleC）
-   * 时发 `nas.authz.cGroupDrift` 事件——防止 HR 调整静默改变跨域只读范围。
-   * 返回本次发生漂移的组清单（含增减明细），供调用方展示/断言。
+   * Recalcule tous les membres de groupes dynamiques et compare avec l'instantané (clôture de synchronisation de connecteur / déclenchement manuel REST).
+   * Dérive ≥ seuil (driftAlertThreshold du groupe, défaut 5) ou groupe marqué groupe C NAS (authzRoleC)
+   * → émission de `nas.authz.cGroupDrift` — contre les changements silencieux du périmètre de lecture inter-domaine par les ajustements RH.
+   * Renvoie la liste des groupes ayant dérivé (détail des ajouts/retraits inclus), pour affichage/assertion par l'appelant.
    */
   refreshGroupSnapshots(actor: string): Array<{ groupId: string; groupName: string; added: string[]; removed: string[]; threshold: number; alerted: boolean }> {
     const drifts: Array<{ groupId: string; groupName: string; added: string[]; removed: string[]; threshold: number; alerted: boolean }> = []
@@ -1872,7 +1872,7 @@ export class IamService extends Service {
         const removed = previous.filter((id) => !nextSet.has(id))
         if (added.length > 0 || removed.length > 0) {
           const threshold = group.driftAlertThreshold ?? DEFAULT_GROUP_DRIFT_THRESHOLD
-          // C 关联组任何幅度的漂移都告警（跨域只读范围敏感）；其余组按阈值
+          // Un groupe associé C alerte sur toute dérive (sensibilité du périmètre de lecture inter-domaine) ; les autres selon le seuil
           const alerted = group.authzRoleC === true || (added.length + removed.length) >= threshold
           if (alerted) {
             this.ctx.platformBus.emit('nas.authz.cGroupDrift', {
@@ -1890,19 +1890,19 @@ export class IamService extends Service {
     return drifts
   }
 
-  // -- 三方接入 -----------------------------------------------------------
+  // -- Accès tierce ---------------------------------------------------------------
 
-  /** 按平台类型取第一条配置（旧调用兼容；多主体请用 connectorConfigById/resolveConnectorConfig）。 */
+  /** Première configuration par type de plateforme (compatibilité des anciens appels ; en multi-entité, utiliser connectorConfigById/resolveConnectorConfig). */
   connectorConfig(provider: string): ConnectorConfigRecord | undefined {
     return this.connectorConfigs().findOne((config) => config.provider === provider)
   }
 
-  /** 按配置实例 id 寻址（多主体：配置实例以 ConnectorConfigRecord.id 寻址，provider 仅表示平台类型）。 */
+  /** Adressage par id d'instance de configuration (multi-entité : l'instance est adressée par ConnectorConfigRecord.id, provider ne désigne que le type de plateforme). */
   connectorConfigById(id: string): ConnectorConfigRecord | undefined {
     return this.connectorConfigs().get(id)
   }
 
-  /** 解析配置实例：先按 id 找，找不到按 provider 取第一条（enabled 优先）——REST 旧参数兼容入口。 */
+  /** Résout l'instance de configuration : d'abord par id, sinon la première par provider (enabled prioritaire) — entrée de compatibilité des anciens paramètres REST. */
   resolveConnectorConfig(idOrProvider: string): ConnectorConfigRecord | undefined {
     const byId = this.connectorConfigById(idOrProvider)
     if (byId) return byId
@@ -1910,12 +1910,12 @@ export class IamService extends Service {
     return candidates.find((config) => config.enabled) ?? candidates[0]
   }
 
-  /** 更新/创建接入配置：带 id 按 id 更新；不带 id 维持旧行为（按 provider 第一条更新，无则建）。 */
+  /** Met à jour/crée une configuration d'accès : avec id, mise à jour par id ; sans id, l'ancien comportement (mise à jour de la première par provider, création si absente). */
   upsertConnectorConfig(input: {
-    /** 配置实例 id（多主体按 id 更新；缺省=旧的按 provider 第一条语义）。 */
+    /** Id de l'instance de configuration (multi-entité : mise à jour par id ; défaut = l'ancienne sémantique première-par-provider). */
     id?: string
     provider: 'dingtalk' | 'feishu' | 'wecom'
-    /** 主体名称（缺省 `${provider}-${corpId}`）。 */
+    /** Nom de l'entité (défaut `${provider}-${corpId}`). */
     name?: string
     corpId: string
     appKey: string
@@ -1926,13 +1926,13 @@ export class IamService extends Service {
     callbackUrl?: string
     loginEnabled?: boolean
     conflictStrategy?: ConnectorConfigRecord['conflictStrategy']
-    /** real=真实 OpenAPI（需真实企业凭证）；mock=演示降级。 */
+    /** real = vraie OpenAPI (identifiants d'entreprise réels requis) ; mock = repli de démonstration. */
     mode?: 'real' | 'mock'
-    /** OpenAPI 基址覆盖（测试/专有部署）。 */
+    /** Surcharge de l'URL de base OpenAPI (tests/déploiement dédié). */
     apiBase?: string
-    /** 通讯录 topapi 基址覆盖（默认 https://oapi.dingtalk.com）。 */
+    /** Surcharge de l'URL de base topapi d'annuaire (défaut https://oapi.dingtalk.com). */
     oapiBase?: string
-    /** 同步树挂载的目标组织 ID（空=平台根）。 */
+    /** ID de l'organisation cible du montage de l'arbre synchronisé (vide = racine plateforme). */
     targetOrgId?: string
   }): ConnectorConfigRecord {
     if (!IamService.BUILTIN_CONNECTOR_PROVIDERS.has(input.provider)) throw new Error(t('未注册的连接器：{provider}', { provider: input.provider }))
@@ -1944,7 +1944,7 @@ export class IamService extends Service {
       existing = this.connectorConfig(input.provider)
     }
     const secret = input.appSecret ?? existing?.secretActual ?? 'demo-secret'
-    // 非演示密钥的全新配置默认 real（表单不采集 mode，靠密钥形态推导；demo- 前缀=演示降级）。
+    // Une configuration neuve à clé non-démo est real par défaut (le formulaire ne collecte pas le mode, déduit de la forme de la clé ; préfixe demo- = repli de démonstration).
     const mode = input.mode ?? (secret.startsWith('demo-') ? 'mock' : existing?.mode ?? 'real')
     const payload = {
       provider: input.provider,
@@ -1971,10 +1971,10 @@ export class IamService extends Service {
     return saved
   }
 
-  /** 新建接入配置实例（多主体：同一 provider 可接入多家企业，provider|corpId 由引擎级唯一约束拒绝重复主体）。 */
+  /** Crée une instance de configuration d'accès (multi-entité : un même provider peut connecter plusieurs entreprises, provider|corpId rejeté en doublon par la contrainte moteur). */
   createConnectorConfig(input: {
     provider: 'dingtalk' | 'feishu' | 'wecom'
-    /** 主体名称（缺省 `${provider}-${corpId}`）。 */
+    /** Nom de l'entité (défaut `${provider}-${corpId}`). */
     name?: string
     corpId: string
     appKey: string
@@ -1985,18 +1985,18 @@ export class IamService extends Service {
     callbackUrl?: string
     loginEnabled?: boolean
     conflictStrategy?: ConnectorConfigRecord['conflictStrategy']
-    /** real=真实 OpenAPI（需真实企业凭证）；mock=演示降级。 */
+    /** real = vraie OpenAPI (identifiants d'entreprise réels requis) ; mock = repli de démonstration. */
     mode?: 'real' | 'mock'
-    /** OpenAPI 基址覆盖（测试/专有部署）。 */
+    /** Surcharge de l'URL de base OpenAPI (tests/déploiement dédié). */
     apiBase?: string
-    /** 通讯录 topapi 基址覆盖（默认 https://oapi.dingtalk.com）。 */
+    /** Surcharge de l'URL de base topapi d'annuaire (défaut https://oapi.dingtalk.com). */
     oapiBase?: string
-    /** 同步树挂载的目标组织 ID（空=平台根）。 */
+    /** ID de l'organisation cible du montage de l'arbre synchronisé (vide = racine plateforme). */
     targetOrgId?: string
   }): ConnectorConfigRecord {
     if (!IamService.BUILTIN_CONNECTOR_PROVIDERS.has(input.provider)) throw new Error(t('未注册的连接器：{provider}', { provider: input.provider }))
     const secret = input.appSecret ?? 'demo-secret'
-    // 与 upsert 同一推导：demo- 前缀密钥=演示降级（mock），其余全新配置默认 real。
+    // Même déduction qu'upsert : clé préfixe demo- = repli de démonstration (mock), les autres configurations neuves sont real par défaut.
     const mode = input.mode ?? (secret.startsWith('demo-') ? 'mock' : 'real')
     const saved = this.connectorConfigs().insert({
       id: newId('conn'),
@@ -2021,7 +2021,7 @@ export class IamService extends Service {
     return saved
   }
 
-  /** 删除接入配置实例：同时注销运行时连接器/身份源注册项（不存在则抛错）。 */
+  /** Supprime une instance de configuration d'accès : désactive en même temps l'inscription runtime du connecteur/de la source d'identité (erreur si absente). */
   deleteConnectorConfig(id: string): void {
     if (!this.connectorConfigById(id)) throw new Error(t('接入配置不存在：{id}', { id }))
     this.connectorConfigs().remove(id)
@@ -2029,7 +2029,7 @@ export class IamService extends Service {
     this.authProviders.delete(id)
   }
 
-  /** 按单条配置实例实例化连接器/身份源 Adapter 的 real/mock 实现（第 0 步：连接器真实化；多主体按 configId 注册）。 */
+  /** Instancie pour une instance de configuration l'implémentation real/mock de l'Adapter connecteur/source d'identité (étape 0 : mise en réalité du connecteur ; multi-entité : enregistrement par configId). */
   applyConnectorMode(configId: string): void {
     const config = this.connectorConfigById(configId)
     if (!config) return
@@ -2045,8 +2045,8 @@ export class IamService extends Service {
         this.registerConnector(config.id, new RealDingTalkConnector(credentials, { syncOrgRoot: config.syncOrgRoot }))
         this.registerAuthProvider(config.id, new RealDingTalkAuthAdapter(credentials))
       } else if (config.mode === 'mock') {
-        // 显式声明 mock（演示/联调）：仅 DEMO_SEED 环境允许注册 mock 身份源，
-        // 生产基线禁止将 mock 作为可登录身份源暴露。
+        // Déclaration explicite de mock (démo/intégration) : seuls les environnements DEMO_SEED peuvent enregistrer une source d'identité mock,
+        // la base de production interdit d'exposer un mock comme source d'identité connectable.
         if (process.env.DEMO_SEED === '1') {
           this.registerConnector(config.id, new DingTalkConnector())
           this.registerAuthProvider(config.id, new DingTalkAuthAdapter())
@@ -2064,7 +2064,7 @@ export class IamService extends Service {
     return connector.healthCheck()
   }
 
-  /** 全量同步：目录映射 + 冲突入队 + 离职联动。失败同样落 lastSyncResult（ok:false），避免「点了没反应」。 */
+  /** Synchronisation intégrale : cartographie d'annuaire + mise en file des conflits + couplage des départs. Un échec tombe aussi dans lastSyncResult (ok:false), contre le « clic sans effet ». */
   async syncConnector(idOrProvider: string, actor: string): Promise<{ created: number; updated: number; conflicts: number; frozen: number; message: string }> {
     const config = this.resolveConnectorConfig(idOrProvider)
     if (!config || !config.enabled) throw new Error(t('连接器未启用：{provider}', { provider: idOrProvider }))
@@ -2087,17 +2087,17 @@ export class IamService extends Service {
     let created = 0
     let updated = 0
     for (const remoteOrg of directory.orgs) {
-      // 多主体：同步树根挂到 config.targetOrgId（空=平台根）
+      // Multi-entité : la racine de l'arbre synchronisé monte sur config.targetOrgId (vide = racine plateforme)
       const parent = remoteOrg.parentRemoteId ? remoteOrgToId.get(remoteOrg.parentRemoteId) : (config.targetOrgId ?? null)
       if (parent === undefined && remoteOrg.parentRemoteId) continue
-      // 部门归属双键 customFields { remoteId, connectorId }：旧数据只有 remoteId 的视为不属于任何连接器，不会被误匹配
+      // Double clé de rattachement de département customFields { remoteId, connectorId } : les vieilles données n'ayant que remoteId sont considérées sans connecteur, sans risque de faux appariement
       const local = this.orgs().findOne((org) => org.customFields['remoteId'] === remoteOrg.remoteId && org.customFields['connectorId'] === config.id)
-        // 名称兜底只认领「无归属（手工/历史）或本连接器」的组织——其他主体名下的同名部门不能合并
+        // Le rattrapage par nom ne réclame que les organisations « sans rattachement (manuelles/historiques) ou de ce connecteur » — les homonymes sous d'autres entités ne fusionnent pas
         ?? this.orgs().findOne((org) => org.name === remoteOrg.name && org.parentId === parent
           && (org.customFields['connectorId'] === undefined || org.customFields['connectorId'] === config.id))
       if (local) {
-        // 认领即盖章：名称兜底命中的无归属组织补写 remoteId/connectorId，
-        // 之后其他主体的名称兜底不再能命中它（否则第二主体会合并进第一主体的树）。
+        // Réclamer = tamponner : l'organisation sans rattachement atteinte par le rattrapage par nom reçoit remoteId/connectorId,
+        // après quoi le rattrapage par nom des autres entités ne peut plus l'atteindre (sinon la seconde entité fusionnerait dans l'arbre de la première).
         if (local.customFields['connectorId'] !== config.id || local.customFields['remoteId'] !== remoteOrg.remoteId) {
           this.orgs().update(local.id, { customFields: { ...local.customFields, remoteId: remoteOrg.remoteId, connectorId: config.id } })
         }
@@ -2115,12 +2115,12 @@ export class IamService extends Service {
     for (const remoteUser of directory.users) {
       const orgId = remoteOrgToId.get(remoteUser.orgRemoteId)
       if (!orgId) continue
-      // 一人多部门（兼任语义，dev-plan-nas-authz §2.1）：主归属=orgId（首个部门），挂靠=extraOrgRemoteIds 首个命中。
-      // 引擎侧 primaryOrgId=主归属锚点，orgId 子树按兼任只读——双身份权限并存不冲突。
+      // Une personne, plusieurs départements (sémantique de cumul, dev-plan-nas-authz §2.1) : rattachement principal = orgId (premier département), attache = première atteinte d'extraOrgRemoteIds.
+      // Côté moteur, primaryOrgId = ancre du rattachement principal, le sous-arbre orgId est en lecture de cumul — les permissions des deux identités coexistent sans conflit.
       const secondaryOrgId = (remoteUser.extraOrgRemoteIds ?? []).map((remoteOrgId) => remoteOrgToId.get(remoteOrgId)).find(Boolean)
-// 多主体：身份匹配以 identityLinks（事实源）为准，bindings 仅为兼容存量投影；
-      // 二者都未命中才按工号认领——解绑后 bindings 会被重建为空，此处若只认投影会错判为新人重复建号。
-      // 注意：只认登录身份链（kind≠staff）——任职链是岗位事实，不能用来定位「谁要绑登录身份」。
+// Multi-entité : l'appariement d'identité fait foi sur identityLinks (source de fait), bindings n'est qu'une projection de compatibilité ;
+      // la réclamation par matricule n'a lieu qu'après double échec — après déliaison, bindings est reconstruit vide ; ne considérer que la projection ferait passer à tort pour un nouveau compte en double.
+      // Note : ne reconnaître que le lien d'identité de connexion (kind≠staff) — le lien de fonction est un fait de poste, il ne peut pas servir à localiser « qui va lier une identité de connexion ».
       let local = this.users().get(this.identityLinks().findOne((link) => link.provider === provider
         && link.providerUserId === remoteUser.remoteId
         && link.kind !== 'staff'
@@ -2138,21 +2138,21 @@ export class IamService extends Service {
         }, SYSTEM_ACTOR)
         this.users().update(record.id, secondaryOrgId ? { status: 'active', primaryOrgId: orgId, orgId: secondaryOrgId } : { status: 'active' })
         this.linkIdentity(record.id, { provider, providerUserId: remoteUser.remoteId, corpId: config.corpId, displayName: remoteUser.name, kind: 'login' }, 'connector-sync')
-        // 任职身份链（staff）：与既有用户同口径写入——部门负责人映射与 NAS 数据权限身份反查依赖它
+        // Lien d'identité de fonction (staff) : écrit au même référentiel que l'utilisateur existant — la cartographie des responsables de département et la recherche d'identité NAS en dépendent
         if (remoteUser.remoteUserId) {
           try {
             this.linkIdentity(record.id, { provider, providerUserId: remoteUser.remoteUserId, corpId: config.corpId, displayName: remoteUser.name, kind: 'staff' }, 'connector-sync')
           } catch {
-            // 唯一约束冲突：该 userid 已绑定其他账号，跳过
+            // Conflit d'unicité : ce userid est déjà lié à un autre compte, ignoré
           }
         }
         created++
         continue
       }
-      // 绑定补链：已被人工解绑的主体（bindingExemptions 含 provider|corpId）跳过登录身份链——
-      // 否则解绑会在下一次同步（默认 60 分钟）被静默撤销，用户看到的是「点了没反应」。
-      // 任职身份链（staff）不受豁免约束：它描述的是「此人在组织里的岗位」，是组织事实而非登录凭据，
-      // 豁免它会断掉部门负责人反查与 NAS 数据权限身份反查。
+      // Réparation de lien à la liaison : les entités déliées manuellement (bindingExemptions contient provider|corpId) voient leur lien d'identité de connexion sauté —
+      // sinon la déliaison serait silencieusement annulée à la synchronisation suivante (60 min par défaut), l'utilisateur verrait « clic sans effet ».
+      // Le lien d'identité de fonction (staff) n'est pas soumis à l'exemption : il décrit « le poste de cette personne dans l'organisation », fait d'organisation et non identifiant de connexion,
+      // l'exempter casserait la recherche inversée des responsables de département et la recherche d'identité des permissions de données NAS.
       const exemptKey = `${provider}|${config.corpId ?? ''}`
       const exempted = (local.bindingExemptions ?? []).includes(exemptKey)
       const hasLinkForSubject = (providerUserId: string) => Boolean(this.identityLinks().findOne((link) => link.provider === provider
@@ -2163,20 +2163,20 @@ export class IamService extends Service {
         try {
           this.linkIdentity(local.id, { provider, providerUserId: remoteUser.remoteId, corpId: config.corpId, displayName: remoteUser.name, kind: 'login' }, 'connector-sync')
         } catch {
-          // 唯一约束冲突：该三方身份已绑定其他账号（一人一号），跳过并保留冲突语义
+          // Conflit d'unicité : cette identité tierce est déjà liée à un autre compte (une personne, un compte), ignoré en conservant la sémantique de conflit
         }
       }
-      // 运营身份链（nasAuthz P0）：unionId 供 SSO 登录匹配，userid 供 nasAuthz 身份反查
-      // （hermes X-On-Behalf-User 上报 userid 口径）与 dept_manager_userid_list 负责人映射——两链并存互不覆盖。
+      // Liens d'identité opérationnelle (nasAuthz P0) : l'unionId sert à l'appariement SSO, le userid à la recherche d'identité nasAuthz
+      // (référentiel userid remonté par hermes X-On-Behalf-User) et à la cartographie des responsables dept_manager_userid_list — les deux liens coexistent sans s'écraser.
       if (remoteUser.remoteUserId && !hasLinkForSubject(remoteUser.remoteUserId)) {
         try {
           this.linkIdentity(local.id, { provider, providerUserId: remoteUser.remoteUserId, corpId: config.corpId, displayName: remoteUser.name, kind: 'staff' }, 'connector-sync')
         } catch {
-          // 唯一约束冲突：该 userid 已绑定其他账号，跳过（沿用 unionId 链语义）
+          // Conflit d'unicité : ce userid est déjà lié à un autre compte, ignoré (sémantique du lien unionId reprise)
         }
       }
-      // 兼任归属是组织架构事实（钉钉多部门），不进属性冲突机制，直接落库收敛：
-      // primaryOrgId 锚定主归属，orgId 切到兼任挂靠（引擎对其子树授只读）
+      // Le rattachement de cumul est un fait d'organigramme (multi-départements DingTalk), hors mécanisme de conflit d'attributs, tombé directement en base :
+      // primaryOrgId ancre le rattachement principal, orgId bascule sur l'attache de cumul (le moteur n'y accorde que la lecture du sous-arbre)
       if (secondaryOrgId && (local.primaryOrgId !== orgId || local.orgId !== secondaryOrgId)) {
         this.users().update(local.id, { primaryOrgId: orgId, orgId: secondaryOrgId })
         local = this.users().get(local.id) ?? local
@@ -2209,12 +2209,12 @@ export class IamService extends Service {
       }
     }
 
-    // 负责人同步（dev-plan-nas-authz 步骤 1）：dept_manager_userid_list → 平台 userId（identityLinks 反查）。
-    // 置于用户循环之后：userid 身份链在同一轮先落库，负责人才映射得上（钉钉负责人列表是 userid 口径）。
-    // 远端显式给空列表=清空负责人；字段缺省=不动本地（兼容旧目录源）。映射不上的远端负责人被丢弃（不落悬空 ID）。
-    // 手动锁定（leaderSource='manual'，控制台补录）的组织整段跳过——远端没配负责人的部门靠手动补录兜底。
-    // 先补齐存量链的 kind：本轮刚写入的链在旧数据里与存量链混在同一 (provider,corpId,userId) 组，
-    // 缺 kind 时无法区分登录链与任职链（解绑会连带抹掉任职事实）。
+    // Synchronisation des responsables (dev-plan-nas-authz étape 1) : dept_manager_userid_list → userId plateforme (recherche inverse identityLinks).
+    // Placée après la boucle utilisateurs : les liens d'identité userid tombent en base d'abord dans le même tour, sinon les responsables ne se cartographient pas (la liste DingTalk est au référentiel userid).
+    // Une liste vide explicite côté distant = vider les responsables ; champ absent = ne pas toucher le local (compatibilité des anciennes sources d'annuaire). Un responsable distant sans cartographie est écarté (pas d'ID suspendu).
+    // Les organisations à verrou manuel (leaderSource='manual', complétion console) sont sautées en bloc — les départements sans responsable côté distant reposent sur la complétion manuelle.
+    // Compléter d'abord le kind des liens existants : les liens écrits dans ce tour se mêlent aux liens existants dans le même groupe (provider,corpId,userId) des vieilles données,
+    // sans kind, impossible de distinguer lien de connexion et lien de fonction (la déliaison effacerait le fait de fonction).
     this.backfillIdentityLinkKinds()
     let leaderSynced = 0
     let leaderPinned = 0
@@ -2231,8 +2231,8 @@ export class IamService extends Service {
       leaderSynced++
     }
 
-    // 动态用户组重算快照 + 漂移告警（dev-plan-nas-authz §2.2）：HR 调整 title/org 后
-    // 组成员可能静默变化，同步收尾时统一重算并与快照比对，漂移超阈值或涉及 C 关联组即告警。
+    // Instantané du recalcul des groupes dynamiques + alerte de dérive (dev-plan-nas-authz §2.2) : après un ajustement RH de title/org,
+    // les membres de groupe peuvent changer silencieusement ; la clôture de synchronisation recalcule tout et compare à l'instantané, dérive au-delà du seuil ou touchant un groupe C = alerte.
     const drifts = this.refreshGroupSnapshots('connector-sync')
 
     const result = { ok: true, created, updated, conflicts, frozen, message: t('同步完成：新建 {created}，更新 {updated}，冲突 {conflicts}，离职冻结 {frozen}{leaderSyncedPart}{leaderPinnedPart}{driftsPart}', { created, updated, conflicts, frozen, leaderSyncedPart: leaderSynced > 0 ? t('，负责人 {n}', { n: leaderSynced }) : '', leaderPinnedPart: leaderPinned > 0 ? t('，手动锁定 {n}', { n: leaderPinned }) : '', driftsPart: drifts.length > 0 ? t('，组漂移 {n}', { n: drifts.length }) : '' }) }
@@ -2267,10 +2267,10 @@ export class IamService extends Service {
   }
 
   /**
-   * 连接器自动同步巡检（定时器每分钟调用；POST /api/iam/connectors/auto-sync 为其手动触发口）：
-   * 已启用的配置实例中，lastSyncAt 距今超过生效间隔（intervalMinutes，下限 5 分钟；0=关闭自动同步）
-   * 即全量同步——从未同步过的连接器视为到期（启动即补同步）。actor 记 'auto-sync' 与手动同步区分；
-   * 单配置失败不阻断其余配置（失败已落 lastSyncResult），返回逐条处理结果。
+   * Inspection de la synchronisation automatique des connecteurs (le minuteur appelle chaque minute ; POST /api/iam/connectors/auto-sync en est le déclencheur manuel) :
+   * parmi les instances actives, celle dont lastSyncAt dépasse l'intervalle effectif (intervalMinutes, plancher 5 minutes ; 0 = synchronisation automatique fermée)
+   * est synchronisée intégralement — un connecteur jamais synchronisé compte comme échu (rattrapage dès le démarrage). actor noté 'auto-sync' pour se distinguer de la synchro manuelle ;
+   * l'échec d'une configuration n'arrête pas les autres (l'échec est déjà dans lastSyncResult), renvoie le résultat entrée par entrée.
    */
   async runDueAutoSyncs(now = Date.now()): Promise<Array<{ configId: string; provider: string; name: string; message: string; ok: boolean }>> {
     if (process.env.IAM_CONNECTOR_AUTO_SYNC === 'off') return []
@@ -2299,10 +2299,10 @@ export class IamService extends Service {
   }
 
   /**
-   * 全员名册（组织数据通道）：供已接入的外部应用（人事/绩效等）以机器凭证
-   * （iam.roster.read scope，应用注册凭证经控制台追加授权）一次性拉取在职账号与组织树，
-   * 用于铺排填报任务与 sub → 业务角色映射；id 即 userinfo 的 sub（稳定关联键）。
-   * PII 最小化：不含手机号；已注销账号不出现在名册；每次拉取由控制台层记审计（invoke）。
+   * Nom complet des effectifs (canal de données d'organisation) : permet aux applications externes connectées (RH/performance, etc.) avec des identifiants machine
+   * (scope iam.roster.read, autorisation ajoutée via la console à l'enregistrement de l'application) de tirer en une fois les comptes en poste et l'arbre d'organisations,
+   * pour déployer des tâches de saisie et la cartographie sub → rôle métier ; l'id est le sub du userinfo (clé d'association stable).
+   * Minimisation des PII : sans numéro de mobile ; les comptes fermés absents du registre ; chaque tirage est audité par la couche console (invoke).
    */
   roster(): {
     generatedAt: string
@@ -2342,31 +2342,31 @@ export interface OrgTreeNode extends OrgRecord {
   children: OrgTreeNode[]
 }
 
-// -- 口令哈希（A-09：scrypt KDF + 常数时间比较） ---------------------------------------------
+// -- Hachage de mot de passe (A-09 : KDF scrypt + comparaison à temps constant) ---------------------------------------------
 
-/** scrypt 存储格式前缀：`scrypt$<N>$<r>$<p>$<saltB64>$<hashB64>`（参数随哈希自描述，可平滑调档）。 */
+/** Préfixe du format de stockage scrypt : `scrypt$<N>$<r>$<p>$<saltB64>$<hashB64>` (paramètres autodescriptifs avec le hachage, ajustable en douceur). */
 const SCRYPT_PREFIX = 'scrypt$'
-/** OWASP 推荐下限档（N=2^14, r=8, p=1），单次派生约 16MiB 内存。 */
+/** Palier plancher recommandé OWASP (N=2^14, r=8, p=1), environ 16 MiB de mémoire par dérivation. */
 const SCRYPT_N = 16_384
 const SCRYPT_R = 8
 const SCRYPT_P = 1
 const SCRYPT_KEYLEN = 64
 
-/** 新格式口令哈希（scrypt，随机 16 字节盐）。 */
+/** Hachage de mot de passe au nouveau format (scrypt, sel aléatoire de 16 octets). */
 function hashPasswordScrypt(password: string): string {
   const salt = randomBytes(16)
   const hash = scryptSync(password, salt, SCRYPT_KEYLEN, { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P })
   return `${SCRYPT_PREFIX}${SCRYPT_N}$${SCRYPT_R}$${SCRYPT_P}$${salt.toString('base64')}$${hash.toString('base64')}`
 }
 
-/** 旧格式口令哈希（裸 sha256，存量库口径；仅供无感升级校验，不再用于新写入）。 */
+/** Hachage de mot de passe à l'ancien format (sha256 nu, référentiel des bases existantes ; uniquement pour la vérification de montée invisible, plus jamais en nouvelle écriture). */
 function hashPassword(password: string, salt: string): string {
   return sha256Hex(`${salt}:${password}`)
 }
 
 /**
- * 口令校验（常数时间比较，timingSafeEqual）：新格式走 scrypt 参数复算；
- * 旧格式（裸 sha256 hex）按旧算法复算后同精度比较——两条路径都不因首字节差异提前返回。
+ * Vérification du mot de passe (comparaison à temps constant, timingSafeEqual) : le nouveau format recalcule avec les paramètres scrypt ;
+ * l'ancien format (sha256 hex nu) est recalculé à l'ancien algorithme puis comparé à même précision — aucun des deux chemins ne retourne plus tôt sur différence de premier octet.
  */
 function verifyPasswordHash(record: { passwordHash: string; passwordSalt: string }, password: string): boolean {
   if (record.passwordHash.startsWith(SCRYPT_PREFIX)) {
@@ -2386,7 +2386,7 @@ function verifyPasswordHash(record: { passwordHash: string; passwordSalt: string
 }
 
 // ---------------------------------------------------------------------------
-// 插件
+// Extension
 // ---------------------------------------------------------------------------
 
 declare module '@deepseek-ai/cordis' {

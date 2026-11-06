@@ -1,14 +1,14 @@
 /**
- * 数字员工域纯策略层（domain）—— 无 IO、无时钟副作用、无数据库。
+ * Couche de politique pure du domaine de l'employé numérique (domain) — pas d'IO, pas d'effet de bord d'horloge, pas de base de données.
  *
- * 分层纪律与 plugin-exec-hub/src/domain.ts 同源（Paperclip 决策/IO 分离）：
- *   - 这里只放状态机转换表、密级策略、规范化摘要、stepKey 校验与最小 JSON Schema 校验器；
- *   - 任何「读库 / 读时钟 / 发事件」一律留在服务层（employee/appointment/identity），
- *     把事实（facts）算好再喂进来；
- *   - 本文件供全部工作组消费（准入、permit、调用账本、交付验收均可复用），不 import 本插件任何服务。
+ * Discipline de couche homologue de plugin-exec-hub/src/domain.ts (séparation décisions/IO Paperclip) :
+ *   - ne placer ici que les tables de transition des machines à états, la politique de classification, le résumé canonique, la validation stepKey et un validateur JSON Schema minimal ;
+ *   - tout « lire la base / lire l'horloge / émettre un événement » reste dans la couche service (employee/appointment/identity),
+ *     qui calcule les faits (facts) avant de les fournir ;
+ *   - ce fichier est consommé par tous les groupes de travail (admission, permit, registre des appels, acceptation de livraison peuvent le réutiliser), sans importer aucun service de cette extension.
  *
- * 蓝本依据：《数字员工与平台资源调用-技术关联与施工实施路径》2026-10-15
- *   §D.4（任用授权生效状态机）、§9.3（stepKey 与参数摘要）、§D14（统一业务密级）、§11.5（幂等规则）。
+ * Référence de canevas : « Employé numérique et appels de ressources de la plateforme - corrélations techniques et chemin d'implémentation » 2026-10-15
+ *   §D.4 (machine à états d'effectivité des autorisations de nomination), §9.3 (stepKey et résumé de paramètres), §D14 (classification métier unifiée), §11.5 (règles d'idempotence).
  */
 import { sha256Hex } from '../../platform-core/src/ids.ts'
 import { WORK_DATA_CLASS_ORDER, type WorkDataClass } from '../../platform-core/src/workforce-port.ts'
@@ -26,29 +26,29 @@ import type {
 } from './contract.ts'
 
 // ---------------------------------------------------------------------------
-// 统一业务密级（D14）：全平台工作面唯一口径，到旧协议的映射必须显式完成
+// Classification métier unifiée (D14) : référentiel unique de la face de travail de toute la plateforme, le mappage vers l'ancien protocole doit être explicite
 // ---------------------------------------------------------------------------
 
-/** 业务密级全集（自 workforce-port 的序表派生，避免两处清单漂移）。 */
+/** Ensemble complet des classifications métier (dérivé de la table d'ordre de workforce-port, pour éviter une dérive entre deux listes). */
 export const WORK_DATA_CLASS_VALUES = Object.keys(WORK_DATA_CLASS_ORDER) as WorkDataClass[]
 
-/** 校验并归一业务密级（任用登记 / 请求参数口用）。非法值抛中文错误。 */
+/** Valide et normalise la classification métier (pour l'enregistrement de nomination / les paramètres de requête). Une valeur illégale lève une erreur en chinois. */
 export function validateWorkDataClass(value: unknown): WorkDataClass {
   if (typeof value === 'string' && Object.hasOwn(WORK_DATA_CLASS_ORDER, value)) return value as WorkDataClass
   throw new Error(t('数据密级不合法：{value}（允许：{allowed}）', { value: String(value), allowed: WORK_DATA_CLASS_VALUES.join('/') }))
 }
 
 /**
- * 生效密级 = max(请求方声明的密级, 任用冻结的密级上限)（§4.1 改造点：
- * 密级从可信任务/数据策略推导，不信任运行时自行降低 dataClass）。
- * 未声明时回落任用冻结值——「未声明」不等于「公开」。
+ * Classification effective = max(classification déclarée par le demandeur, plafond figé par la nomination) (point de refonte §4.1 :
+ * la classification se déduit de tâches/de politiques de données de confiance, on ne croit pas un runtime qui s'abaisse seul le dataClass).
+ * Non déclarée → repli sur la valeur figée par la nomination — « non déclaré » ne vaut pas « public ».
  */
 export function effectiveDataClass(requested: WorkDataClass | undefined, appointment: WorkDataClass): WorkDataClass {
   if (requested === undefined) return appointment
   return WORK_DATA_CLASS_ORDER[requested] >= WORK_DATA_CLASS_ORDER[appointment] ? requested : appointment
 }
 
-/** 绝密禁止数字员工处理：模型/资源调用前直接拒绝（禁止映射成可用高等级渠道，D14）。 */
+/** Top secret interdit au traitement par l'employé numérique : refus direct avant tout appel de modèle/ressource (mappage vers un canal haut niveau disponible interdit, D14). */
 export function assertAgentAllowedDataClass(dataClass: WorkDataClass): void {
   if (dataClass === 'topsecret') {
     throw new WorkforceError('ARGUMENT_SCOPE_DENIED', t('绝密数据禁止数字员工处理'))
@@ -56,27 +56,27 @@ export function assertAgentAllowedDataClass(dataClass: WorkDataClass): void {
 }
 
 /**
- * 业务密级 → modelgw 渠道分级标签（显式映射表，禁止静默回落 internal）。
+ * Classification métier → étiquette de niveau de canal modelgw (table de mappage explicite, repli silencieux vers internal interdit).
  *
- * modelgw 的 DataClass 只有 public/internal/secret 三级（plugin-modelgw/src/index.ts）：
- *   - public/internal/secret 与本口径同名同级（本口径 secret=「秘密」，与 modelgw secret 一致）；
- *   - confidential（机密）：Agent 处理需审批，渠道分级无法表达 → 返回 null 由调用方拒绝；
- *   - topsecret（绝密）：本就不允许 Agent 处理（assertAgentAllowedDataClass 已挡）→ 返回 null。
- * 映射不到返回 null，由调用方显式拒绝——绝不悄悄降级为 internal（验收 V14/蓝本 §4.1）。
+ * Le DataClass de modelgw n'a que trois niveaux public/internal/secret (plugin-modelgw/src/index.ts) :
+ *   - public/internal/secret homonymes et de même niveau dans ce référentiel (ici secret = « secret », cohérent avec le secret de modelgw) ;
+ *   - confidential : traitement par l'Agent soumis à approbation, le niveau de canal ne sait pas l'exprimer → renvoie null, refus par l'appelant ;
+ *   - topsecret : le traitement par l'Agent est interdit de toute façon (déjà bloqué par assertAgentAllowedDataClass) → renvoie null.
+ * Sans correspondance, renvoie null, refus explicite par l'appelant — jamais de rétrogradation discrète en internal (acceptation V14/canevas §4.1).
  */
 export function mapWorkDataClassToChannel(dataClass: WorkDataClass): 'public' | 'internal' | 'secret' | null {
   const table: Record<WorkDataClass, 'public' | 'internal' | 'secret' | null> = {
     public: 'public',
     internal: 'internal',
     secret: 'secret',
-    confidential: null, // 机密：Agent 处理需审批，modelgw 渠道分级无此级，映射不到＝拒绝
-    topsecret: null, // 绝密：禁止 Agent 处理，不映射
+    confidential: null, // confidentiel : traitement par l'Agent soumis à approbation, le niveau de canal modelgw n'a pas ce degré, sans correspondance = refus
+    topsecret: null, // top secret : traitement par l'Agent interdit, pas de mappage
   }
   return table[dataClass] ?? null
 }
 
 // ---------------------------------------------------------------------------
-// 状态机（§D.4 / §11.6）：显式转换表 + 断言函数（非法流转抛中文错误）
+// Machines à états (§D.4 / §11.6) : tables de transition explicites + fonctions d'assertion (transition illégale lève une erreur en chinois)
 // ---------------------------------------------------------------------------
 
 export const EMPLOYEE_STATUS_LABELS: Record<EmployeeStatus, string> = { active: '在岗', suspended: '停职', offboarded: '离岗' }
@@ -91,7 +91,7 @@ export const INVOCATION_STATUS_LABELS: Record<InvocationStatus, string> = {
 }
 export const DELIVERABLE_STATUS_LABELS: Record<DeliverableStatus, string> = { submitted: '已提交', accepted: '已验收', rejected: '已退回' }
 
-/** 员工状态：active→suspended/offboarded；suspended→active（复岗）/offboarded；offboarded 终态。 */
+/** État de l'employé : active→suspended/offboarded ; suspended→active (reprise)/offboarded ; offboarded est terminal. */
 export const EMPLOYEE_TRANSITIONS: Record<EmployeeStatus, EmployeeStatus[]> = {
   active: ['suspended', 'offboarded'],
   suspended: ['active', 'offboarded'],
@@ -99,9 +99,9 @@ export const EMPLOYEE_TRANSITIONS: Record<EmployeeStatus, EmployeeStatus[]> = {
 }
 
 /**
- * 任用状态（§D.4）：preparing→effective（探针全过）/revoked（未生效直接撤）/failed（显式判失败）；
- * effective→revoking→revoked；revoking 是唯一可续办的中间态（部分撤权失败留此重试，D.4 第 5 条）；
- * failed 为终态（修正后开新版本，不改写历史）。
+ * État de nomination (§D.4) : preparing→effective (sondes toutes passées)/revoked (révocation directe sans effet)/failed (échec déclaré explicitement) ;
+ * effective→revoking→revoked ; revoking est le seul état intermédiaire reprenable (un échec partiel de retrait de droits y demeure pour nouvelle tentative, D.4 5e) ;
+ * failed est terminal (après correction, on ouvre une nouvelle version, on ne réécrit pas l'historique).
  */
 export const APPOINTMENT_TRANSITIONS: Record<AppointmentStatus, AppointmentStatus[]> = {
   preparing: ['effective', 'revoked', 'failed'],
@@ -111,7 +111,7 @@ export const APPOINTMENT_TRANSITIONS: Record<AppointmentStatus, AppointmentStatu
   failed: [],
 }
 
-/** 资源授权状态：与任用同构；failed→preparing 允许重试激活（探针缺席/失败修复后重跑）。 */
+/** État d'autorisation de ressources : isomorphe à la nomination ; failed→preparing autorise une nouvelle tentative d'activation (relance après correction d'une sonde absente/en échec). */
 export const GRANT_TRANSITIONS: Record<GrantStatus, GrantStatus[]> = {
   preparing: ['effective', 'failed', 'revoked'],
   effective: ['revoking'],
@@ -120,7 +120,7 @@ export const GRANT_TRANSITIONS: Record<GrantStatus, GrantStatus[]> = {
   failed: ['preparing'],
 }
 
-/** 工作授权：active→revoked/expired；撤销/过期均终态（旧 permit 一律不复活，V07）。 */
+/** Autorisation de travail : active→revoked/expired ; révoqué/expiré sont terminaux (un ancien permit ne ressuscite jamais, V07). */
 export const PERMIT_TRANSITIONS: Record<PermitStatus, PermitStatus[]> = {
   active: ['revoked', 'expired'],
   revoked: [],
@@ -128,9 +128,9 @@ export const PERMIT_TRANSITIONS: Record<PermitStatus, PermitStatus[]> = {
 }
 
 /**
- * 调用状态（§9.3）：reserved 为唯一起点；approval_required/rate_limited/outcome_unknown
- * 是可收敛中间态（审批回写/重试收敛/人工核验回写）；其余为终态。
- * outcome_unknown 只允许 →completed/failed（reconcile 人工核验后），禁止直接重试写入（§11.5 第 4 条）。
+ * État d'appel (§9.3) : reserved est l'unique point de départ ; approval_required/rate_limited/outcome_unknown
+ * sont des états intermédiaires convergents (écriture retour d'approbation/convergence sur tentative/vérification humaine) ; les autres sont terminaux.
+ * outcome_unknown n'autorise que →completed/failed (après vérification humaine reconcile), nouvelle tentative d'écriture directe interdite (§11.5 4e).
  */
 export const INVOCATION_TRANSITIONS: Record<InvocationStatus, InvocationStatus[]> = {
   reserved: ['completed', 'denied', 'approval_required', 'rate_limited', 'failed', 'outcome_unknown', 'cancelled'],
@@ -143,7 +143,7 @@ export const INVOCATION_TRANSITIONS: Record<InvocationStatus, InvocationStatus[]
   cancelled: [],
 }
 
-/** 交付物：submitted→accepted/rejected；rejected 终态（退回重做＝新版本新记录，§8.2 版本不合并）。 */
+/** Livrable : submitted→accepted/rejected ; rejected est terminal (retour pour refaire = nouvelle version, nouvel enregistrement, §8.2 pas de fusion de versions). */
 export const DELIVERABLE_TRANSITIONS: Record<DeliverableStatus, DeliverableStatus[]> = {
   submitted: ['accepted', 'rejected'],
   accepted: [],
@@ -163,38 +163,38 @@ function assertTransition(labels: Record<string, string>, table: Record<string, 
   }
 }
 
-/** 员工状态流转断言：非法流转抛中文错误（由路由层 400）。 */
+/** Assertion de transition d'état de l'employé : transition illégale lève une erreur en chinois (400 par la couche routes). */
 export function employeeStatusTransition(from: EmployeeStatus, to: EmployeeStatus): void {
   assertTransition(EMPLOYEE_STATUS_LABELS, EMPLOYEE_TRANSITIONS, from, to, t('员工'))
 }
 
-/** 任用状态流转断言。 */
+/** Assertion de transition d'état de nomination. */
 export function appointmentStatusTransition(from: AppointmentStatus, to: AppointmentStatus): void {
   assertTransition(APPOINTMENT_STATUS_LABELS, APPOINTMENT_TRANSITIONS, from, to, t('任用'))
 }
 
-/** 资源授权状态流转断言。 */
+/** Assertion de transition d'état d'autorisation de ressources. */
 export function grantStatusTransition(from: GrantStatus, to: GrantStatus): void {
   assertTransition(GRANT_STATUS_LABELS, GRANT_TRANSITIONS, from, to, t('资源授权'))
 }
 
-/** 工作授权（permit）状态流转断言。 */
+/** Assertion de transition d'état de l'autorisation de travail (permit). */
 export function permitStatusTransition(from: PermitStatus, to: PermitStatus): void {
   assertTransition(PERMIT_STATUS_LABELS, PERMIT_TRANSITIONS, from, to, t('工作授权'))
 }
 
-/** 调用账本状态流转断言。 */
+/** Assertion de transition d'état du registre des appels. */
 export function invocationStatusTransition(from: InvocationStatus, to: InvocationStatus): void {
   assertTransition(INVOCATION_STATUS_LABELS, INVOCATION_TRANSITIONS, from, to, t('工作调用'))
 }
 
-/** 交付物状态流转断言。 */
+/** Assertion de transition d'état du livrable. */
 export function deliverableStatusTransition(from: DeliverableStatus, to: DeliverableStatus): void {
   assertTransition(DELIVERABLE_STATUS_LABELS, DELIVERABLE_TRANSITIONS, from, to, t('交付物'))
 }
 
 // ---------------------------------------------------------------------------
-// 任用有效期窗口（appointmentInEffect）
+// Fenêtre de validité de la nomination (appointmentInEffect)
 // ---------------------------------------------------------------------------
 
 function toMs(input: string | number | Date): number | null {
@@ -205,8 +205,8 @@ function toMs(input: string | number | Date): number | null {
 }
 
 /**
- * 任用是否处于生效窗口：status=effective 且 effectiveFrom ≤ now ≤ effectiveUntil（空串＝长期）。
- * 时间解析失败的窗口按「不生效」处理（fail-closed，诚实缺位）。
+ * La nomination est-elle dans sa fenêtre d'effectivité : status=effective et effectiveFrom ≤ now ≤ effectiveUntil (chaîne vide = à durée indéterminée).
+ * Une fenêtre dont l'analyse temporelle échoue est traitée « non en vigueur » (fail-closed, absence honnête).
  */
 export function appointmentInEffect(
   appt: Pick<AppointmentRecord, 'status' | 'effectiveFrom' | 'effectiveUntil'>,
@@ -225,14 +225,14 @@ export function appointmentInEffect(
 }
 
 // ---------------------------------------------------------------------------
-// 规范化 JSON 与参数摘要（§9.3 / §11.5）：键排序稳定序列化
+// JSON canonique et résumé de paramètres (§9.3 / §11.5) : sérialisation stable par tri des clés
 // ---------------------------------------------------------------------------
 
 /**
- * 规范化 JSON：对象键按字典序排序、剔除 undefined 值、定界符无空白——
- * 同一参数对象无论键序如何，摘要一致；不同参数摘要必不同（步骤冲突判定的基础）。
- * 仅接受 JSON 可表达数据（string/number/boolean/null/array/object），
- * function/symbol/bigint 等抛中文错误（参数摘要不可伪造确定性）。
+ * JSON canonique : clés d'objet triées lexicographiquement, valeurs undefined éliminées, délimiteurs sans blanc —
+ * un même objet de paramètres donne le même résumé quel que soit l'ordre des clés ; des paramètres différents donnent nécessairement des résumés différents (base du jugement de conflit d'étape).
+ * N'accepte que des données exprimables en JSON (string/number/boolean/null/array/object),
+ * function/symbol/bigint etc. lèvent une erreur en chinois (le résumé de paramètres ne peut pas voir sa déterminabilité falsifiée).
  */
 export function canonicalJson(value: unknown): string {
   if (value === undefined || value === null) return 'null'
@@ -249,18 +249,18 @@ export function canonicalJson(value: unknown): string {
   throw new Error(t('参数含不可规范化数据（{type}），无法计算稳定摘要', { type: typeof value }))
 }
 
-/** 参数摘要：sha256(canonicalJson)。相同 stepKey 不同参数 → 摘要不同 → STEP_ARGUMENT_CONFLICT。 */
+/** Résumé de paramètres : sha256(canonicalJson). Même stepKey avec des paramètres différents → résumés différents → STEP_ARGUMENT_CONFLICT. */
 export function argsHashOf(value: unknown): string {
   return sha256Hex(canonicalJson(value))
 }
 
 // ---------------------------------------------------------------------------
-// stepKey 校验（§9.3）：调用方提出的业务步骤引用，不是可信身份
+// Validation du stepKey (§9.3) : référence d'étape métier proposée par l'appelant, pas une identité de confiance
 // ---------------------------------------------------------------------------
 
 /**
- * stepKey 合法性：契约 STEP_KEY_PATTERN（1-96 位，字母开头，允许数字/点/下划线/连字符）。
- * 不合法抛 WorkforceError('ARGUMENT_SCOPE_DENIED')（与参数 Schema 校验不过同码，路由层映射 400）。
+ * Validité du stepKey : STEP_KEY_PATTERN du contrat (1-96 caractères, commence par une lettre, chiffres/point/souligné/tiret permis).
+ * Illégal lève WorkforceError('ARGUMENT_SCOPE_DENIED') (même code qu'un échec de validation de schéma de paramètres, mappé 400 par la couche routes).
  */
 export function assertValidStepKey(stepKey: string): void {
   if (typeof stepKey !== 'string' || !STEP_KEY_PATTERN.test(stepKey)) {
@@ -269,13 +269,13 @@ export function assertValidStepKey(stepKey: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// 资源授权期望（ResourceGrantSpec）校验：任用登记口与适配器共用的最小结构约束
+// Validation de l'autorisation de ressources souhaitée (ResourceGrantSpec) : contraintes structurelles minimales partagées par l'enregistrement de nomination et les adaptateurs
 // ---------------------------------------------------------------------------
 
 export const GRANT_KINDS = ['mcp', 'connector', 'model', 'skill', 'nas', 'app'] as const
 export const GRANT_RISKS = ['read', 'write', 'admin'] as const
 
-/** 校验并归一授权期望：kind/registryId/actions/risk 必备；写动作必须显式列入 actions（附录 A 决策 5）。 */
+/** Valide et normalise l'autorisation souhaitée : kind/registryId/actions/risk requis ; les actions d'écriture doivent être listées explicitement dans actions (annexe A décision 5). */
 export function validateGrantSpec(input: unknown): ResourceGrantSpec {
   if (!input || typeof input !== 'object') throw new Error(t('资源授权项不合法：须为对象（kind/registryId/actions/risk）'))
   const spec = input as Record<string, unknown>
@@ -309,7 +309,7 @@ export function validateGrantSpec(input: unknown): ResourceGrantSpec {
 }
 
 // ---------------------------------------------------------------------------
-// 最小 JSON Schema 校验器（§9.2：服务端参数约束，校验不过＝ARGUMENT_SCOPE_DENIED）
+// Validateur JSON Schema minimal (§9.2 : contraintes de paramètres côté serveur, échec = ARGUMENT_SCOPE_DENIED)
 // ---------------------------------------------------------------------------
 
 function jsonTypeOf(value: unknown): string {
@@ -327,16 +327,16 @@ function matchesType(value: unknown, type: string): boolean {
     case 'integer': return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)
     case 'boolean': return typeof value === 'boolean'
     case 'null': return value === null
-    default: return false // 未知类型关键字一律不匹配（fail-closed）
+    default: return false // tout mot-clé de type inconnu ne correspond jamais (fail-closed)
   }
 }
 
 /**
- * 最小 JSON Schema 校验器（够用即可）：支持
- *   type（含数组）/ required / properties / additionalProperties:false / enum /
- *   items / maxRows（数组行数上限，契约 constraints 示例口径）/ minLength / maxLength / minimum / maximum。
- * 校验通过返回 null；不通过返回首条中文错误消息（带参数路径）。
- * 不支持的 Schema 关键字静默忽略——本函数只做「声明过的约束」，不冒充完整 JSON Schema。
+ * Validateur JSON Schema minimal (suffisant pour l'usage) : prend en charge
+ *   type (tableaux compris) / required / properties / additionalProperties:false / enum /
+ *   items / maxRows (plafond de lignes d'un tableau, référentiel d'exemple des constraints du contrat) / minLength / maxLength / minimum / maximum.
+ * Retourne null si la validation passe ; sinon la première erreur en chinois (avec chemin du paramètre).
+ * Les mots-clés de schéma non pris en charge sont ignorés silencieusement — cette fonction n'applique que « les contraintes déclarées », sans se faire passer pour un JSON Schema complet.
  */
 export function validateAgainstSchema(
   value: unknown,

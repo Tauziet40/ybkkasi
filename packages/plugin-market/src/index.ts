@@ -1,32 +1,32 @@
 /**
- * @dsh-ops/plugin-market —— 第三方插件市场 + 开发者身份域（生态设计 v1.2 第 3/5/7 步）。
+ * @dsh-ops/plugin-market — marché de plugins tiers + domaine d'identité développeur (conception écosystème v1.2 étapes 3/5/7).
  *
- * 契约五面（L0 声明式，无任何可执行代码）：
- *   plugin.yaml                 元数据 + capabilities_request + sandbox + L0 内容（提示词包）
- *   manifest/permissions.yaml   权限声明（requested；安装时企业逐项审批 → approved）
- *   manifest/api.yaml           声明式提供面（L0 阶段仅登记描述）
- *   manifest/events.yaml        事件声明（订阅/发射均收敛在 plugin:<id>: 命名空间）
- *   manifest/billing.yaml       计量声明（兼容字段：仅 meter key/单位参与计量登记，金额侧一律零价快照）
+ * Les cinq faces du contrat (L0 déclaratif, sans aucun code exécutable) :
+ *   plugin.yaml                 métadonnées + capabilities_request + sandbox + contenu L0 (paquets de prompts)
+ *   manifest/permissions.yaml   déclaration de permissions (requested ; à l'installation, l'entreprise approuve point par point → approved)
+ *   manifest/api.yaml           face d'offre déclarative (en étape L0, simple enregistrement de description)
+ *   manifest/events.yaml        déclaration d'événements (souscription/émission confinées dans l'espace de noms plugin:<id>:)
+ *   manifest/billing.yaml       déclaration de metering (champ de compatibilité : seuls meter key/unité participent à l'enregistrement du metering, côté montant toujours instantané à prix zéro)
  *
- * 市场准入门禁（硬性）：sandbox 仅受理 L0——L1 有码沙箱（第 10 步）交付前，
- * 任何有码插件提交直接拒绝，杜绝「内部信任」例外。
+ * Barrière d'entrée du marché (dure) : sandbox n'accepte que L0 — avant la livraison du bac à sable L1 à code (étape 10),
+ * toute soumission de plugin avec code est rejetée d'emblée, pour exclure toute exception de « confiance interne ».
  *
- * 开发者身份域（M2）：独立于内部员工 iam 域；Ed25519 发布者密钥对验签提交。
- * 签名对象 = 五面文件内容指纹（按文件名排序拼接的 SHA-256）。
+ * Domaine d'identité développeur (M2) : indépendant du domaine iam des employés internes ; vérification de signature des soumissions par paire de clés Ed25519 de l'éditeur.
+ * Objet signé = empreinte du contenu des cinq faces (SHA-256 de la concaténation triée par nom de fichier).
  */
 import { randomBytes } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
 import { PlatformEvents, newId, parseYaml, sha256Hex, type Collection, type RecordBase } from '../../platform-core/src/index.ts'
-// M2 筑基：Ed25519 验签基建抽升 platform-core（plugin-update 发布清单验签共用同一套）；
-// 此处按市场语境别名 re-export，dshctl 脚手架等既有引用不受影响。
+// Fondation M2 : l'infrastructure de vérification Ed25519 est hissée dans platform-core (la vérification du manifeste de publication de plugin-update partage la même) ;
+// ici simple ré-export aliasé dans le contexte du marché, les références existantes (scaffold dshctl, etc.) ne sont pas affectées.
 import { generateEd25519KeyPair, isValidEd25519PublicKeyBase64, signEd25519, verifyEd25519 } from '../../platform-core/src/index.ts'
 import { t } from '../../platform-i18n/src/index.ts'
 export { generateEd25519KeyPair as generateDeveloperKeyPair, signEd25519 as signFingerprint, verifyEd25519 as verifySignature }
 import * as marketTools from './tools.ts'
 
 // ---------------------------------------------------------------------------
-// 数据模型
+// Modèle de données
 // ---------------------------------------------------------------------------
 
 export interface DeveloperRecord extends RecordBase {
@@ -36,17 +36,17 @@ export interface DeveloperRecord extends RecordBase {
   status: 'active' | 'suspended'
   passwordSalt: string
   passwordHash: string
-  /** 发布者 Ed25519 公钥（SPKI DER → base64）。 */
+  /** Clé publique Ed25519 de l'éditeur (SPKI DER → base64). */
   publicKey: string
-  /** 插件 id 命名空间（NEW-E-01 轻量版）：com.<namespace>.* 归属段；缺省取注册账号品牌段。 */
+  /** Espace de noms d'id de plugin (NEW-E-01 version légère) : segment d'appartenance com.<namespace>.* ; par défaut, segment de marque du compte enregistré. */
   namespace?: string
   company?: string
-  /** 收款账户登记（资金通道依赖清单就位前的登记位，v1.2 §六）。 */
+  /** Enregistrement du compte d'encaissement (emplacement d'enregistrement en attendant la liste des dépendances du canal financier, v1.2 §6). */
   payoutAccount?: string
   principalId: string
 }
 
-/** 契约五面解析结果。 */
+/** Résultat d'analyse des cinq faces du contrat. */
 export interface PluginManifest {
   id: string
   version: string
@@ -76,12 +76,12 @@ export interface PluginSubmissionRecord extends RecordBase {
   developerId: string
   developerName: string
   status: PluginStatus
-  /** 五面原文（文件路径 → 内容）。 */
+  /** Texte original des cinq faces (chemin de fichier → contenu). */
   files: Record<string, string>
   parsed: PluginManifest
   fingerprint: string
   signature: string
-  /** L0 内容指纹：提示词/配置变更 = 行为变更，强制重走审批（M5）。 */
+  /** Empreinte du contenu L0 : changer prompts/configuration = changer le comportement, retour obligatoire par l'approbation (M5). */
   contentHash: string
   reviewNote?: string
   reviewedBy?: string
@@ -93,7 +93,7 @@ export interface PluginInstallRecord extends RecordBase {
   version: string
   orgId: string
   tenantId: string
-  /** 安装时企业审批通过的能力子集（approved ⊆ requested）。 */
+  /** Sous-ensemble de capacités approuvé par l'entreprise à l'installation (approved ⊆ requested). */
   capabilities: string[]
   permissions: string[]
   status: 'running' | 'suspended' | 'uninstalled'
@@ -101,12 +101,12 @@ export interface PluginInstallRecord extends RecordBase {
 }
 
 // ---------------------------------------------------------------------------
-// 契约校验
+// Validation du contrat
 // ---------------------------------------------------------------------------
 
 export const REQUIRED_FILES = ['plugin.yaml', 'manifest/permissions.yaml', 'manifest/api.yaml', 'manifest/events.yaml', 'manifest/billing.yaml']
 
-/** L0 内容静态扫描规则（复用 skillhub 治理模式；声明式内容变更=行为变更）。 */
+/** Règles d'analyse statique du contenu L0 (réutilise le mode de gouvernance de skillhub ; changement de contenu déclaratif = changement de comportement). */
 const CONTENT_BLOCK_RULES: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /rm\s+-rf\s+\//i, reason: '疑似破坏性命令' },
   { pattern: /sk-[A-Za-z0-9]{16,}/, reason: '疑似明文密钥' },
@@ -125,7 +125,7 @@ export function contentHashOf(manifest: PluginManifest): string {
   return sha256Hex(JSON.stringify(manifest.content))
 }
 
-/** 解析并校验契约五面（结构性校验 + 准入门禁）。 */
+/** Analyse et validation des cinq faces du contrat (validation structurelle + barrière d'entrée). */
 export function parseManifest(files: Record<string, string>): PluginManifest {
   for (const file of REQUIRED_FILES) {
     if (typeof files[file] !== 'string' || files[file]!.trim() === '') {
@@ -198,17 +198,17 @@ export function parseManifest(files: Record<string, string>): PluginManifest {
   return manifest
 }
 
-// Ed25519 验签/密钥/签名三件套已抽升 platform-core（M2 筑基，文件顶部 re-export），
-// plugin-update 发布清单验签与市场五面验签共用同一套基建。
+// Le trio vérification de signature/clé/signature Ed25519 a été hissé dans platform-core (fondation M2, ré-export en tête de fichier),
+// la vérification du manifeste de publication de plugin-update et celle des cinq faces du marché partagent la même infrastructure.
 
-/** 能力 → 可消耗资源前缀（运行时对账 M5 的授权基线）。 */
+/** Capacité → préfixe de ressource consommable (base d'autorisation de la réconciliation à l'exécution M5). */
 const CAPABILITY_RESOURCE_MAP: Record<string, string> = {
   'model-gateway.invoke': 'model:*',
   'knowledgebase.read': 'kb:*',
 }
 
 // ---------------------------------------------------------------------------
-// 服务
+// Services
 // ---------------------------------------------------------------------------
 
 export class MarketService extends Service {
@@ -216,8 +216,8 @@ export class MarketService extends Service {
 
   constructor(ctx: Context) {
     super(ctx, 'market')
-    // 自营种子须在服务构造器内做（插件 apply 里 ctx.market 未注入，cordis 红线）。
-    // 仅在 DEMO_SEED=1 演示环境下注入自营商业插件，生产基线不写入任何计费价格簿/自营供给。
+    // La graine d'offre propre doit être faite dans le constructeur du service (dans le apply de l'extension, ctx.market n'est pas encore injecté, ligne rouge cordis).
+    // Les plugins commerciaux propres ne sont injectés que dans l'environnement de démonstration DEMO_SEED=1 ; la base de production n'écrit aucun prix de facturation/offre propre.
     if (process.env.DEMO_SEED === '1') {
       seedOfficialPlugins(this)
     }
@@ -239,7 +239,7 @@ export class MarketService extends Service {
     return this.ctx.opsStorage.collection<PluginInstallRecord>('market:installs')
   }
 
-  // -- 开发者身份域（M2：独立于内部员工 iam） --------------------------------
+  // -- Domaine d'identité développeur (M2 : indépendant de l'iam des employés internes) --------------------------------
 
   registerDeveloper(input: { username: string; displayName: string; email: string; password: string; publicKey: string; company?: string; payoutAccount?: string; namespace?: string }): { developer: DeveloperRecord; token: string } {
     if (!/^[a-z][a-z0-9_-]{2,31}$/.test(input.username)) throw new Error(t('开发者账号格式非法（^[a-z][a-z0-9_-]{2,31}$）'))
@@ -249,9 +249,9 @@ export class MarketService extends Service {
     if (!isValidEd25519PublicKeyBase64(input.publicKey)) {
       throw new Error(t('发布者公钥格式非法（应为 Ed25519 SPKI DER base64）'))
     }
-    // NEW-E-01 轻量版：注册即绑定插件 id 命名空间（com.<namespace>.* 归属段）。
-    // 缺省取注册账号的品牌段（'-' 前段，如 acme-dev → acme）；显式指定须为合法 id 段字符域
-    //（品牌段含 id 非法字符——如下划线——时按原值入册：该账号提交 com.* 插件会被命名空间闸拦下）
+    // NEW-E-01 version légère : l'enregistrement lie l'espace de noms d'id de plugin (segment d'appartenance com.<namespace>.*).
+    // Par défaut, segment de marque du compte enregistré (partie avant '-', ex. acme-dev → acme) ; une valeur explicite doit rester dans le domaine de caractères légaux d'un segment d'id
+    //(si le segment de marque contient des caractères illégaux pour un id — ex. souligné — il est inscrit tel quel : les soumissions com.* de ce compte seront bloquées par la barrière d'espace de noms)
     const namespace = input.namespace ?? input.username.split('-')[0]!
     if (input.namespace !== undefined && !/^[a-z0-9][a-z0-9-]{0,30}$/.test(namespace)) {
       throw new Error(t('插件 id 命名空间非法（^[a-z0-9][a-z0-9-]{0,30}$）：{namespace}', { namespace }))
@@ -277,7 +277,7 @@ export class MarketService extends Service {
       principalId: credential.principal.id,
     })
     this.ctx.authn.principals().update(credential.principal.id, { refId: record.id })
-    // 开发者主体默认授予平台能力白名单（计量授权，运行时对账基线）
+    // Le principal développeur reçoit par défaut la liste blanche de capacités de la plateforme (autorisation de metering, base de la réconciliation à l'exécution)
     this.ctx.usage.grantCapabilities(`developer:${record.id}`, ['plugin:*'], 'developer-register')
     return { developer: record, token: this.developerToken(record) }
   }
@@ -301,20 +301,20 @@ export class MarketService extends Service {
     return token
   }
 
-  /** 由令牌主体定位开发者（开发者路由鉴权）。 */
+  /** Localise le développeur depuis le principal du jeton (authentification des routes développeur). */
   developerOfPrincipal(principalId: string): DeveloperRecord | undefined {
     return this.developers().findOne((item) => item.principalId === principalId)
   }
 
-  // -- 提交与审批 ------------------------------------------------------------
+  // -- Soumission et approbation ------------------------------------------------------------
 
   submit(developer: DeveloperRecord, files: Record<string, string>, signature: string): PluginSubmissionRecord {
     const parsed = parseManifest(files)
     if (parsed.publisher !== developer.username) {
       throw new Error(t('plugin.yaml publisher 必须为提交者账号（{account}），收到 {value}', { account: developer.username, value: parsed.publisher }))
     }
-    // NEW-E-01 轻量版：com.<x>.* 插件 id 的归属段必须与提交者命名空间一致，防 com.<品牌>.* 冒认。
-    // 存量兼容：无 namespace 字段的存量开发者不做此检查（保持审批闸现状）
+    // NEW-E-01 version légère : le segment d'appartenance d'un id de plugin com.<x>.* doit coïncider avec l'espace de noms du soumetteur, contre l'usurpation com.<marque>.*.
+    // Compatibilité des préexistants : pas de contrôle pour les développeurs existants sans champ namespace (la barrière d'approbation reste en l'état)
     if (parsed.id.startsWith('com.') && developer.namespace !== undefined) {
       const vendor = parsed.id.slice('com.'.length).split('.')[0] ?? ''
       if (vendor !== developer.namespace) {
@@ -363,7 +363,7 @@ export class MarketService extends Service {
     return this.submissions().update(id, { status: 'rejected', reviewNote: reason, reviewedBy: approver })
   }
 
-  /** 上架后内容变更（同版本内容指纹变化）→ 强制重走审批：旧版本 suspend 待迁移。 */
+  /** Changement de contenu après publication (empreinte de contenu modifiée à version identique) → retour obligatoire par l'approbation : ancienne version suspendue en attente de migration. */
   suspend(id: string, reason: string): PluginSubmissionRecord {
     const record = this.requireSubmission(id)
     const updated = this.submissions().update(id, { status: 'suspended', reviewNote: reason })
@@ -377,7 +377,7 @@ export class MarketService extends Service {
     return this.submissions().find((item) => item.status === 'listed')
   }
 
-  // -- 安装（权限确认 + 能力固化 + 价格簿登记） ------------------------------
+  // -- Installation (confirmation de permissions + figage des capacités + enregistrement au tarif) ------------------------------
 
   install(input: {
     pluginId: string
@@ -396,7 +396,7 @@ export class MarketService extends Service {
         throw new Error(t('能力 {cap} 不在插件请求清单内（approved ⊆ requested）', { cap }))
       }
     }
-    // QA E-02：权限面同口径——approvedPermissions 未做 ⊆ requested 校验，可授予插件从未申请的权限点
+    // QA E-02 : même référentiel sur la face permissions — approvedPermissions sans validation ⊆ requested permettait d'accorder des points jamais demandés par le plugin
     const requestedPermissions: string[] = submission.parsed.permissions.requested ?? []
     for (const point of input.approvedPermissions ?? []) {
       if (!requestedPermissions.includes(point)) {
@@ -414,12 +414,12 @@ export class MarketService extends Service {
       status: 'running',
       installedBy: input.installedBy,
     })
-    // 能力固化：运行时对账基线（M5）——插件主体只许消耗获批能力对应的资源
+    // Figage des capacités : base de la réconciliation à l'exécution (M5) — le principal du plugin ne peut consommer que les ressources correspondant aux capacités approuvées
     const grantedResources = [`plugin:${input.pluginId}`, ...input.approvedCapabilities.map((cap) => CAPABILITY_RESOURCE_MAP[cap] ?? cap)]
     this.ctx.usage.grantCapabilities(`plugin:${input.pluginId}`, grantedResources, `market-install:${record.id}`)
-    // 计量登记（M0-3 收敛）：安装即写入价格簿，meter key 取 billing.usage[0] 声明
-    //（L0 运行时计量 meterPromptUse 依赖该键过 record() 硬校验）；金额侧一律零价快照——
-    // 第三方声明价不再入账（商业模式为私有化年费+治理包，无转售分成/代收）
+    // Enregistrement au metering (convergence M0-3) : l'installation écrit le tarif, meter key pris de la déclaration billing.usage[0]
+    //(le metering d'exécution L0 meterPromptUse dépend de cette clé pour la validation dure de record()) ; côté montant, toujours instantané à prix zéro —
+    // les prix déclarés par les tiers n'entrent plus en compte (modèle économique : licence annuelle privatif + pack de gouvernance, ni revente avec partage ni encaissement)
     const usageEntry = submission.parsed.billing.usage[0]
     if (usageEntry) {
       this.ctx.usage.upsertPrice({
@@ -453,7 +453,7 @@ export class MarketService extends Service {
     return this.installs().find((item) => item.orgId === orgId && item.status === 'running')
   }
 
-  /** L0 运行时：读取已安装插件的提示词包（Agent 消费面，纯声明式内容）。 */
+  /** Exécution L0 : lit le paquet de prompts d'un plugin installé (face de consommation de l'Agent, contenu purement déclaratif). */
   promptPacks(orgId: string): Array<{ pluginId: string; version: string; name: string; description: string; template: string }> {
     const packs: Array<{ pluginId: string; version: string; name: string; description: string; template: string }> = []
     for (const install of this.installedFor(orgId)) {
@@ -466,7 +466,7 @@ export class MarketService extends Service {
     return packs
   }
 
-  /** L0 内容计量：Agent 每次取用提示词包 → usage 事件（L3 计费）。 */
+  /** Metering du contenu L0 : chaque reprise d'un paquet de prompts par l'Agent → événement usage (facturation L3). */
   meterPromptUse(orgId: string, pluginId: string, promptName: string, subject: string): void {
     const install = this.installs().findOne((item) => item.pluginId === pluginId && item.orgId === orgId && item.status === 'running')
     if (!install) throw new Error(t('插件 {plugin} 未在组织 {org} 安装', { plugin: pluginId, org: orgId }))
@@ -475,9 +475,9 @@ export class MarketService extends Service {
     if (!submission.parsed.content.prompts.some((prompt) => prompt.name === promptName)) {
       throw new Error(t('提示词包不存在：{name}', { name: promptName }))
     }
-    // 确定性幂等键：安装+主体+提示词包+UTC 分钟窗——同业务重试（meterPromptUse 无业务单据 ID
-    // 可用）不重复计量，不同业务（不同安装/主体/提示词包/窗口）不互撞；分钟级去重窗口与
-    // usage 自动幂等键（autoIdempotencyKey）同口径
+    // Clé idempotente déterministe : installation+principal+paquet de prompts+fenêtre UTC à la minute — une retry du même métier (meterPromptUse n'a pas d'ID de document
+    // métier disponible) ne compte pas deux fois, des métiers différents (installation/principal/paquet/fenêtre différents) ne se collisionnent pas ; fenêtre de déduplication à la minute
+    // alignée sur la clé idempotente automatique d'usage (autoIdempotencyKey)
     const dedupWindow = new Date().toISOString().slice(0, 16)
     this.ctx.usage.record({
       org: orgId,
@@ -498,7 +498,7 @@ export class MarketService extends Service {
 }
 
 // ---------------------------------------------------------------------------
-// 插件
+// Extension
 // ---------------------------------------------------------------------------
 
 declare module '@deepseek-ai/cordis' {
@@ -516,8 +516,8 @@ export function apply(ctx: Context) {
 }
 
 // ---------------------------------------------------------------------------
-// 平台自营首批供给（M3 消解：L0 供给空窗 → 标杆场景演示包，零价快照计量）
-// 走与第三方完全相同的提交/签名/审批流水线（吃自己的狗粮）。
+// Première offre propre de la plateforme (résorption M3 : creux d'offre L0 → paquets de démonstration de scénarios étalons, metering en instantané à prix zéro)
+// passe par exactement la même chaîne soumission/signature/approbation que les tiers (on mange sa propre nourriture de chien).
 // ---------------------------------------------------------------------------
 
 const OFFICIAL_PLUGINS: Array<{ id: string; name: string; description: string; template: string; usageKey: string; unit: string }> = [
@@ -539,9 +539,9 @@ const OFFICIAL_PLUGINS: Array<{ id: string; name: string; description: string; t
 ]
 
 function seedOfficialPlugins(market: MarketService): void {
-  // ctx 必须取在 try 外：catch 也要用它记日志（曾因 ctx 定义在 try 内，种子一旦抛错
-  // catch 自身 ReferenceError 并把错误升级为 MarketService 构造失败——console 的 inject
-  // 随之缺失、插件被 cordis 静默挂起，实例 /api/health 404 且零日志，2026-09-16 M2 排障实证）
+  // ctx doit être pris hors du try : le catch doit aussi s'en servir pour logger (ctx défini dans le try, une graine qui jetait
+  // transformait le catch lui-même en ReferenceError et élevait l'erreur en échec de construction du MarketService — l'injection
+  // de console manquait alors, l'extension restait suspendue silencieusement par cordis, /api/health de l'instance en 404 sans aucun log, constat de dépannage M2 2026-09-16)
   const ctx = market.ctx
   try {
     if (market.submissions().count() > 0) return

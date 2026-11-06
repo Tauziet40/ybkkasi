@@ -1,13 +1,13 @@
 /**
- * NAS 文件资源适配器（§4.5/D.3：文件能力 ≠ 知识检索能力；逐动作授权）。
+ * Adaptateur de ressources de fichiers NAS (§4.5/D.3 : capacité de fichiers ≠ capacité de recherche de connaissances ; autorisation action par action).
  *
- * 身份纪律（§4.5-1）：
- *   - 无人值守：岗位服务主体——actor.id 用 `agent:<agentId>`（含冒号，nasRegistry
- *     onBehalfHeaders 不产生 X-On-Behalf-User 头，不冒充真人权限）；
- *   - 人代办：args.onBehalfUser 仅在 work.requesterUserId 校验一致时透传
- *     （requesterUserId 由 port 层从 human 链服务端写入；缺失一律忽略并注释）。
- * 写入纪律（§4.5-2）：write 内容仅允许来自受控 artifact（args.artifactId →
- * workforceArtifacts 读受控 staging），禁止本地路径（args.localPath 出现即拒绝）。
+ * Discipline d'identité (§4.5-1) :
+ *   - Sans surveillance : sujet de service de poste — actor.id prend `agent:<agentId>` (avec deux-points, le
+ *     onBehalfHeaders de nasRegistry ne produit pas d'en-tête X-On-Behalf-User, pas d'usurpation des permissions d'un humain) ;
+ *   - Mandat humain : args.onBehalfUser n'est transmis que s'il concorde avec work.requesterUserId après vérification
+ *     (requesterUserId est écrit côté serveur par la couche port depuis la chaîne human ; en son absence, toujours ignoré et consigné).
+ * Discipline d'écriture (§4.5-2) : le contenu de write ne peut provenir que d'un artefact contrôlé (args.artifactId →
+ * lecture du staging contrôlé par workforceArtifacts), chemin local interdit (toute apparition de args.localPath est refusée).
  */
 import { readFile } from 'node:fs/promises'
 import type {
@@ -23,7 +23,7 @@ import { ARTIFACT_MAX_BYTES } from '../contract.ts'
 import { t } from '../../../platform-i18n/src/index.ts'
 import type { WorkExecutionContext } from '../../../platform-core/src/workforce-port.ts'
 
-/** nasRegistry 结构化探测面（真实签名见 plugin-nas/src/index.ts NasRegistryService）。 */
+/** Face de sondage structurée de nasRegistry (signature réelle dans plugin-nas/src/index.ts NasRegistryService). */
 interface NasRegistryProbe {
   get?: (id: string) => { id: string; name: string; status: string } | undefined
   listFiles?: (id: string, path?: string, actor?: { id: string; name: string }) => Promise<unknown>
@@ -32,7 +32,7 @@ interface NasRegistryProbe {
   uploadFile?: (id: string, input: { buffer?: Buffer; localFile?: string; destPath: string; actor: { id: string; name: string }; onBehalf?: boolean }) => Promise<{ path: string; sizeBytes: number }>
 }
 
-/** workforceArtifacts 结构化探测面（本插件服务，readBase64 真实签名）。 */
+/** Face de sondage structurée de workforceArtifacts (service de cette extension, signature réelle de readBase64). */
 interface ArtifactsProbe {
   readBase64?: (caller: { kind: 'machine'; principalId: string; refType?: string; refId?: string }, artifactId: string) => Promise<string>
   get?: (caller: { kind: 'machine'; principalId: string; refType?: string; refId?: string }, artifactId: string) => Promise<ArtifactRecord>
@@ -55,7 +55,7 @@ export function createNasAdapter(ctx: {
   const denied = (message: string, gatewayRef?: Record<string, unknown>): AdapterInvokeResult =>
     ({ ok: false, message, gatewayRef: { outcome: 'denied', ...gatewayRef } })
 
-  /** pathPrefixes 业务范围复核（invocation 层校验 args.path，此处对全部路径参数再复核）。 */
+  /** Revérification du périmètre métier pathPrefixes (la couche invocation valide args.path, ici on revérifie tous les paramètres de chemin). */
   const assertPathScope = (tool: AdapterInvokeInput['tool'], path: string): string | null => {
     const prefixes = tool.constraints?.['pathPrefixes']
     if (!Array.isArray(prefixes) || prefixes.length === 0) return null
@@ -63,10 +63,10 @@ export function createNasAdapter(ctx: {
     return t('路径 {path} 超出授权目录范围', { path })
   }
 
-  /** 人代办主体：仅当 work.requesterUserId 存在且与 args.onBehalfUser 一致才透传真人链。 */
+  /** Sujet du mandat humain : la chaîne humaine n'est transmise que si work.requesterUserId existe et concorde avec args.onBehalfUser. */
   const actorFor = (work: WorkExecutionContext, args: Record<string, unknown>): { id: string; name: string; onBehalf: boolean } => {
     const requested = typeof args['onBehalfUser'] === 'string' ? args['onBehalfUser'] as string : ''
-    // requesterUserId 缺失时忽略 onBehalfUser（防伪造真人链）；岗位服务主体不带身份头
+    // onBehalfUser ignoré en l'absence de requesterUserId (anti-falsification de chaîne humaine) ; le sujet de service de poste ne porte pas d'en-tête d'identité
     if (requested && work.requesterUserId && requested === work.requesterUserId) {
       return { id: work.requesterUserId, name: t('人代办:{id}', { id: work.employeeId }), onBehalf: true }
     }
@@ -104,7 +104,7 @@ export function createNasAdapter(ctx: {
           case 'read': {
             if (typeof hub.downloadFile !== 'function') return denied(t('nasRegistry 未提供文件下载能力，未支持'))
             const result = await hub.downloadFile(input.tool.registryId, path, actor)
-            // 内容经受控 staging 读取回传（≤8MB 文本）；不向员工暴露平台本地路径
+            // Contenu relu via le staging contrôlé (texte ≤8 Mo) ; le chemin local de la plateforme n'est pas exposé à l'employé
             let content: string | undefined
             if (result.bytes > 0 && result.bytes <= ARTIFACT_MAX_BYTES) {
               try {
@@ -138,7 +138,7 @@ export function createNasAdapter(ctx: {
             return { ok: true, value: result, gatewayRef: { nasId: input.tool.registryId, path, onBehalf: actor.onBehalf } }
           }
           case 'write': {
-            // 写入只认受控 artifact 来源（V15：员工调用面拒绝任意本地路径）
+            // L'écriture n'accepte que la source artefact contrôlé (V15 : la face d'appel de l'employé refuse tout chemin local arbitraire)
             if (typeof input.args['localPath'] === 'string' || typeof input.args['localFile'] === 'string') {
               return denied(t('禁止本地路径写入：write 内容仅允许来自受控 artifact'))
             }
@@ -157,7 +157,7 @@ export function createNasAdapter(ctx: {
               buffer: Buffer.from(base64, 'base64'),
               destPath,
               actor,
-              // 无人值守：岗位服务主体（不带 X-On-Behalf-User）；人代办：透传真人链
+              // Sans surveillance : sujet de service de poste (sans X-On-Behalf-User) ; mandat humain : transmission de la chaîne humaine
               onBehalf: actor.onBehalf ? true : false,
             })
             return {
@@ -174,14 +174,14 @@ export function createNasAdapter(ctx: {
             }
           }
           case 'share':
-            // 分享是独立权限动作（§4.5）；一期未开放（分享链接服务不在受控调用面）
+            // Le partage est une action de permission distincte (§4.5) ; non ouvert en phase 1 (le service de liens de partage n'est pas dans la face d'appel contrôlée)
             return denied(t('NAS 分享动作适配一期未开放（外发分享需独立授权与人工通道）'))
           default:
             return denied(t('未知 NAS 动作：{action}', { action }))
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        // 写超时/网络不确定 → 结果未知（§11.5-4）
+        // Écriture en timeout/incertitude réseau → résultat inconnu (§11.5-4)
         const uncertain = action === 'write' && /超时|timeout|abort|ECONNRESET|ETIMEDOUT/i.test(message)
         return {
           ok: false,

@@ -1,55 +1,55 @@
 /**
- * NAS 数据权限判定引擎（纯函数模块，dev-plan-nas-authz §2.1 分层约束）。
+ * Moteur de jugement des permissions de données NAS (module de fonctions pures, contrainte de couches dev-plan-nas-authz §2.1).
  *
- * - 不依赖 Service 容器、不做任何 IO：入参为已取数的组织树快照 / 用户 / NAS 资产 / 规则快照，
- *   出参为判定结果（含 reasons）。Service 层（../authz.ts）只做取数装配与留痕落盘。
- * - 判定序移植自 saas-permission-service（服务 B）语义，只移植语义不部署本体：
- *   ① 账号特殊规则（外部/可疑/挂根/未落班组/兼任只读）
- *   ② 资源级显式 deny（nasId+path 尾通配，可带 userIds）
- *   ③ 资源级显式 allow（C 跨域白名单、临时授权，可设 expiresAt）
- *      ③b 文件所有权（2026-09-17 新增）：上传者对自有文档默认全权（admin 除外，显式 deny 仍优先）
- *   ④ 角色矩阵 MATRIX[role][op] × 作用域边界
- *   ⑤ 默认 deny
- * - selftest 直接单测本模块（引擎分层约束 O8）。
+ * - Ne dépend pas du conteneur de Service, ne fait aucun IO : en entrée, des instantanés déjà pris (arbre d'organisations / utilisateur / actif NAS / règles),
+ *   en sortie un résultat de jugement (avec reasons). La couche Service (../authz.ts) ne fait que l'assemblage des données et l'inscription des traces.
+ * - L'ordre de jugement est un portage de la sémantique de saas-permission-service (service B) : seul le sémantique est porté, pas le déploiement :
+ *   ① règles spéciales de compte (externe/suspect/racine/sans groupe/poste cumul lecture seule)
+ *   ② deny explicite au niveau ressource (nasId+chemin avec joker de queue, userIds possible)
+ *   ③ allow explicite au niveau ressource (liste blanche inter-domaines C, autorisation temporaire, expiresAt possible)
+ *      ③b propriété de fichier (ajout 2026-09-17) : l'uploadeur tout-puissant par défaut sur ses documents (admin excepté, le deny explicite reste prioritaire)
+ *   ④ matrice de rôles MATRIX[role][op] × frontière de périmètre
+ *   ⑤ deny par défaut
+ * - Le selftest teste ce module directement (contrainte de couches du moteur O8).
  */
 import { t } from '../../../platform-i18n/src/index.ts'
 
 // ---------------------------------------------------------------------------
-// 类型
+// Types
 // ---------------------------------------------------------------------------
 
-/** 七类操作（附件第四章操作矩阵维度；share/admin 在网关工具面不存在，网关侧恒 deny）。 */
+/** Sept classes d'opérations (dimension matrice d'opérations de l'annexe 4 ; share/admin n'existent pas sur la face outils de la passerelle, toujours deny côté passerelle). */
 export type AuthzOp = 'read' | 'download' | 'write' | 'modify' | 'delete' | 'share' | 'admin'
 
 export const AUTHZ_OPS: AuthzOp[] = ['read', 'download', 'write', 'modify', 'delete', 'share', 'admin']
 
-/** 写类操作（readonly 语义 = read/download 放行、写类拒绝）。 */
+/** Opérations d'écriture (sémantique readonly = read/download passants, écritures refusées). */
 export const WRITE_OPS: ReadonlySet<AuthzOp> = new Set<AuthzOp>(['write', 'modify', 'delete', 'share', 'admin'])
 
-/** 高危操作（判定留痕永久保留；普通记录 90 天滚动清理）。 */
+/** Opérations à haut risque (traces de jugement conservées à vie ; enregistrements ordinaires nettoyés glissamment à 90 jours). */
 export const HIGH_RISK_OPS: ReadonlySet<AuthzOp> = new Set<AuthzOp>(['delete', 'share', 'admin'])
 
-/** 主角色（C 为叠加标签，不参与主角色序）。 */
+/** Rôle principal (C est une marque additive, ne participe pas à l'ordre des rôles principaux). */
 export type AuthzRole = 'P' | 'D' | 'T' | 'M'
 
 export interface EngineOrgNode {
   id: string
   name: string
   parentId: string | null
-  /** 组织树深度：根=1（平台级），2=部门级，≥3=职能组/班组级。 */
+  /** Profondeur dans l'arbre d'organisations : racine=1 (niveau plateforme), 2=niveau département, ≥3=niveau groupe fonctionnel/équipe. */
   depth: number
   leaderUserIds: string[]
 }
 
-/** 组织树快照索引：orgId → 节点（含 depth，由 buildOrgIndex 预计算）。 */
+/** Index d'instantané de l'arbre d'organisations : orgId → nœud (depth inclus, précalculé par buildOrgIndex). */
 export type OrgIndex = Map<string, EngineOrgNode>
 
 export interface EngineUser {
   id: string
   displayName: string
-  /** 挂靠组织；与 primaryOrgId 不同时，orgId 子树按兼任只读处理。 */
+  /** Organisation d'attache ; différente de primaryOrgId, le sous-arbre orgId est traité comme cumul en lecture seule. */
   orgId: string
-  /** 主归属组织（兼任语义）；缺省取组织链最深者（单人单挂时即 orgId）。 */
+  /** Organisation de rattachement principale (sémantique de cumul) ; par défaut la plus profonde de la chaîne (mono-rattachement = orgId). */
   primaryOrgId?: string
   accountType?: 'internal' | 'external' | 'suspended-review'
   status?: string
@@ -58,44 +58,44 @@ export interface EngineUser {
 export interface EngineNas {
   id: string
   name?: string
-  /** 资产级授权根路径（现有 rootPath 属性）。 */
+  /** Chemin racine autorisé au niveau actif (attribut rootPath actuel). */
   rootPath: string
-  /** 接入组织锚点：平台级组织名或 orgId（数据权限作用域推导锚点）。 */
+  /** Ancre d'organisation d'accès : nom d'organisation de niveau plateforme ou orgId (ancre de dérivation du périmètre de permissions de données). */
   orgRoot?: string
-  /** 组织 → 目录前缀显式映射（优先于名字推导，组织改名/合并不漂移）。 */
+  /** Correspondance explicite organisation → préfixe de répertoire (prioritaire sur la dérivation par nom ; renommage/fusion d'organisation sans dérive). */
   orgPathOverrides?: Record<string, string>
 }
 
-/** 资源级例外：显式 allow/deny，可按人收敛、可过期（服务 B 语义）。 */
+/** Exception au niveau ressource : allow/deny explicite, resserrable par personne, expirable (sémantique service B). */
 export interface AuthzException {
   id: string
   effect: 'allow' | 'deny'
   nasId: string
-  /** 路径前缀；尾部 `/*` 通配该子树，`*` 通配全部。 */
+  /** Préfixe de chemin ; `/*` en queue joker du sous-arbre, `*` joker total. */
   path: string
   ops: AuthzOp[]
-  /** 缺省 = 对全部用户生效（按路径的资源级例外）。 */
+  /** Défaut = s'applique à tous les utilisateurs (exception au niveau ressource par chemin). */
   userIds?: string[]
-  /** ISO 时间；过期即失效（判定序仍在原位，只是不再命中）。 */
+  /** Temps ISO ; expirée = sans effet (l'ordre de jugement reste en place, simplement plus atteint). */
   expiresAt?: string
   note?: string
   createdBy?: string
   createdAt?: string
 }
 
-/** 规则配置快照（nas:authzRules 单例的引擎可见投影）。 */
+/** Instantané de configuration de règles (projection visible du moteur sur le singleton nas:authzRules). */
 export interface AuthzRulesSnapshot {
   version: number
-  /** 矩阵覆盖项：true=放宽为 allow，false=收紧为 deny（在内置矩阵之上打补丁）。 */
+  /** Éléments de couverture de matrice : true = relâché en allow, false = resserré en deny (rustine sur la matrice intégrée). */
   matrixOverrides?: Partial<Record<AuthzRole, Partial<Record<AuthzOp, boolean>>>>
   exceptions: AuthzException[]
-  /** C 角色关联的动态用户组 id 集合（不建第二份人员名单）。 */
+  /** Ensemble d'ids de groupes d'utilisateurs dynamiques associés au rôle C (pas de seconde liste de personnel). */
   cGroups: string[]
-  /** 外部账号白名单目录（external 只读范围）。 */
+  /** Répertoires en liste blanche des comptes externes (périmètre lecture seule external). */
   externalReadPaths: Array<{ nasId: string; path: string }>
-  /** 观察模式：判定结果不变，仅标注（网关 deny 只告警不拦截）。 */
+  /** Mode observation : résultat de jugement inchangé, simple marque (le deny de la passerelle alerte sans bloquer). */
   observeOnly: boolean
-  /** 全量降级只读：所有 allow 视作 readonly（灰度 G3）。 */
+  /** Rétrogradation intégrale en lecture seule : tout allow traité comme readonly (gradation G3). */
   degradeAllToReadonly: boolean
 }
 
@@ -104,7 +104,7 @@ export interface EngineCheckInput {
   nasId: string
   paths: string[]
   op: AuthzOp
-  /** 破窗：走 P 判定并强制留痕（须持 nas.authz.write，Service 层校验后透传）。 */
+  /** Effraction : passe le jugement P et force la trace (doit détenir nas.authz.write, la couche Service vérifie puis transmet). */
   override?: boolean
   now?: string
 }
@@ -117,14 +117,14 @@ export interface EnginePathVerdict {
 
 export interface EngineDecision {
   decision: 'allow' | 'deny'
-  /** 主角色（P/D/T/M）；特殊账号无主角色时缺省。 */
+  /** Rôle principal (P/D/T/M) ; défaut pour un compte spécial sans rôle principal. */
   role?: AuthzRole
-  /** 是否叠加 C 标签（动态用户组成员）。 */
+  /** Si la marque additive C est posée (membre d'un groupe d'utilisateurs dynamique). */
   cTag: boolean
-  /** 判定时的作用域前缀列表（平台口径，供 scope 查询与降级快照复用）。 */
+  /** Liste des préfixes de périmètre au jugement (référentiel plateforme, réutilisé par la requête scope et l'instantané de repli). */
   scope: string[]
   reasons: string[]
-  /** 命中的显式例外 id（allow/deny 皆回填，便于审计归因）。 */
+  /** Ids des exceptions explicites atteintes (allow/deny tous renseignés, pour l'attribution d'audit). */
   ruleId?: string
   perPath: EnginePathVerdict[]
   observeOnly: boolean
@@ -132,16 +132,16 @@ export interface EngineDecision {
 }
 
 // ---------------------------------------------------------------------------
-// 内置矩阵与工具函数
+// Matrice intégrée et fonctions utilitaires
 // ---------------------------------------------------------------------------
 
 /**
- * 内置操作矩阵（附件第四章默认值）：
- * - P 平台负责人：全部放行；
- * - D 部门负责人：本部门子树全权（admin 为平台规则管理权限点，矩阵恒 deny，走权限点而非目录）；
- * - T 班组负责人：可写不可删（delete/share 需走审批例外）；
- * - M 普通成员：可读写文件，不可改结构（rename/copy/compress）、不可删；
- * - C 叠加标签：跨域只读（在 check 中作为 read/download 范围扩展实现）。
+ * Matrice d'opérations intégrée (valeurs par défaut de l'annexe 4) :
+ * - P responsable plateforme : tout passe ;
+ * - D responsable de département : tous droits sur le sous-arbre du département (admin est le point de permission de gestion de règles de la plateforme, matrice toujours deny, passe par le point de permission plutôt que le répertoire) ;
+ * - T responsable d'équipe : écrit sans supprimer (delete/share passent par l'exception d'approbation) ;
+ * - M membre ordinaire : lit et écrit les fichiers, sans modifier la structure (rename/copy/compress), sans supprimer ;
+ * - C marque additive : lecture seule inter-domaines (réalisée dans check comme extension du périmètre read/download).
  */
 export const MATRIX_DEFAULT: Record<AuthzRole, Record<AuthzOp, boolean>> = {
   P: { read: true, download: true, write: true, modify: true, delete: true, share: true, admin: true },
@@ -150,7 +150,7 @@ export const MATRIX_DEFAULT: Record<AuthzRole, Record<AuthzOp, boolean>> = {
   M: { read: true, download: true, write: true, modify: false, delete: false, share: false, admin: false },
 }
 
-/** 合并矩阵覆盖项（规则可收紧/放宽单格；admin 恒需平台权限点，覆盖其矩阵无网关侧效果）。 */
+/** Fusionne les couvertures de matrice (les règles resserrent/relâchent des cases ; admin exige toujours le point de permission de la plateforme, couvrir sa matrice est sans effet côté passerelle). */
 export function effectiveMatrix(rules: Pick<AuthzRulesSnapshot, 'matrixOverrides'>): Record<AuthzRole, Record<AuthzOp, boolean>> {
   const matrix = structuredClone(MATRIX_DEFAULT)
   const overrides = rules.matrixOverrides ?? {}
@@ -163,7 +163,7 @@ export function effectiveMatrix(rules: Pick<AuthzRulesSnapshot, 'matrixOverrides
   return matrix
 }
 
-/** 路径归一化：绝对化、去尾斜杠、禁 `..`；根返回 ''（内部比较口径，展示层再补 `/`）。 */
+/** Normalisation de chemin : absolutisation, retrait des barres de queue, `..` interdit ; racine = '' (référentiel de comparaison interne, la couche d'affichage rajoute `/`). */
 export function normalizePath(path: string): string {
   const normalized = `/${path}`.replace(/\\/g, '/').replace(/\/+$/, '')
   const segments = normalized.split('/').filter(Boolean)
@@ -171,7 +171,7 @@ export function normalizePath(path: string): string {
   return `/${segments.join('/')}`
 }
 
-/** scope 前缀命中：path === prefix 或 path 位于 prefix 子树内。 */
+/** Atteinte de préfixe de périmètre : path === prefix ou path dans le sous-arbre de prefix. */
 export function pathWithin(path: string, prefix: string): boolean {
   const p = normalizePath(path)
   const f = normalizePath(prefix)
@@ -179,7 +179,7 @@ export function pathWithin(path: string, prefix: string): boolean {
   return p === f || p.startsWith(`${f}/`)
 }
 
-/** 例外路径通配命中：`*` 全部；尾 `/*` 子树；其余精确前缀（子树语义）。 */
+/** Atteinte de joker de chemin d'exception : `*` tout ; queue `/*` sous-arbre ; le reste préfixe exact (sémantique de sous-arbre). */
 export function matchExceptionPath(exceptionPath: string, path: string): boolean {
   const trimmed = exceptionPath.trim()
   if (trimmed === '*') return true
@@ -187,7 +187,7 @@ export function matchExceptionPath(exceptionPath: string, path: string): boolean
   return pathWithin(path, trimmed)
 }
 
-/** 组织树快照构建：由扁平 OrgRecord 数组计算 depth（孤儿节点挂深度按 1 兜底）。 */
+/** Construction d'instantané de l'arbre d'organisations : calcule depth depuis un tableau plat d'OrgRecord (nœud orphelin replié à profondeur 1). */
 export function buildOrgIndex(records: Array<{ id: string; name: string; parentId: string | null; leaderUserIds?: string[] }>): OrgIndex {
   const index: OrgIndex = new Map()
   for (const record of records) {
@@ -207,7 +207,7 @@ export function buildOrgIndex(records: Array<{ id: string; name: string; parentI
   return index
 }
 
-/** 组织祖先链（自身 → 根，平台口径）。 */
+/** Chaîne d'ancêtres d'organisation (soi → racine, référentiel plateforme). */
 export function orgChain(orgIndex: OrgIndex, orgId: string): EngineOrgNode[] {
   const chain: EngineOrgNode[] = []
   let cursor: string | null = orgId
@@ -222,31 +222,31 @@ export function orgChain(orgIndex: OrgIndex, orgId: string): EngineOrgNode[] {
 }
 
 // ---------------------------------------------------------------------------
-// 角色推导（附件第三章，纯函数，无人员名单配置）
+// Dérivation des rôles (annexe 3, fonctions pures, sans configuration de liste de personnel)
 // ---------------------------------------------------------------------------
 
 export interface DerivedRole {
   role?: AuthzRole
-  /** 主归属链上的负责人身份（多负责人 co-leader 语义：一人可同时是 D + 子树 T，取最高为主角色）。 */
+  /** Qualité de responsable sur la chaîne de rattachement principal (sémantique co-leader multi-responsables : une personne peut être à la fois D + T du sous-arbre, le rôle principal prend le plus haut). */
   leaderOf: Array<{ orgId: string; depth: number; role: AuthzRole; coLeader: boolean }>
-  /** 跨分支负责人身份（一人多角色）：主归属链之外的部门负责人，作用域与矩阵按所领导部门子树独立生效（leaderScopes）。 */
+  /** Qualité de responsable inter-branches (une personne, plusieurs rôles) : responsable de département hors de la chaîne de rattachement principal, périmètre et matrice appliqués indépendamment au sous-arbre dirigé (leaderScopes). */
   leaderOfElsewhere: Array<{ orgId: string; orgName: string; depth: number; role: AuthzRole; coLeader: boolean }>
-  /** 主归属组织（兼任语义锚点）。 */
+  /** Organisation de rattachement principale (ancre de la sémantique de cumul). */
   primaryOrg?: EngineOrgNode
-  /** 挂靠组织（orgId；与主归属不同即为兼任）。 */
+  /** Organisation d'attache (orgId ; différente du rattachement principal = cumul). */
   attachedOrg?: EngineOrgNode
   secondaryAffiliation: boolean
   special?: 'external' | 'suspended-review' | 'root-no-role' | 'dept-root-readonly'
 }
 
 /**
- * 角色推导：
- * - P/D/T = 主归属组织链上的负责人（深度 1/2/≥3）；多负责人全部推导（reasons 标 co-leader）；
- * - M = 挂在深度≥3 组织下的非负责人成员；
- * - 挂根组织（深度=1 非负责人）→ special 'root-no-role'（deny 全部）；
- * - 未落班组（挂在深度=2 部门根且非负责人）→ special 'dept-root-readonly'（部门根只读）；
- * - external / suspended-review 见 special；
- * - 主归属缺省取组织链最深者（orgId 与 primaryOrgId 不一致即为兼任）。
+ * Dérivation des rôles :
+ * - P/D/T = responsable sur la chaîne de l'organisation de rattachement principal (profondeur 1/2/≥3) ; tous les responsables dérivés (reasons marqués co-leader) ;
+ * - M = membre non responsable monté sous une organisation de profondeur ≥3 ;
+ * - monté à l'organisation racine (profondeur=1, non responsable) → special 'root-no-role' (deny total) ;
+ * - sans équipe (monté à une racine de département de profondeur=2, non responsable) → special 'dept-root-readonly' (racine de département en lecture seule) ;
+ * - external / suspended-review : voir special ;
+ * - rattachement principal par défaut : le plus profond de la chaîne (orgId ≠ primaryOrgId = cumul).
  */
 export function deriveRole(user: EngineUser, orgIndex: OrgIndex): DerivedRole {
   const result: DerivedRole = { leaderOf: [], leaderOfElsewhere: [], secondaryAffiliation: false }
@@ -260,7 +260,7 @@ export function deriveRole(user: EngineUser, orgIndex: OrgIndex): DerivedRole {
   result.secondaryAffiliation = attached.id !== primary.id
 
   const primaryChain = orgChain(orgIndex, primary.id)
-  // 主归属链上的负责人身份（含链上所有层级，多负责人全部推导）
+  // Qualité de responsable sur la chaîne de rattachement principal (tous les niveaux de la chaîne, tous les responsables dérivés)
   for (const node of primaryChain) {
     const coLeader = node.leaderUserIds.length > 1 && node.leaderUserIds.includes(user.id)
     if (node.leaderUserIds.includes(user.id)) {
@@ -268,15 +268,15 @@ export function deriveRole(user: EngineUser, orgIndex: OrgIndex): DerivedRole {
       result.leaderOf.push({ orgId: node.id, depth: node.depth, role, coLeader })
     }
   }
-  // 跨分支负责人身份（一人多角色，多主体兼任管理）：不并入主角色推导（避免抬高主归属矩阵档位），
-  // 由 check 的 leaderScopes 按所领导部门子树独立套用矩阵——多身份权限并存不冲突。
+  // Qualité de responsable inter-branches (une personne, plusieurs rôles, multi-attaches) : non fusionnée dans la dérivation du rôle principal (pour ne pas surélever le palier de matrice du rattachement),
+  // check applique la matrice indépendamment par sous-arbre de département dirigé via leaderScopes — les permissions multi-identités coexistent sans conflit.
   for (const node of orgIndex.values()) {
     if (!node.leaderUserIds.includes(user.id)) continue
     if (primaryChain.some((onChain) => onChain.id === node.id)) continue
     const role: AuthzRole = node.depth === 1 ? 'P' : node.depth === 2 ? 'D' : 'T'
     result.leaderOfElsewhere.push({ orgId: node.id, orgName: node.name, depth: node.depth, role, coLeader: node.leaderUserIds.length > 1 })
   }
-  // 主角色取链上最高负责人角色；无负责人身份按挂载深度推导
+  // Le rôle principal prend le rôle de responsable le plus haut de la chaîne ; sans qualité de responsable, dérivation selon la profondeur de montage
   if (result.leaderOf.length > 0) {
     result.role = result.leaderOf.reduce((best, item) => (item.role === 'P' || (best !== 'P' && item.role === 'D') ? item.role : best), result.leaderOf[0]!.role)
   } else if (primary.depth >= 3) {
@@ -290,32 +290,32 @@ export function deriveRole(user: EngineUser, orgIndex: OrgIndex): DerivedRole {
 }
 
 // ---------------------------------------------------------------------------
-// 作用域推导（映射表优先、名字推导为默认，消除"路径即权限"单点脆性）
+// Dérivation du périmètre (table de correspondance prioritaire, dérivation par nom par défaut, supprimant la fragilité du point unique « chemin = permission »)
 // ---------------------------------------------------------------------------
 
 export interface DerivedScope {
-  /** 命中的锚点组织（orgRoot 对应节点）。 */
+  /** Organisation ancre atteinte (nœud correspondant à orgRoot). */
   anchor?: EngineOrgNode
-  /** 作用域前缀列表（平台口径绝对路径，含 NAS rootPath 收敛）。 */
+  /** Liste des préfixes de périmètre (chemins absolus au référentiel plateforme, incluant le resserrement rootPath du NAS). */
   prefixes: string[]
-  /** 解析方式：override=映射表命中；name=名字推导；none=未命中（对该 NAS 全 deny）。 */
+  /** Mode de résolution : override = table de correspondance atteinte ; name = dérivation par nom ; none = non atteint (deny intégral sur ce NAS). */
   via: 'override' | 'name' | 'none'
   reason?: string
 }
 
 /**
- * 作用域推导（dev-plan-nas-authz §2.1 修订）：
- * 1. 组织祖先链（锚点 → 根）命中 `orgPathOverrides[orgId]` → 用映射前缀（组织改名/合并不漂移）；
- * 2. 否则名字推导：链上命中 `orgRoot`（orgId 或组织名）→ 目录子树 = rootPath + 自锚点起的名字拼接；
- * 3. 未命中 → none（对该 NAS 全 deny）。
+ * Dérivation du périmètre (dev-plan-nas-authz §2.1 révisé) :
+ * 1. la chaîne d'ancêtres (ancre → racine) atteint `orgPathOverrides[orgId]` → préfixe de correspondance (renommage/fusion d'organisation sans dérive) ;
+ * 2. sinon dérivation par nom : la chaîne atteint `orgRoot` (orgId ou nom d'organisation) → sous-arbre de répertoires = rootPath + concaténation des noms depuis l'ancre ;
+ * 3. non atteint → none (deny intégral sur ce NAS).
  */
 export function deriveScope(user: EngineUser, nas: EngineNas, orgIndex: OrgIndex): DerivedScope {
   const root = normalizePath(nas.rootPath || '/')
   const primary = orgIndex.get(user.primaryOrgId ?? user.orgId) ?? orgIndex.get(user.orgId)
   if (!primary) return { prefixes: [], via: 'none', reason: 'user-org-not-found' }
-  // 角色与作用域对齐：主归属链上若领导某个（更浅层的）部门——负责人主部门挂在下属班组是常态
-  // （钉钉 dept_id_list[0] 为主部门，管理职务在上级部门）——作用域锚提升到所领导的最高部门，
-  // 否则 D/P 角色会落进更窄的下属作用域，矩阵放行形同虚设。
+  // Alignement rôle et périmètre : si, sur la chaîne de rattachement principal, la personne dirige un département (plus superficiel) — le département principal d'un responsable monté dans une équipe subordonnée est la norme
+  // (DingTalk dept_id_list[0] est le département principal, la fonction de direction est au département supérieur) — l'ancre de périmètre remonte au plus haut département dirigé,
+  // sinon le rôle D/P tomberait dans un périmètre subordonné plus étroit et le passage de la matrice serait lettre morte.
   const primaryChain = orgChain(orgIndex, primary.id)
   const ledAnchor = primaryChain
     .filter((node) => node.leaderUserIds.includes(user.id))
@@ -323,7 +323,7 @@ export function deriveScope(user: EngineUser, nas: EngineNas, orgIndex: OrgIndex
   const anchor = ledAnchor ?? primary
   const chain = orgChain(orgIndex, anchor.id)
   const overrides = nas.orgPathOverrides ?? {}
-  // ① 映射表优先：从锚点向根找第一个显式映射（锚点自身映射优先级最高）
+  // ① table de correspondance prioritaire : de l'ancre vers la racine, la première correspondance explicite (la correspondance de l'ancre elle-même a la plus haute priorité)
   for (const node of chain) {
     const mapped = overrides[node.id]
     if (mapped) {
@@ -332,19 +332,19 @@ export function deriveScope(user: EngineUser, nas: EngineNas, orgIndex: OrgIndex
       return { anchor: node, prefixes: [prefix], via: 'override' }
     }
   }
-  // ② 名字推导：链上找 orgRoot（orgId 精确匹配优先，组织名次之；取最浅命中=最接近平台级）
+  // ② dérivation par nom : recherche d'orgRoot dans la chaîne (correspondance exacte orgId prioritaire, puis nom d'organisation ; prise de l'atteinte la plus superficielle = la plus proche du niveau plateforme)
   if (nas.orgRoot) {
     const byId = chain.find((node) => node.id === nas.orgRoot)
     const byName = chain.find((node) => node.name === nas.orgRoot)
     const hit = byId ?? byName
     if (hit) {
-      // 锚点组织自身（平台负责人 P 直属锚点）：作用域即 NAS 授权根整体
+      // L'organisation ancre elle-même (le responsable plateforme P dépend directement de l'ancre) : le périmètre est la racine d'autorisation entière du NAS
       const below = chain.slice(0, chain.indexOf(hit)).reverse().map((item) => item.name)
       const prefix = hit.id === anchor.id ? root : joinPaths(root, [hit.name, ...below].join('/'))
       return { anchor: hit, prefixes: [prefix], via: 'name' }
     }
   }
-  // ③ 未命中任何锚点 → 对该 NAS 全 deny
+  // ③ aucune ancre atteinte → deny intégral sur ce NAS
   return { prefixes: [], via: 'none', reason: nas.orgRoot ? 'org-root-not-on-chain' : 'nas-org-root-not-configured' }
 }
 
@@ -356,7 +356,7 @@ function joinPaths(root: string, suffix: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// 判定序（服务 B 语义移植，每步产出 reasons）
+// Ordre de jugement (portage de la sémantique du service B, chaque étape produit des reasons)
 // ---------------------------------------------------------------------------
 
 export interface EngineCheckContext {
@@ -364,9 +364,9 @@ export interface EngineCheckContext {
   user?: EngineUser
   nas?: EngineNas
   rules: Pick<AuthzRulesSnapshot, 'version' | 'matrixOverrides' | 'exceptions' | 'cGroups' | 'externalReadPaths' | 'observeOnly' | 'degradeAllToReadonly'>
-  /** 命中的 C 关联动态用户组 id（Service 层按规则解析后传入，引擎不做 IO）。 */
+  /** Ids des groupes dynamiques associés C atteints (résolus par les règles côté Service puis transmis, le moteur ne fait pas d'IO). */
   cGroupHits: string[]
-  /** 请求用户持有的文件所有权路径（精确路径，Service 层从所有权登记解析后传入；2026-09-17 新增）。 */
+  /** Chemins de propriété de fichiers détenus par l'utilisateur demandeur (chemins exacts, résolus par la couche Service depuis l'enregistrement de propriété ; ajout 2026-09-17). */
   ownedPaths?: string[]
 }
 
@@ -374,7 +374,7 @@ const OP_LABEL: Record<AuthzOp, string> = {
   read: '读取', download: '下载', write: '写入', modify: '改动', delete: '删除', share: '分享', admin: '管理',
 }
 
-/** 五步判定序（纯函数）。多路径取最严决策（任一 deny 即 deny），逐路径产出 reasons。 */
+/** Ordre de jugement en cinq étapes (fonction pure). Chemins multiples = décision la plus stricte (un deny quelconque = deny), reasons produits par chemin. */
 export function check(input: EngineCheckInput, ctx: EngineCheckContext): EngineDecision {
   const now = input.now ?? new Date().toISOString()
   const base: EngineDecision = { decision: 'deny', cTag: false, scope: [], reasons: [], perPath: [], observeOnly: ctx.rules.observeOnly, override: input.override === true }
@@ -389,12 +389,12 @@ export function check(input: EngineCheckInput, ctx: EngineCheckContext): EngineD
   if (!user) return denyAll([t('user-not-found：账号不存在或未同步')])
   if (ctx.nas === undefined) return denyAll([t('nas-not-found：NAS 资产不存在')])
 
-  // C 叠加标签（判定序④的范围扩展依据）
+  // Marque additive C (base de l'extension de périmètre de l'ordre ④)
   const cTag = ctx.rules.cGroups.some((groupId) => ctx.cGroupHits.includes(groupId))
   base.cTag = cTag
   base.scope = deriveScope(user, ctx.nas, ctx.orgIndex).prefixes
 
-  // ① 账号特殊规则
+  // ① règles spéciales de compte
   const derived = deriveRole(user, ctx.orgIndex)
   base.role = derived.role
   if (derived.special === 'suspended-review') {
@@ -413,8 +413,8 @@ export function check(input: EngineCheckInput, ctx: EngineCheckContext): EngineD
     return finalize(base, ctx.rules, input)
   }
   if (derived.special === 'root-no-role') {
-    // 挂根默认全拒（推人落入部门/班组）；唯一出口是管理员显式授予的资源级 allow 例外——
-    // 平台服务账号（网关令牌绑定身份）对自有存储区的授权走这条通道，例外全量留痕可审计。
+    // Monté à la racine = refus global par défaut (on pousse la personne vers département/équipe) ; l'unique sortie est l'exception allow explicite au niveau ressource accordée par l'admin —
+    // l'autorisation du compte de service de la plateforme (identité liée au jeton de passerelle) sur sa zone de stockage propre passe par ce canal, l'exception intégralement tracée et auditable.
     const verdicts = input.paths.map((path) => {
       const rescue = ctx.rules.exceptions.find((exception) => exception.effect === 'allow'
         && exception.nasId === input.nasId
@@ -434,21 +434,21 @@ export function check(input: EngineCheckInput, ctx: EngineCheckContext): EngineD
   }
 
   const scope = deriveScope(user, ctx.nas, ctx.orgIndex)
-  // 未落班组：部门根只读（read/download 放行于部门子树，写类拒绝）
+  // Sans équipe : racine de département en lecture seule (read/download passants sur le sous-arbre du département, écritures refusées)
   const deptRootReadonly = derived.special === 'dept-root-readonly'
 
   const matrix = effectiveMatrix(ctx.rules)
   const primaryRole = derived.role
   const coLeaderMarks = derived.leaderOf.filter((item) => item.coLeader).map((item) => `co-leader@${item.orgId}`)
-  // 跨分支领导作用域（一人多角色）：所领导部门子树按该部门角色独立套用矩阵（全权限，非只读层），
-  // 与主归属权限并存；所领导部门未命中该 NAS 锚点时不产生作用域（跨 NAS 隔离不变）。
+  // Périmètre de direction inter-branches (une personne, plusieurs rôles) : le sous-arbre du département dirigé applique indépendamment la matrice selon le rôle de ce département (tous droits, pas une couche lecture seule),
+  // coexistant avec les permissions du rattachement principal ; si le département dirigé n'atteint pas l'ancre de ce NAS, pas de périmètre (l'isolement inter-NAS inchangé).
   const leaderScopes = derived.leaderOfElsewhere.map((led) => ({
     ...led,
     prefixes: deriveScope({ ...user, primaryOrgId: led.orgId }, ctx.nas, ctx.orgIndex).prefixes,
   })).filter((led) => led.prefixes.length > 0)
-  // 主作用域未命中锚点不提前拒绝：跨分支领导作用域仍可能命中（反之才全 deny）；
-  // 全部请求路径均为请求用户自有文档（所有权 ③b）时同样不提前拒绝——所有权独立于组织作用域，
-  // 用户调岗/锚点调整后仍保有其上传文档的所有权（显式 deny 与 G3 降级依旧优先）。
+  // Périmètre principal sans ancre atteinte = pas de refus anticipé : le périmètre de direction inter-branches peut encore atteindre (sinon seulement deny intégral) ;
+  // quand tous les chemins demandés sont des documents possédés par l'utilisateur demandeur (propriété ③b), pas de refus anticipé non plus — la propriété est indépendante du périmètre d'organisation,
+  // l'utilisateur muté/ancre réajustée conserve la propriété de ses documents uploadés (le deny explicite et la rétrogradation G3 restent prioritaires).
   const ownedPaths = ctx.ownedPaths ?? []
   const normalizedInputs = input.paths.map((p) => { try { return normalizePath(p) } catch { return '' } })
   const allOwned = input.op !== 'admin' && normalizedInputs.length > 0 && normalizedInputs.every((p) => ownedPaths.includes(p))
@@ -459,19 +459,19 @@ export function check(input: EngineCheckInput, ctx: EngineCheckContext): EngineD
   for (const led of leaderScopes) {
     if (!base.scope.some((prefix) => led.prefixes.includes(prefix))) base.scope = [...base.scope, ...led.prefixes]
   }
-  // 兼任归属作用域（仅只读层）：锚点切到挂靠组织再推导一次
+  // Périmètre du rattachement de cumul (couche lecture seule uniquement) : l'ancre bascule sur l'organisation d'attache et l'on redérive une fois
   const secondaryScope = derived.secondaryAffiliation
     ? deriveScope({ ...user, primaryOrgId: user.orgId }, ctx.nas, ctx.orgIndex)
     : undefined
   const secondaryPrefixes = secondaryScope && secondaryScope.via !== 'none' ? secondaryScope.prefixes : []
   if (secondaryPrefixes.length > 0) base.scope = [...base.scope, ...secondaryPrefixes]
 
-  // 作用域祖先链只读列举（B 语义；2026-09-03 拍板根目录版，2026-09-17 拍板扩展到全祖先链）：
-  // 在本 NAS 有任一作用域（主/跨分支领导/兼任挂靠）的用户，放行对「任一作用域前缀的祖先目录
-  // （含 NAS 根）」的只读操作（列目录/查元信息）——否则深层子树作用域用户在文件浏览器里
-  // 无法逐级下钻到自己的目录（每一步的父目录都越界）。祖先链只读放行的信息增量与根目录
-  // 列举一致（仅暴露目录名层级，不暴露子树内容）；显式 deny 例外仍优先（判定序②不变）；
-  // 写类与作用域外平级/越界路径不受影响；无任何作用域用户照常全拒。
+  // Énumération en lecture seule de la chaîne d'ancêtres du périmètre (sémantique B ; version répertoire racine entérinée 2026-09-03, extension à toute la chaîne d'ancêtres entérinée 2026-09-17) :
+  // un utilisateur ayant un périmètre quelconque sur ce NAS (principal/direction inter-branches/attache de cumul) voit passer ses opérations en lecture seule sur « les répertoires ancêtres d'un
+  // quelconque préfixe de périmètre (racine NAS incluse) » (listage de répertoire/méta-infos) — sinon un utilisateur de périmètre profond ne pourrait pas descendre
+  // niveau par niveau vers son répertoire dans le navigateur de fichiers (le parent de chaque pas serait hors frontière). L'incrément d'information du passage lecture seule de la chaîne d'ancêtres
+  // égale celui du listage racine (expose seulement la hiérarchie des noms de répertoires, pas le contenu des sous-arbres) ; l'exception deny explicite reste prioritaire (ordre ② inchangé) ;
+  // les écritures et les chemins hors périmètre de même niveau/hors frontière ne sont pas affectés ; un utilisateur sans aucun périmètre reste refusé intégralement.
   const nasRoot = normalizePath(ctx.nas!.rootPath || '/')
   const ancestorPrefixes = [
     ...(scope.via === 'none' ? [] : scope.prefixes),
@@ -481,7 +481,7 @@ export function check(input: EngineCheckInput, ctx: EngineCheckContext): EngineD
 
   const verdicts: EnginePathVerdict[] = input.paths.map((rawPath) => {
     const path = normalizePath(rawPath)
-    // ② 资源级显式 deny（尾通配，可按人收敛）
+    // ② deny explicite au niveau ressource (joker de queue, resserrable par personne)
     const denyHit = ctx.rules.exceptions.find((exception) => exception.effect === 'deny'
       && exception.nasId === input.nasId
       && exception.ops.includes(input.op)
@@ -491,7 +491,7 @@ export function check(input: EngineCheckInput, ctx: EngineCheckContext): EngineD
     if (denyHit) {
       return { path, decision: 'deny', reasons: [t('exception.deny：命中显式拒绝规则 {id}', { id: denyHit.id }) + (denyHit.note ? `（${denyHit.note}）` : '')], ruleId: denyHit.id }
     }
-    // ③ 资源级显式 allow（C 跨域白名单、临时授权；可过期）
+    // ③ allow explicite au niveau ressource (liste blanche inter-domaines C, autorisation temporaire ; expirable)
     const allowHit = ctx.rules.exceptions.find((exception) => exception.effect === 'allow'
       && exception.nasId === input.nasId
       && exception.ops.includes(input.op)
@@ -501,13 +501,13 @@ export function check(input: EngineCheckInput, ctx: EngineCheckContext): EngineD
     if (allowHit) {
       return { path, decision: 'allow', reasons: [t('exception.allow：命中显式授权规则 {id}', { id: allowHit.id }) + (allowHit.expiresAt ? `（${allowHit.expiresAt} 到期）` : '') + (allowHit.note ? `（${allowHit.note}）` : '')], ruleId: allowHit.id }
     }
-    // ③b 文件所有权（2026-09-17 新增）：上传者对自有文档默认全权（admin 为平台权限点，不随所有权）。
-    // 登记仅覆盖文件精确路径（目录不登记，避免建目录者获得子树删权）；显式 deny 仍优先（判定序②）；
-    // allow 后仍受 finalize 的全量降级只读（G3）约束。
+    // ③b propriété de fichier (ajout 2026-09-17) : l'uploadeur tout-puissant par défaut sur ses documents (admin est un point de permission de la plateforme, ne suit pas la propriété).
+    // L'enregistrement ne couvre que les chemins exacts de fichiers (pas les répertoires, pour éviter qu'un créateur de répertoire n'obtienne le droit de suppression du sous-arbre) ; le deny explicite reste prioritaire (ordre ②) ;
+    // après allow, la rétrogradation intégrale en lecture seule (G3) du finalize contraint toujours.
     if (input.op !== 'admin' && ctx.ownedPaths?.includes(path)) {
       return { path, decision: 'allow', reasons: [t('owner.allow：文件上传者对自有文档默认放行「{op}」', { op: t(OP_LABEL[input.op]) })] }
     }
-    // 作用域祖先链只读列举：判定序在显式例外之后、作用域边界之前（NAS 根为祖先链特例，reason 沿用 root-listing）
+    // Énumération en lecture seule de la chaîne d'ancêtres du périmètre : l'ordre de jugement se place après les exceptions explicites, avant la frontière de périmètre (la racine NAS est un cas particulier de la chaîne d'ancêtres, reason réutilise root-listing)
     const onAncestorChain = ancestorPrefixes.some((prefix) => pathWithin(prefix, path))
     if (ancestorPrefixes.length > 0 && !WRITE_OPS.has(input.op) && onAncestorChain) {
       return path === nasRoot
@@ -515,7 +515,7 @@ export function check(input: EngineCheckInput, ctx: EngineCheckContext): EngineD
         : { path, decision: 'allow', reasons: [t('org.ancestor-listing：作用域祖先目录只读列举放行（浏览逐级下钻）')] }
     }
 
-    // ④ 角色矩阵 × 作用域边界（主作用域 / 跨分支领导层 / 兼任只读层 / C 跨域只读层）
+    // ④ matrice de rôles × frontière de périmètre (périmètre principal / couche direction inter-branches / couche lecture seule cumul / couche lecture seule inter-domaines C)
     if (input.override === true) {
       return { path, decision: 'allow', reasons: [t('override：破窗放行（P 判定，强制留痕）')] }
     }
@@ -526,7 +526,7 @@ export function check(input: EngineCheckInput, ctx: EngineCheckContext): EngineD
     if (!inPrimary && ledHits.length === 0 && !inSecondary && !inCScope) {
       return { path, decision: 'deny', reasons: [t('path.out-of-scope：超出作用域 {scopes}', { scopes: [...scope.prefixes, ...leaderScopes.flatMap((led) => led.prefixes)].join('、') })] }
     }
-    // 有效角色 = 主作用域角色与跨分支所领导部门角色的最高档（多身份作用域重叠时取高不叠加）
+    // Rôle effectif = palier le plus haut entre rôle du périmètre principal et rôle du département dirigé inter-branches (chevauchement multi-identités : prise du plus haut, sans cumul)
     const roleRank: Record<AuthzRole, number> = { P: 0, D: 1, T: 2 }
     let effRole: AuthzRole | undefined = inPrimary ? primaryRole : undefined
     let effFrom: string | undefined
@@ -580,7 +580,7 @@ export function check(input: EngineCheckInput, ctx: EngineCheckContext): EngineD
   return finalize(base, ctx.rules, input)
 }
 
-/** 收尾：全量降级只读（G3）与观察模式标注。 */
+/** Finalize : rétrogradation intégrale en lecture seule (G3) et marque de mode observation. */
 function finalize(decision: EngineDecision, rules: Pick<AuthzRulesSnapshot, 'observeOnly' | 'degradeAllToReadonly'>, input: EngineCheckInput): EngineDecision {
   decision.observeOnly = rules.observeOnly
   if (decision.decision === 'allow' && rules.degradeAllToReadonly && WRITE_OPS.has(input.op) && input.override !== true) {
@@ -602,10 +602,10 @@ function roleLabel(role: AuthzRole): string {
 }
 
 // ---------------------------------------------------------------------------
-// 治理纯函数：负责人悬空 / 组织目录对账 / 审批人路由
+// Fonctions pures de gouvernance : responsable vacant / réconciliation organisation-répertoire / routage d'approbateur
 // ---------------------------------------------------------------------------
 
-/** 负责人悬空检测：leaderUserIds 为空的组织（可选限定挂了账号的组织）。 */
+/** Détection de responsable vacant : organisations dont leaderUserIds est vide (limitation possible aux organisations portant des comptes). */
 export function findVacantLeaderOrgs(orgIndex: OrgIndex, opts?: { withUserOrgIds?: Set<string> }): EngineOrgNode[] {
   return [...orgIndex.values()].filter((node) => {
     if (node.leaderUserIds.length > 0) return false
@@ -621,10 +621,10 @@ export interface DirOrphanFinding {
 }
 
 /**
- * 组织 ↔ 目录对账（每日 job 的纯函数核心，dev-plan-nas-authz §2.1）：
- * - NAS 一级目录名在组织树（orgRoot 锚点子树直接子级）无同名组织 → dir-without-org；
- * - 锚点组织直接子级组织在 NAS 一级目录无同名目录 → org-without-dir。
- * 命中即发 dirOrphan 告警；组织 rename 时提示管理员确认登记 orgPathOverrides。
+ * Réconciliation organisations ↔ répertoires (cœur en fonctions pures du job quotidien, dev-plan-nas-authz §2.1) :
+ * - nom de répertoire de premier niveau du NAS sans organisation homonyme dans l'arbre (enfants directs du sous-arbre ancré orgRoot) → dir-without-org ;
+ * - organisation enfant directe de l'ancre sans répertoire homonyme dans les répertoires de premier niveau du NAS → org-without-dir.
+ * Atteinte = alerte dirOrphan ; lors d'un rename d'organisation, inviter l'admin à confirmer l'enregistrement dans orgPathOverrides.
  */
 export function reconcileOrgDirs(dirNames: string[], nas: EngineNas, orgIndex: OrgIndex): DirOrphanFinding[] {
   const findings: DirOrphanFinding[] = []
@@ -645,9 +645,9 @@ export function reconcileOrgDirs(dirNames: string[], nas: EngineNas, orgIndex: O
 }
 
 /**
- * share 审批人自动路由（dev-plan-nas-authz §2.7）：沿申请路径所属子树向上找最近
- * leaderUserIds 非空的负责人（从申请者组织链找；返回链上最近有负责人的组织与人员）。
- * 找不到返回 undefined（调用方升级 resource_admin 兜底审批）。
+ * Routage automatique de l'approbateur share (dev-plan-nas-authz §2.7) : remonte du sous-arbre du chemin demandé vers le premier
+ * responsable non vide (recherché depuis la chaîne d'organisations du demandeur ; renvoie l'organisation la plus proche avec responsable et les personnes).
+ * Introuvable = undefined (l'appelant escalade au repli resource_admin).
  */
 export function nearestLeaderOrg(orgIndex: OrgIndex, userOrgId: string): { orgId: string; orgName: string; leaderUserIds: string[] } | undefined {
   for (const node of orgChain(orgIndex, userOrgId)) {

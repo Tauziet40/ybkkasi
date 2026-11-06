@@ -1,11 +1,11 @@
 /**
- * 面板种子（review-dsh-agent-panel-v2 Phase 1 第 5-10 条）：
- * - 基线（首次启动，panel:deptConfigs 为空时）：五部门骨架配置（一套骨架五种皮肤的数据底座，
- *   DEPT_META 来自设计原型剥离）+ 内置行业激活（QB01/YB01/JB01 图谱包随平台分发 → 默认授权根组织，幂等收敛）。
- * - 演示（DEMO_SEED=1）：追加五部门 KPI/widget（来源徽标 mock/手工）/频道/样例会话/任务/部门知识——
- *   全部来自 demo-content.json（原型 APPLIANCE 数据，scripts/extract-panel-seed.mjs 确定性剥离）。
- * 演示会话中的 Agent 卡片不预绑 agentRef（面板阵容的 agentRef 由管理员经 PUT /api/panel/:dept/agents
- * 绑定到真实 Agent 资产——运行时未绑定则诚实降级转人工，不造假回复）。
+ * Graines du panneau (review-dsh-agent-panel-v2 Phase 1, items 5-10) :
+ * - base (premier démarrage, panel:deptConfigs vide) : squelettes de configuration des cinq départements (un socle de données, un squelette, cinq habillages,
+ *   DEPT_META tiré du prototype) + activation intégrée des secteurs (paquets de cartographie QB01/YB01/JB01 distribués avec la plateforme → autorisation par défaut à l'organisation racine, convergence idempotente).
+ * - démonstration (DEMO_SEED=1) : s'ajoutent KPI/widget des cinq départements (badges de source mock/manuel)/canaux/sessions d'exemple/tâches/savoir départemental —
+ *   tout vient de demo-content.json (données APPLIANCE du prototype, détachement déterministe par scripts/extract-panel-seed.mjs).
+ * Les cartes d'Agent des sessions de démonstration ne pré-lient pas agentRef (l'agentRef de la ligne-up du panneau est lié par l'admin via PUT /api/panel/:dept/agents
+ * à un vrai actif Agent — non lié à l'exécution, dégradation honnête vers l'humain, pas de réponse fabriquée).
  */
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -14,7 +14,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { newId } from '../../../platform-core/src/ids.ts'
 import type { DeptAgent, DeptKpi, DeptWidget, MessageCardOp, PanelService } from '../service.ts'
 
-/** 五部门骨架（原型 DEPT_META 一比一：主题色即部门身份）。 */
+/** Squelettes des cinq départements (DEPT_META du prototype un-un : la couleur de thème est l'identité du département). */
 const DEPT_META: Array<Pick<import('../service.ts').DeptConfigRecord, 'id' | 'label' | 'icon' | 'theme' | 'collab' | 'acts' | 'colors'>> = [
   { id: 'rd', label: '研发部', icon: '🔬', theme: '深空蓝 · 项目工程风', collab: '任务驱动 · 评审协同', acts: ['rd'], colors: { accent: '#4f46e5', soft: '#e0e7ff', deep: '#3730a3' } },
   { id: 'mfg', label: '制造部', icon: '🏭', theme: '工业青 · 产线实时风', collab: '异常驱动 · 工单闭环', acts: ['mfg', 'scm'], colors: { accent: '#0f766e', soft: '#ccfbf1', deep: '#115e59' } },
@@ -23,7 +23,7 @@ const DEPT_META: Array<Pick<import('../service.ts').DeptConfigRecord, 'id' | 'la
   { id: 'fin', label: '财务部', icon: '💳', theme: '墨绿金 · 严谨合规风', collab: '流程驱动 · 审批留痕', acts: ['fin'], colors: { accent: '#047857', soft: '#d1fae5', deep: '#064e3b' } },
 ]
 
-/** 卡片按钮 → 平台链动作映射（演示卡片按语义落纯平台链；推送钉钉类走 dd.push）。 */
+/** Correspondance boutons de carte → actions de la chaîne plateforme (les cartes de démo tombent sémantiquement en chaîne plateforme pure ; les poussements type DingTalk passent par dd.push). */
 function mapOps(labels: string[]): MessageCardOp[] {
   return labels.map((label, index) => {
     const style: MessageCardOp['style'] = label.includes('钉钉') ? 'dd' : 'primary'
@@ -35,49 +35,49 @@ function mapOps(labels: string[]): MessageCardOp[] {
   })
 }
 
-/** 演示组织主键（01门 装态无组织目录时的激活/计量归属，与 index.ts orgIdOf 兜底同值）。 */
+/** Clé primaire de l'organisation de démonstration (rattachement activation/metering en forme installée porte 01 sans catalogue d'organisations, même valeur que le repli orgIdOf de index.ts). */
 export const DEMO_ORG_ID = 'demo-org'
 
 export function seedPanel(ctx: Context, panel: PanelService, autoDemo = false): void {
   const logger = ctx.logger('panel-seed')
-  // 幂等双入口：首启（集合空）播基线+演示；demoAuth 装态下 loader 热重载会以空 config
-  // 重放 apply——先播了基线骨架、后到的 autoDemo 需要能补齐演示内容（真机 gate01-npm 实证）
+  // Double entrée idempotente : premier démarrage (collection vide) sème base+démo ; en forme installée demoAuth, le rechargement à chaud du loader rejoue apply
+  // avec une config vide — la base du squelette est semée d'abord, l'autoDemo arrivé après doit pouvoir compléter le contenu de démo (constat machine réelle gate01-npm)
   if (panel.deptConfigs().count() > 0) {
-    // 存量部署：内置行业激活仍随启动幂等收敛（升级获得新增内置行业码的默认授权），
-    // 部门骨架/演示内容不重播
+    // Déploiement existant : l'activation intégrée des secteurs continue de converger idempotemment au démarrage (une montée de version donne les droits par défaut des nouveaux codes intégrés),
+    // squelettes de départements/contenu de démo non re-semés
     seedBuiltInActivations(ctx, panel, logger, autoDemo)
     if (autoDemo) seedDemoContent(ctx, panel, logger)
     return
   }
 
-  // -- 基线：五部门骨架 + 内置行业激活 + 组织名自动绑定（账号组织打通） ------------
-  // 组织目录缺席（01门演示态）→ 部门不绑组织（范围权限全开放）+ 跳过内置激活登记，
-  // 骨架与演示内容照常播种（plan-gate01 决策 2：未连接宿主时内置演示看板）
-  // 注意：panel 服务必须显式传参（dsh loader 代理 ctx 对未声明键的裸访问硬抛 without
-  // inject——panel 不可自 inject，与 service.ts soft() 同源教训，真机 gate01-local 实证）。
+  // -- Base : squelettes des cinq départements + activation intégrée + liaison automatique par nom d'organisation (interconnexion comptes-organisations) ------------
+  // Catalogue d'organisations absent (état démo porte 01) → départements non liés à une organisation (permissions de périmètre toutes ouvertes) + saut de l'enregistrement d'activation intégrée,
+  // squelette et contenu de démo semés comme d'habitude (décision 2 de plan-gate01 : tableau de bord démo intégré quand l'hôte n'est pas connecté)
+  // Note : le service panel doit passer les paramètres explicitement (le ctx proxy du loader dsh jette without inject sur l'accès nu à une clé non déclarée —
+   // panel ne peut pas s'auto-injecter, même leçon que soft() de service.ts, constat machine réelle gate01-local).
   const iam = ctx.reflect.get('iam', false) as any | undefined
   for (const meta of DEPT_META) {
-    // 组织名与部门名一致时自动绑定（真实部署按企业组织树命名即可零配置打通）；
-    // 不一致时由管理员经 PUT /api/panel/:dept/config 手工绑定
+    // Liaison automatique quand nom d'organisation = nom de département (un déploiement réel qui nomme l'arbre d'organisations de l'entreprise obtient l'interconnexion sans configuration) ;
+    // en cas de divergence, l'admin lie à la main via PUT /api/panel/:dept/config
     const matchedOrg = iam?.orgs().findOne((org: { name: string }) => org.name === meta.label)
     panel.deptConfigs().insert({ id: meta.id, ...meta, agents: [], kpis: [], widgets: [], ...(matchedOrg ? { orgId: matchedOrg.id } : {}) })
   }
-  // 内置图谱资产（packages/platform-core/scenegraphs/ 随平台分发）默认授权根组织；
-  // 其余组织/行业走「申请 → 审批（industry.activation，high）→ 激活」链路
+  // Les actifs de cartographie intégrés (packages/platform-core/scenegraphs/ distribués avec la plateforme) sont autorisés par défaut à l'organisation racine ;
+  // les autres organisations/secteurs passent par la chaîne « demande → approbation (industry.activation, high) → activation »
   seedBuiltInActivations(ctx, panel, logger, autoDemo)
   logger.info('面板基线：五部门骨架 + 内置行业激活（QB01/YB01/JB01）完成')
 
-  // 演示内容门控：DEMO_SEED=1（全量形态显式演示）或 autoDemo（01门 demoAuth 装态自动演示）
+  // Porte du contenu de démo : DEMO_SEED=1 (démo explicite en forme complète) ou autoDemo (démo automatique en forme installée demoAuth porte 01)
   if (process.env.DEMO_SEED !== '1' && !autoDemo) return
   seedDemoContent(ctx, panel, logger)
 }
 
 /**
- * 内置行业激活收敛（每次启动幂等执行，2026-09-11 IAW 改版）：
- * - 随启动收敛而非只在首启播种——存量部署升级（新增内置行业码）后重启即自动获得默认授权；
- * - 根组织解析带延迟重试：装态下面板 seed 与 iam 基线存在启动竞态（真机 gate01-local 实证：
- *   面板 seed 先于 iam 根组织 ~500ms，激活被误挂 demo-org 而实名用户解析到真实根组织 → 行业全落锁）；
- * - iam 缺席（纯演示形态）才落 demo-org 兜底。
+ * Convergence de l'activation intégrée des secteurs (exécutée idempotemment à chaque démarrage, refonte IAW 2026-09-11) :
+ * - convergence au démarrage plutôt que semis au seul premier démarrage — un déploiement existant qui monte de version (nouveaux codes intégrés) obtient les droits par défaut au redémarrage ;
+ * - la résolution de l'organisation racine a une retry différée : en forme installée, la graine du panneau et la base iam sont en course au démarrage (constat machine réelle gate01-local :
+ *   la graine panneau précède l'organisation racine iam d'environ 500 ms, l'activation se raccrochait à tort à demo-org alors que l'utilisateur nommé résout la vraie racine → tous les secteurs verrouillés) ;
+ * - seulement si iam est absent (forme purement démo) tombe-t-on sur le repli demo-org.
  */
 function seedBuiltInActivations(ctx: Context, panel: PanelService, logger: { info(msg: string): void }, autoDemo: boolean): void {
   const iam = ctx.reflect.get('iam', false) as any | undefined
@@ -90,9 +90,9 @@ function seedBuiltInActivations(ctx: Context, panel: PanelService, logger: { inf
   const rootOrgId = findRootOrgId()
   if (rootOrgId) { seedTo(rootOrgId); return }
   if (!iam) {
-    // dsh loader 并发装载：iam 服务可能晚于本插件发布（与本文件上方 admin 种子延迟重试同源教训，
-    // 真机 gate01-local 实证——激活被立即误挂 demo-org，实名用户解析真实根组织后行业全落锁）。
-    // demoAuth 装态轮询等待 iam（≤10s），拿到根组织即收敛；非演示形态无 iam 时维持原语义（不种）。
+    // Chargement concurrent du loader dsh : le service iam peut publier après cette extension (même leçon que la retry différée de la graine admin ci-dessus,
+    // constat machine réelle gate01-local — l'activation se raccrochait immédiatement à tort à demo-org, et après résolution de la vraie racine par l'utilisateur nommé, tous les secteurs verrouillés).
+    // En forme installée demoAuth, scrutin d'attente d'iam (≤10 s), convergence dès l'organisation racine obtenue ; en forme non démo sans iam, sémantique d'origine maintenue (pas de semis).
     if (!autoDemo) return
     let tries = 0
     const timer = setInterval(() => {
@@ -105,10 +105,10 @@ function seedBuiltInActivations(ctx: Context, panel: PanelService, logger: { inf
         seedTo(DEMO_ORG_ID)
       }
     }, 500)
-    try { timer.unref?.() } catch { /* 非 Node 环境忽略 */ }
+    try { timer.unref?.() } catch { /* hors Node : ignoré */ }
     return
   }
-  // iam 在场但基线未就绪（启动竞态）：每秒重试最多 15s，最终 autoDemo 落 demo-org 兜底
+  // iam présent mais base non prête (course au démarrage) : retry chaque seconde jusqu'à 15 s au plus, au final autoDemo tombe sur le repli demo-org
   let tries = 0
   const timer = setInterval(() => {
     const orgId = findRootOrgId()
@@ -119,16 +119,16 @@ function seedBuiltInActivations(ctx: Context, panel: PanelService, logger: { inf
       if (autoDemo) seedTo(DEMO_ORG_ID)
     }
   }, 1_000)
-  try { timer.unref?.() } catch { /* 非 Node 环境忽略 */ }
+  try { timer.unref?.() } catch { /* hors Node : ignoré */ }
 }
 
 /**
- * 演示内容幂等补齐（plan-gate01 决策 2）：对「仍是空骨架」的部门补播 KPI/Agent 阵容/widget/
- * 频道/会话/任务/知识。以「部门是否已有频道」为该部门演示内容已播标记（频道不空即跳过该
- * 部门全量演示），agents/kpis/widgets 单独按空判——重复 apply / 热重载 / 部分失败重放全部安全。
+ * Complétion idempotente du contenu de démo (décision 2 de plan-gate01) : complète en KPI/ligne-up d'Agents/widget/canaux/sessions/tâches/savoir les départements
+ * « encore squelettes ». « le département a-t-il déjà un canal » sert de marque de contenu de démo déjà semé (canal non vide = saut de toute la démo
+ * de ce département), agents/kpis/widgets jugés séparément sur la vacuité — rejouer apply / rechargement à chaud / rejeu partiellement échoué, tout est sûr.
  */
-/** 内置行业激活幂等登记（QB01 家电 / YB01 钢铁 / JB01 工程机械 默认授权；其余 11 行业走申请审批）：
- *  demoAuth 装态下 demo-org 兜底，重放安全。 */
+/** Enregistrement idempotent de l'activation intégrée (QB01 électroménager / YB01 acier / JB01 machines de chantier autorisés par défaut ; les 11 autres secteurs passent par demande-approbation) :
+ *  en forme installée demoAuth, repli demo-org, rejeu sûr. */
 function seedActivations(panel: PanelService, orgId: string): void {
   for (const code of ['QB01', 'YB01', 'JB01']) {
     if (panel.activations().findOne((item) => item.orgId === orgId && item.code === code)) continue
@@ -151,7 +151,7 @@ function seedDemoContent(ctx: Context, panel: PanelService, logger: { info(msg: 
   const demoPath = join(dirname(fileURLToPath(import.meta.url)), 'demo-content.json')
   const demo = JSON.parse(readFileSync(demoPath, 'utf8')) as { depts: Record<string, DemoDept> }
 
-  // 行业激活面幂等补齐（「有骨架无激活」中间态——如宿主强杀丢失部分持久层——也能恢复）
+  // Complétion idempotente de la face d'activation des secteurs (l'état intermédiaire « squelette sans activation » — ex. hôte tué brutalement perdant une partie de la persistance — se rétablit aussi)
   const iam = ctx.reflect.get('iam', false) as any | undefined
   const demoOrgId = iam?.orgs().find((org: { parentId: string | null }) => org.parentId === null).at(0)?.id ?? DEMO_ORG_ID
   seedActivations(panel, demoOrgId)
@@ -159,7 +159,7 @@ function seedDemoContent(ctx: Context, panel: PanelService, logger: { info(msg: 
   for (const [deptId, content] of Object.entries(demo.depts)) {
     const config = panel.deptConfigs().get(deptId)
     if (!config) continue
-    // 幂等标记：该部门已有频道 = 演示内容（频道/会话/任务/知识）已播过，只补配置面
+    // Marque idempotente : le département a déjà un canal = contenu de démo (canaux/sessions/tâches/savoir) déjà semé, ne compléter que la face configuration
     const alreadySeeded = panel.channels().find((item) => item.dept === deptId).length > 0
 
     if (config.agents.length === 0 && config.kpis.length === 0) {
@@ -172,7 +172,7 @@ function seedDemoContent(ctx: Context, panel: PanelService, logger: { info(msg: 
         type: widget.t as DeptWidget['type'],
         title: widget.title,
         ...(widget.live ? { live: true } : {}),
-        // 治理硬性 DoD：演示看板全部带「模拟数据」来源徽标，绝不冒充真实业务面
+        // DoD dur de gouvernance : tous les tableaux de bord de démo portent le badge de source « données simulées », jamais d'usurpation d'une vraie face métier
         source: 'mock',
         rows: widget.rows,
       }))
@@ -206,7 +206,7 @@ function seedDemoContent(ctx: Context, panel: PanelService, logger: { info(msg: 
       }
     }
 
-    // 任务看板演示（泳道状态机 todo/doing/review/done；场景编号引用沉淀回图谱）
+    // Démo du tableau des tâches (machine à états des couloirs todo/doing/review/done ; les références de codes de scénario se déposent dans la cartographie)
     const demoTasks: Array<[string, string, 'todo' | 'doing' | 'review' | 'done', string?]> = [
       ['rd', '低温启动需求拆解（V2.5-REQ-018）', 'doing', 'QB01-B-1-1'],
       ['rd', '!482 电机驱动过流保护评审', 'review'],
@@ -228,7 +228,7 @@ function seedDemoContent(ctx: Context, panel: PanelService, logger: { info(msg: 
       })
     }
 
-    // 部门知识演示（Agent 产出物沉淀）
+    // Démo du savoir départemental (dépôt des productions d'Agent)
     const demoArtifacts: Array<[string, string, string, string?]> = [
       ['rd', 'diagnosis', 'V2.5 低温启动需求拆解纪要', '6 任务 / 34 人日 / 关键路径可靠性试验 10 天'],
       ['mfg', 'order', '维修工单 WX-0912', '3# 冲床液压油温超阈值；对应 QB01-A-2-5 建议列入改造清单'],

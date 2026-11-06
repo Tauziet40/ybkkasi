@@ -1,16 +1,16 @@
 /**
- * 制造工具箱 —— 版本化 Skill 注册表（自「制造业 AI 工具集」server/skills.ts 并入）。
+ * Boîte à outils manufacture — registre de Skills versionné (intégré depuis « jeu d'outils IA manufacture » server/skills.ts).
  *
- * 铁律（源项目 docs/skill-quality.md，并入后不变）：候选 Skill 不会因为「能安装、能返回文本、
- * 市场有排名」就进入普通调用入口。本注册表只登记项目自撰写的提示词内核——不加载、不执行
- * 任何上传的指令文本（提示注入的第一道边界）。
+ * Loi d'airain (docs/skill-quality.md du projet source, inchangée après intégration) : un Skill candidat n'entre pas dans l'entrée d'appel ordinaire
+ * parce qu'il « s'installe, renvoie du texte, est bien classé au marché ». Ce registre n'enregistre que les noyaux de prompts rédigés par le projet — il ne charge ni n'exécute
+ * aucun texte d'instruction uploadé (première frontière contre l'injection de prompt).
  */
 
 export type Skill = {
   version: string
   origin: 'project-authored'
   license: string
-  /** 固定章节序列：模型输出必须按此顺序齐全，缺项或乱序即判不合格。 */
+  /** Séquence fixe de sections : la sortie du modèle doit les avoir toutes dans cet ordre ; manquante ou désordonnée = jugée non conforme. */
   sections: string[]
   instructions: string
 }

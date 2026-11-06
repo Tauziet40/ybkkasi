@@ -1,11 +1,11 @@
 /**
- * 接入客户端服务：远程 dsh 运行时（插件市场安装形态）连接宿主平台服务的客户端半部。
+ * Service client d'accès : moitié cliente du runtime dsh distant (forme installée via le marché de plugins) se connectant au service de la plateforme hôte.
  *
- * 职责：
- *   - 持久化宿主连接配置（<dataDir>/connect-client.json，0600，机器凭证仅本机明文）
- *   - 凭证三通道：接入码换机器凭证（enroll）/ 直接配置已有凭证 / 断开重置
- *   - 机器令牌缓存（client-credentials 换 2h machine token，失效自动重换，401 单次重试）
- *   - 工具远程代理：forward() 把平台 37 个运维工具的执行转发到宿主 /api/tools/execute
+ * Responsabilités :
+ *   - persister la configuration de connexion à l'hôte (<dataDir>/connect-client.json, 0600, identifiants machine en clair uniquement sur cette machine)
+ *   - trois voies d'identifiants : échange d'un code d'accès contre des identifiants machine (enroll) / configuration directe d'identifiants existants / déconnexion et réinitialisation
+ *   - cache du jeton machine (client-credentials contre un machine token de 2 h, renouvellement automatique à expiration, une unique retry sur 401)
+ *   - proxy distant d'outils : forward() transfère l'exécution des 37 outils d'exploitation de la plateforme vers l'hôte /api/tools/execute
  */
 import { existsSync } from 'node:fs'
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -15,7 +15,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Service } from '@deepseek-ai/cordis'
 import { t } from '../../platform-i18n/src/index.ts'
 
-/** 本机持久化的宿主连接配置（机器凭证等价于口令，文件权限收紧到 0600）。 */
+/** Configuration de connexion à l'hôte persistée localement (les identifiants machine équivalent à des mots de passe, permissions du fichier resserrées à 0600). */
 export interface ConnectClientConfig {
   hubUrl: string
   clientId: string
@@ -24,7 +24,7 @@ export interface ConnectClientConfig {
   template: string
   principalId: string
   enrolledAt: string
-  /** 最近一次转发失败信息（诊断用）。 */
+  /** Informations du dernier échec de transfert (à des fins de diagnostic). */
   lastError?: string
 }
 
@@ -41,10 +41,10 @@ export class ConnectClientService extends Service {
   private configFile: string
   private config: ConnectClientConfig | null = null
   private cached: CachedToken | null = null
-  /** 远程代理降级状态（OPT-P1-03）：安装失败时记录原因，connect_status 显式透出。 */
+  /** État de dégradation du proxy distant (OPT-P1-03) : raison consignée en cas d'échec d'installation, exposée explicitement par connect_status. */
   private degradedReason: string | undefined
   private degradedDetail: string | undefined
-  /** 转发失败告警节流（OPT-P1-03）：60s 内至多发一次 connect.degraded，避免重试风暴刷屏审计。 */
+  /** Throttling de l'alerte d'échec de transfert (OPT-P1-03) : au plus un connect.degraded par 60 s, pour éviter qu'une tempête de retries sature l'audit. */
   private lastForwardFailureEmitAt = 0
 
   constructor(ctx: Context, options: { dataDir?: string } = {}) {
@@ -53,7 +53,7 @@ export class ConnectClientService extends Service {
     this.config = this.load()
   }
 
-  /** 是否已配置宿主（决定工具代理走远程还是本地）。 */
+  /** Si un hôte est configuré (détermine si le proxy d'outils passe en distant ou en local). */
   hasHub(): boolean {
     return this.config !== null && this.config.hubUrl !== ''
   }
@@ -62,11 +62,11 @@ export class ConnectClientService extends Service {
     return this.config
   }
 
-  // ---------------------------------------------------------------- 凭证三通道
+  // ---------------------------------------------------------------- trois voies d'identifiants
 
   /**
-   * 接入码换机器凭证（Agent 一键申请口令的主通道）：
-   * 向宿主 POST /api/connect/enroll，成功后落盘 clientId/clientSecret。
+   * Échange d'un code d'accès contre des identifiants machine (voie principale de demande d'identifiants en un geste par l'Agent) :
+   * POST /api/connect/enroll vers l'hôte, puis persistance de clientId/clientSecret en cas de succès.
    */
   async enroll(input: { hubUrl: string; enrollmentCode: string; clientName?: string }): Promise<ConnectClientConfig> {
     const hubUrl = normalizeBaseUrl(input.hubUrl)
@@ -92,7 +92,7 @@ export class ConnectClientService extends Service {
     return this.config
   }
 
-  /** 直接配置已有机器凭证（管理员在宿主控制台手工签发后分发）。 */
+  /** Configuration directe d'identifiants machine existants (signés à la main par l'admin dans la console hôte puis distribués). */
   async loginWithCredential(input: { hubUrl: string; clientId: string; clientSecret: string; clientName?: string }): Promise<ConnectClientConfig> {
     const hubUrl = normalizeBaseUrl(input.hubUrl)
     if (!input.clientId || !input.clientSecret) throw new Error(t('clientId 与 clientSecret 必填'))
@@ -106,30 +106,30 @@ export class ConnectClientService extends Service {
       enrolledAt: new Date().toISOString(),
     }
     this.cached = null
-    // 立即验证凭证可用性（失败不落盘，避免写入坏配置）
+    // Vérifie immédiatement la validité des identifiants (en cas d'échec, rien n'est persisté afin d'éviter d'écrire une mauvaise configuration)
     const probe = await this.machineToken()
     void probe
     this.save()
     return this.config
   }
 
-  /** 断开：清除本机凭证与令牌缓存（不影响宿主侧，吊销请在宿主控制台操作）。 */
+  /** Déconnexion : efface les identifiants locaux et le cache de jetons (sans impact côté hôte ; la révocation se fait dans la console hôte). */
   reset(): void {
     this.config = null
     this.cached = null
     try {
       if (existsSync(this.configFile)) writeFileSync(this.configFile, JSON.stringify({ configured: false }, null, 2), 'utf8')
-    } catch { /* 清理失败不阻断断开 */ }
+    } catch { /* un échec de nettoyage n'interrompt pas la déconnexion */ }
   }
 
-  /** 更新内存态错误信息（供 status 诊断）。 */
+  /** Met à jour l'information d'erreur en mémoire (pour le diagnostic par status). */
   noteError(message: string): void {
     if (this.config) this.config = { ...this.config, lastError: message }
   }
 
-  // ---------------------------------------------------------------- 令牌与转发
+  // ---------------------------------------------------------------- jeton et transfert
 
-  /** 获取机器令牌（缓存 + 提前 60s 过期；失效自动走 client-credentials 重换）。 */
+  /** Obtient le jeton machine (cache + expiration anticipée de 60 s ; renouvellement automatique via client-credentials à expiration). */
   async machineToken(): Promise<string> {
     if (this.cached && this.cached.expiresAt > Date.now() + 60_000) return this.cached.token
     if (!this.config) throw new Error(t('尚未配置宿主服务，请先完成接入（connect_setup 或本地配置页）'))
@@ -144,7 +144,7 @@ export class ConnectClientService extends Service {
       return this.cached.token
     } catch (error) {
       if (error instanceof HubUnauthorizedError) {
-        // 机器凭证被吊销/禁用：重换无意义，直接给出可行动的诊断
+        // Identifiants machine révoqués/désactivés : un renouvellement serait inutile, fournir directement un diagnostic actionnable
         throw new Error(t('机器凭证无效或已在宿主侧吊销，请重新接入（connect_setup）或联系宿主管理员'))
       }
       throw error
@@ -152,9 +152,9 @@ export class ConnectClientService extends Service {
   }
 
   /**
-   * 工具远程代理：把一次工具调用转发到宿主工具桥。
-   * 宿主返回 { isError, value, error } —— 错误就地抛出，由本机 ToolRuntime 统一包装。
-   * 401（机器令牌过期/宿主密钥轮换）时重换令牌重试一次；凭证级失败不重试。
+   * Proxy distant d'outils : transfère un appel d'outil vers le pont d'outils de l'hôte.
+   * L'hôte renvoie { isError, value, error } — l'erreur est levée sur place, l'encapsulation uniforme est faite par le ToolRuntime local.
+   * Sur 401 (jeton machine expiré/rotation des clés de l'hôte), renouvelle le jeton et réessaie une fois ; les échecs de niveau identifiants ne sont pas réessayés.
    */
   async forward(toolName: string, args: Record<string, unknown>, exec?: { signal?: AbortSignal }): Promise<unknown> {
     if (!this.config) throw new Error(t('尚未配置宿主服务，本工具需要远程执行，请先完成接入'))
@@ -164,11 +164,11 @@ export class ConnectClientService extends Service {
       return await this.hubCall(hubUrl, 'POST', '/api/tools/execute', {
         name: toolName,
         args,
-        // 节点身份 ≠ 员工执行身份（D13/§10.4）：转发请求 additive 携带自身已验证主体绑定信封，
-        // 仅供宿主工具桥侧（/api/tools/execute）日志/归因观测。硬性边界：
-        //   1. 信封只随转发透传自身凭证绑定，不含任何可提升权限的声明；
-        //   2. 宿主鉴权仍以 Bearer 机器令牌独立验证，本字段绝不参与授权判定；
-        //   3. 不携带也不接受任何「平台内部请求」免验标记（§10.5：内部动作必须由受信任内部路径发起）。
+        // Identité du nœud ≠ identité d'exécution de l'employé (D13/§10.4) : la requête transférée porte de façon additive l'enveloppe de liaison de son propre principal vérifié,
+        // uniquement pour l'observation logs/attribution côté pont d'outils de l'hôte (/api/tools/execute). Frontières strictes :
+        //   1. l'enveloppe ne transmet que la liaison à ses propres identifiants lors du transfert, sans aucune déclaration permettant d'élever les droits ;
+        //   2. l'authentification de l'hôte reste vérifiée indépendamment par le jeton machine Bearer, ce champ ne participe jamais à la décision d'autorisation ;
+        //   3. ne porte ni n'accepte aucun marqueur d'exemption « requête interne plateforme » (§10.5 : les actions internes doivent être initiées par un chemin interne de confiance).
         meta: {
           principal: {
             kind: 'machine' as const,
@@ -208,17 +208,17 @@ export class ConnectClientService extends Service {
     }
   }
 
-  // ------------------------------------------------- 降级可观测（OPT-P1-03）
+  // ------------------------------------------------- observabilité de la dégradation (OPT-P1-03)
 
-  /** 安装级降级（扩展点缺失等）：状态持久记录，connect_status 显式透出。 */
+  /** Dégradation de niveau installation (points d'extension absents, etc.) : état consigné de façon persistante, exposé explicitement par connect_status. */
   noteDegraded(reason: string, detail?: string): void {
     this.degradedReason = reason
     this.degradedDetail = detail
   }
 
   /**
-   * 转发失败告警（OPT-P1-03 fail-closed）：调用侧已显式抛错不落本地，
-   * 此处补发 connect.degraded 事件（60s 节流）供总线/审计侧观测「以为在管远端其实在管本机」类语义漂移。
+   * Alerte d'échec de transfert (OPT-P1-03 fail-closed) : l'appelant lève déjà explicitement l'erreur sans repli local,
+   * ici est émis en complément l'événement connect.degraded (throttle 60 s) pour que le bus/audit observe les dérives sémantiques du type « on croit gérer le distant alors qu'on gère le local ».
    */
   noteForwardFailure(toolName: string, error: unknown): void {
     const now = Date.now()
@@ -227,15 +227,15 @@ export class ConnectClientService extends Service {
     const message = error instanceof Error ? error.message : String(error)
     try {
       this.ctx.platformBus?.emit('connect.degraded', { reason: 'forward_failed', tool: toolName, detail: message, at: new Date().toISOString() })
-    } catch { /* 总线未就绪：lastError 已由 noteError 记录 */ }
+    } catch { /* bus non prêt : lastError déjà consigné par noteError */ }
   }
 
-  // ---------------------------------------------------------------- 状态探测
+  // ---------------------------------------------------------------- sondage d'état
 
   /**
-   * 心跳上报（接入方 → 宿主主动推送）：POST /api/connect/heartbeat，
-   * 携带运行元信息（工具数 / 运行版本 / uptime），宿主侧「平台接入」可见最近心跳。
-   * 未配置宿主时静默跳过；失败由调用方记录（noteError），不抛出阻断定时器。
+   * Envoi de battement de cœur (côté accès → poussée active vers l'hôte) : POST /api/connect/heartbeat,
+   * transporte les métadonnées d'exécution (nombre d'outils / version du runtime / uptime), le dernier battement est visible côté hôte dans « accès plateforme ».
+   * Silencieusement ignoré si aucun hôte configuré ; l'échec est consigné par l'appelant (noteError), pas d'exception pour ne pas bloquer le minuteur.
    */
   async heartbeat(meta: { tools?: number; version?: string; uptimeSec?: number } = {}): Promise<void> {
     if (!this.config) return
@@ -245,7 +245,7 @@ export class ConnectClientService extends Service {
     })
   }
 
-  /** 连通性探测（不要求已配置凭证）：宿主健康 + 平台信息。 */
+  /** Sondage de connectivité (n'exige pas d'identifiants configurés) : santé de l'hôte + informations de la plateforme. */
   async probeHub(hubUrl?: string): Promise<{ reachable: boolean; health?: unknown; platform?: { name: string; version: string; tools: number }; error?: string }> {
     const base = normalizeBaseUrl(hubUrl ?? this.config?.hubUrl ?? '')
     if (!base) return { reachable: false, error: t('未指定宿主地址') }
@@ -263,7 +263,7 @@ export class ConnectClientService extends Service {
     }
   }
 
-  /** 面向 Agent/配置页的状态快照。 */
+  /** Instantané d'état destiné à l'Agent/à la page de configuration. */
   async status(): Promise<Record<string, unknown>> {
     const config = this.config
     const base = {
@@ -293,7 +293,7 @@ export class ConnectClientService extends Service {
     }
   }
 
-  // ---------------------------------------------------------------- 内部工具
+  // ---------------------------------------------------------------- outils internes
 
   private load(): ConnectClientConfig | null {
     try {
@@ -319,7 +319,7 @@ export class ConnectClientService extends Service {
     try {
       mkdirSync(dirname(this.configFile), { recursive: true })
       writeFileSync(this.configFile, JSON.stringify(this.config, null, 2), { encoding: 'utf8', mode: 0o600 })
-      try { chmodSync(this.configFile, 0o600) } catch { /* Windows 无 chmod */ }
+      try { chmodSync(this.configFile, 0o600) } catch { /* Windows n'a pas de chmod */ }
     } catch (error) {
       console.error('[connect] 客户端配置落盘失败', error)
     }
@@ -348,7 +348,7 @@ export class ConnectClientService extends Service {
 
 class HubUnauthorizedError extends Error {}
 
-/** 判定一个工具是否应被远程代理（connect_* 自身工具始终本地执行）。 */
+/** Détermine si un outil doit être pris en charge par le proxy distant (les propres outils connect_* s'exécutent toujours en local). */
 export function isProxiedTool(name: string): boolean {
   return !name.startsWith(CONNECT_TOOLS_PREFIX)
 }

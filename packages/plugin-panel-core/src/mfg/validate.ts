@@ -1,14 +1,14 @@
 /**
- * 制造工具箱 —— 执行期输入/输出校验（自「制造业 AI 工具集」zod Schema 等价改写）。
+ * Boîte à outils manufacture — validation entrée/sortie à l'exécution (réécriture équivalente des schémas zod du « jeu d'outils IA manufacture »).
  *
- * 为什么手写而不引 zod：01门随附包在安装形态下零 TS 装载、零构建依赖，dist 为
- * 预构建纯 JS 镜像（scripts/build-dist.mjs 逐文件转译，不做模块解析）——引入新运行期
- * 依赖会同时破坏装机闭包与 build-id 语义。本文件以等价语义覆盖源项目仅用的三个能力面：
- *   - 数值：有限、上下界；
- *   - 字符串：trim 后非空、长度上限；
- *   - 对象：strict（未知字段一律拒绝——源项目「拒绝多余参数」断言依赖此语义）。
+ * Pourquoi écrire à la main plutôt qu'importer zod : le paquet de la porte 01, en forme installée, charge zéro TS, zéro dépendance de build ; dist est
+ * un miroir pur JS pré-construit (scripts/build-dist.mjs transpile fichier par fichier, sans résolution de modules) — introduire une nouvelle dépendance
+ * d'exécution casserait à la fois la fermeture d'installation et la sémantique du build-id. Ce fichier couvre en sémantique équivalente les trois seules faces utilisées par le projet source :
+ *   - numérique : fini, bornes inf/sup ;
+ *   - chaîne : non vide après trim, plafond de longueur ;
+ *   - objet : strict (tout champ inconnu refusé — l'assertion « refuser les paramètres superflus » du projet source dépend de cette sémantique).
  *
- * 错误一律走 MfgError（与源项目 ToolError 同形：code/message/status）。
+ * Toute erreur passe par MfgError (même forme que le ToolError du projet source : code/message/status).
  */
 
 export class MfgError extends Error {
@@ -30,10 +30,10 @@ export const requireCondition = (ok: boolean, message: string, code = 'INVALID_I
   if (!ok) fail(code, message)
 }
 
-/** 字段值上限：与源项目一致（16k 字符，防超长文本灌入模型）。 */
+/** Plafond de valeur de champ : identique au projet source (16k caractères, contre l'inondation du modèle par les textes surchargés). */
 export const TEXT_MAX = 16000
 
-/** 数值字段校验：有限 + 上下界（缺省下界 0 由字段定义给出）。 */
+/** Validation d'un champ numérique : fini + bornes (la borne inférieure par défaut 0 est donnée par la définition du champ). */
 export function checkNumber(value: unknown, label: string, min?: number, max?: number): number {
   const num = typeof value === 'number' ? value : Number(value)
   if (typeof value === 'boolean' || value === null || value === undefined || value === '' || !Number.isFinite(num)) {
@@ -44,7 +44,7 @@ export function checkNumber(value: unknown, label: string, min?: number, max?: n
   return num
 }
 
-/** 文本字段校验：trim 后非空 + 长度上限。 */
+/** Validation d'un champ texte : non vide après trim + plafond de longueur. */
 export function checkText(value: unknown, label: string, max = TEXT_MAX): string {
   if (typeof value !== 'string') fail('INVALID_INPUT', `${label}不能为空`)
   const text = value.trim()
@@ -53,7 +53,7 @@ export function checkText(value: unknown, label: string, max = TEXT_MAX): string
   return text
 }
 
-/** 整数校验（安全整数域：跨字段运算不溢出）。 */
+/** Validation d'entier (domaine des entiers sûrs : pas de débordement dans les calculs inter-champs). */
 export function checkInteger(value: unknown, label: string): number {
   const num = checkNumber(value, label)
   if (!Number.isSafeInteger(num)) fail('INVALID_INPUT', `${label}须为安全范围内的整数`)
@@ -61,8 +61,8 @@ export function checkInteger(value: unknown, label: string): number {
 }
 
 /**
- * strict 对象校验：未知字段一律拒绝（源项目「注入字段被拒」断言的语义基础）。
- * 返回按声明字段重建的干净对象——调用方拿不到原始对象，杜绝旁路字段透传。
+ * Validation d'objet strict : tout champ inconnu est refusé (base sémantique de l'assertion « champ injecté rejeté » du projet source).
+ * Renvoie un objet propre reconstruit selon les champs déclarés — l'appelant n'a pas l'objet original, aucune transmission de champ de contournement.
  */
 export function checkStrictObject<T extends Record<string, unknown>>(
   raw: unknown,
@@ -81,7 +81,7 @@ export function checkStrictObject<T extends Record<string, unknown>>(
 }
 
 // ---------------------------------------------------------------------------
-// 模型输出协议校验（源项目 modelOutputSchema 等价改写）
+// Validation du protocole de sortie du modèle (réécriture équivalente du modelOutputSchema du projet source)
 // ---------------------------------------------------------------------------
 
 export type ModelSection = { title: string; content: string; evidence: string[] }
@@ -91,8 +91,8 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 
 /**
- * 校验模型返回的 JSON 结构。任一违规抛出 MfgError('QUALITY_SCHEMA')——
- * 与源项目一致：不合格输出按错误交付，绝不降级当成功结果。
+ * Valide la structure JSON renvoyée par le modèle. Toute violation lève MfgError('QUALITY_SCHEMA') —
+ * comme le projet source : une sortie non conforme est livrée en erreur, jamais rétrogradée en résultat de succès.
  */
 export function checkModelOutputSchema(raw: unknown): ModelOutput {
   if (!isPlainObject(raw)) fail('QUALITY_SCHEMA', '模型输出未通过结构校验，本次结果未交付。', 502)

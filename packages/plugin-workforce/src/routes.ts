@@ -1,9 +1,9 @@
 /**
- * REST 工作面（/api/workforce/*，路径与权限点以 manifest/api.yaml 为唯一事实源）。
+ * Face de travail REST (/api/workforce/*, chemins et points de permission ayant manifest/api.yaml pour unique source de fait).
  *
- * 统一约定：callerRef＝gate.caller(exchange)（console 鉴权中间件先行写入 principal）；
- * WorkforceError → exchange.fail(e.httpStatus, e.code, e.message)；
- * 管理类写操作走 gate.changeLog 留痕（受控调用/交付自身已是权威账本，不重复审计）。
+ * Convention unifiée : callerRef = gate.caller(exchange) (le middleware d'authentification console a déjà écrit le principal) ;
+ * WorkforceError → exchange.fail(e.httpStatus, e.code, e.message) ;
+ * les opérations d'écriture de gestion passent par gate.changeLog pour la traçabilité (les appels contrôlés/les livraisons sont eux-mêmes des registres de référence, pas de double audit).
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { createRestGate, type RestGate } from '../../platform-core/src/rest-gate.ts'
@@ -45,9 +45,9 @@ function services(ctx: Context): WorkforceServices {
   if (missing.length > 0) {
     throw new WorkforceError('WORKFORCE_NOT_READY', t('数字员工服务未就绪：{missing}', { missing: missing.join('、') }), 503)
   }
-  // 显式按接口字段名组包（ctx 不得原样强转返回：调用方按 store/employees/… 取用，
-  // 而 ctx 上的服务键是 workforceStore/workforceEmployees/…——原样返回会让 svc.store
-  // 变成对 ctx 的未知属性读取，被 cordis 判 without inject 抛 400）
+  // Assemblage explicite par noms de champs d'interface (ctx ne doit pas être renvoyé par simple cast : l'appelant consomme via store/employees/…,
+  // alors que les clés de services sur ctx sont workforceStore/workforceEmployees/… — un retour brut ferait de svc.store
+  // une lecture de propriété inconnue de ctx, rejetée par cordis en without inject avec un 400)
   return {
     store: source.workforceStore,
     employees: source.workforceEmployees,
@@ -60,7 +60,7 @@ function services(ctx: Context): WorkforceServices {
   } as WorkforceServices
 }
 
-/** gate.caller → 可信 caller（与 tools.ts 同规则；禁止从请求体读身份）。 */
+/** gate.caller → caller de confiance (même règle que tools.ts ; lecture d'identité depuis le corps de requête interdite). */
 function callerRefOf(gate: RestGate, exchange: HttpExchange): WorkCallerRef {
   const info = gate.caller(exchange)
   return {
@@ -73,7 +73,7 @@ function callerRefOf(gate: RestGate, exchange: HttpExchange): WorkCallerRef {
   }
 }
 
-/** 统一错误出口：领域错误按 httpStatus/code 透传，其余 400。 */
+/** Sortie d'erreur unifiée : les erreurs de domaine passent telles quelles avec httpStatus/code, le reste en 400. */
 function failOf(exchange: HttpExchange, error: unknown): void {
   if (error instanceof WorkforceError) {
     exchange.fail(error.httpStatus, error.code, error.message)
@@ -123,7 +123,7 @@ function parseGrants(value: unknown): ResourceGrantSpec[] {
 export function registerWorkforceRoutes(ctx: Context): void {
   const gate = createRestGate(ctx as unknown as Parameters<typeof createRestGate>[0])
 
-  // -- 总览 ---------------------------------------------------------------
+  // -- Vue d'ensemble ---------------------------------------------------------------
 
   gate.guarded('GET', '/api/workforce/overview', 'workforce.read', () => {
     const svc = services(ctx)
@@ -138,11 +138,11 @@ export function registerWorkforceRoutes(ctx: Context): void {
     }
   })
 
-  // -- 员工 ---------------------------------------------------------------
+  // -- Employés ---------------------------------------------------------------
 
   gate.guarded('GET', '/api/workforce/employees', 'workforce.read', (exchange) => {
     const svc = services(ctx)
-    // 查询串取 exchange.query（HttpExchange 无 request 字段——W 批次修复存量缺陷，原 exchange.request.url 运行时必炸）
+    // Chaîne de requête via exchange.query (HttpExchange n'a pas de champ request — correctif d'un défaut historique du lot W, l'ancien exchange.request.url explosait systématiquement à l'exécution)
     const orgId = exchange.query.get('orgId') ?? undefined
     const status = exchange.query.get('status') ?? undefined
     const records = svc.employees.list({
@@ -202,7 +202,7 @@ export function registerWorkforceRoutes(ctx: Context): void {
     return binding
   })
 
-  // -- 任用 ---------------------------------------------------------------
+  // -- Nominations ---------------------------------------------------------------
 
   gate.guarded('GET', '/api/workforce/appointments', 'workforce.read', (exchange) => {
     const svc = services(ctx)
@@ -248,7 +248,7 @@ export function registerWorkforceRoutes(ctx: Context): void {
     return record
   })
 
-  // -- 待办拉取（运行时按机器主体反查员工待办，不接受任意员工过滤，§13.1） ---------
+  // -- Récupération des tâches à faire (le runtime recherche les tâches de l'employé par sujet machine, aucun filtrage d'employé arbitraire, §13.1) ---------
 
   gate.guarded('GET', '/api/workforce/work-items', 'workforce.invoke', async (exchange) => {
     const svc = services(ctx)
@@ -272,7 +272,7 @@ export function registerWorkforceRoutes(ctx: Context): void {
     return { employeeId: resolution.employee.id, agentId, items: issues }
   })
 
-  // -- 认领与续租 -----------------------------------------------------------
+  // -- Réclamation et prolongation -----------------------------------------------------------
 
   gate.guarded('POST', '/api/workforce/claims', 'workforce.invoke', async (exchange) => {
     const svc = services(ctx)
@@ -316,7 +316,7 @@ export function registerWorkforceRoutes(ctx: Context): void {
     return { ok: true, lease: result.lease }
   })
 
-  // -- 受控调用账本 ---------------------------------------------------------
+  // -- Registre des appels contrôlés ---------------------------------------------------------
 
   gate.guarded('POST', '/api/workforce/invocations', 'workforce.invoke', async (exchange) => {
     const svc = services(ctx)
@@ -328,7 +328,7 @@ export function registerWorkforceRoutes(ctx: Context): void {
       arguments: body['arguments'],
       ...(typeof body['traceId'] === 'string' && body['traceId'] ? { traceId: body['traceId'] } : {}),
     })
-    // 领域状态与 HTTP 状态分开保留（§9.3：不以 HTTP 200 冒充业务成功，也不以 4xx 丢失领域状态）
+    // L'état du domaine et l'état HTTP sont conservés séparément (§9.3 : un HTTP 200 ne fait pas passer un succès métier, et un 4xx ne perd pas l'état du domaine)
     return { ok: outcome.status === 'completed', ...outcome }
   })
 
@@ -344,7 +344,7 @@ export function registerWorkforceRoutes(ctx: Context): void {
     return svc.invocations.listByRun(callerRefOf(gate, exchange), runId)
   })
 
-  // -- 受控 artifact ---------------------------------------------------------
+  // -- Artefacts contrôlés ---------------------------------------------------------
 
   gate.guarded('POST', '/api/workforce/artifacts', 'workforce.invoke', async (exchange) => {
     const svc = services(ctx)
@@ -366,7 +366,7 @@ export function registerWorkforceRoutes(ctx: Context): void {
     return svc.artifacts.get(callerRefOf(gate, exchange), exchange.params['id'] ?? '')
   })
 
-  // -- 交付 -----------------------------------------------------------------
+  // -- Livraisons -----------------------------------------------------------------
 
   gate.guarded('POST', '/api/workforce/deliverables', 'workforce.invoke', async (exchange) => {
     const svc = services(ctx)
@@ -387,7 +387,7 @@ export function registerWorkforceRoutes(ctx: Context): void {
     return svc.delivery.listByRun(callerRefOf(gate, exchange), runId)
   })
 
-  // -- 验收（真人，workforce.accept） -----------------------------------------
+  // -- Acceptation (humain, workforce.accept) -----------------------------------------
 
   gate.guarded('POST', '/api/workforce/acceptances', 'workforce.accept', async (exchange) => {
     const svc = services(ctx)
@@ -405,13 +405,13 @@ export function registerWorkforceRoutes(ctx: Context): void {
     return record
   })
 
-  // -- 运维面（workforce.admin，W5 决策 D-③ three-in-one 最小集） ---------------------------
-  // 本段是 workforce.admin 权限点的代码落点（此前仅清单/目录声明，contract-lint 报 perm_unused
-  // 预留告警；此处 guarded 第三参字面量即销账依据——routeRe 只认字面量引用）。
-  // 跨组织口径：admin 运维面直接读 store 表做穿透查询，不走 invocation-service 的 assertReadable
-  // （org 隔离是员工工作面的口径）——权限点即边界。
+  // -- Face opérationnelle (workforce.admin, décision W5 D-③ ensemble minimal trois-en-un) ---------------------------
+  // Cette section est le point d'atterrissage code du point de permission workforce.admin (auparavant seule déclaration dans l'inventaire/le catalogue, contract-lint rapportait l'avertissement
+  // perm_unused ; le littéral du 3e paramètre de guarded ici vaut justificatif d'apurement — routeRe ne reconnaît que les références littérales).
+  // Référentiel inter-organisations : la face opérationnelle admin lit directement les tables du store en requête traversante, sans passer par l'assertReadable d'invocation-service
+  // (l'isolation org est le référentiel de la face de travail de l'employé) — le point de permission est la frontière.
 
-  /** audit/invocations 查询的公共 limit 口径：默认 50，上限 500（穿透查询防全量拖库）。 */
+  /** Référentiel commun de limit pour les requêtes audit/invocations : défaut 50, plafond 500 (requête traversante, empêche le vidage intégral de la base). */
   function readLimit(query: URLSearchParams): number {
     const raw = Number(query.get('limit') ?? 50)
     return Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), 500) : 50
@@ -433,16 +433,16 @@ export function registerWorkforceRoutes(ctx: Context): void {
     const caller = callerRefOf(gate, exchange)
     const now = new Date().toISOString()
     const results: Array<{ employeeId: string; ok: boolean; error?: string; revokedPermits?: number; releasedRuns?: string[] }> = []
-    // 逐员工独立事务（不整批回滚）：setStatus 内部「撤 permit→释放租约→状态落库」是单员工
-    // 完整 fail-closed 闭环（employee-service.ts 一字不改）；部分失败如实呈现在 results，
-    // 响应即实体现实况，运维按条补办。
+    // Transaction indépendante par employé (pas de rollback global du lot) : le setStatus interne « révocation des permits→libération des baux→écriture de l'état » forme pour un seul employé
+    // une boucle fail-closed complète (employee-service.ts inchangé d'un caractère) ; les échecs partiels sont rendus honnêtement dans results,
+    // la réponse est l'état réel des entités, l'exploitation complète au cas par cas.
     for (const employeeId of employeeIds) {
       const beforeActive = svc.store.permits.findWhere({ employeeId, status: 'active' })
       try {
         await svc.employees.setStatus(caller, employeeId, status, reason)
         const afterStatus = new Map(svc.store.permits.findWhere({ employeeId }).map((permit) => [permit.id, permit.status]))
-        // releasedRuns：停职时取「撤前 active permit 的 run，且撤后该 run 已无有效 permit」；
-        // 复岗不释放租约（恒空）。租约权威在 exec-hub（终态封存），此处为台账可观测投影。
+        // releasedRuns : en suspension, prend « les runs des permits active avant révocation, tels qu'après révocation ce run n'a plus de permit valide » ;
+        // la reprise ne libère pas de bail (toujours vide). La référence des baux est dans exec-hub (archivage à l'état terminal), ici une projection observable du registre.
         const releasedRuns = status === 'suspended'
           ? [...new Set(beforeActive.map((permit) => permit.runId).filter((runId) => runId !== ''))]
               .filter((runId) => !svc.store.permits.findWhere({ runId })
@@ -470,8 +470,8 @@ export function registerWorkforceRoutes(ctx: Context): void {
     const employeeId = exchange.params['id'] ?? ''
     const employee = svc.store.employees.get(employeeId)
     if (!employee) throw new Error(t('数字员工不存在：{id}', { id: employeeId }))
-    // 跨组织穿透说明：本端点由 workforce.admin 把守，直接读 store 表按 employeeId/appointmentId
-    // 串链（不走 assertReadable 的 org 隔离）——admin 运维面审计报表，权限点即边界。
+    // Note sur la traversée inter-organisations : ce endpoint est gardé par workforce.admin, lit directement les tables du store en enchaînant par employeeId/appointmentId
+    // (sans passer par l'isolation org d'assertReadable) — rapport d'audit de la face opérationnelle admin, le point de permission est la frontière.
     const limit = readLimit(exchange.query)
     const now = new Date().toISOString()
     const bindings = svc.store.bindings.findWhere({ employeeId })
@@ -495,8 +495,8 @@ export function registerWorkforceRoutes(ctx: Context): void {
       invocations: allInvocations.slice(0, limit),
       deliverables,
       summary: {
-        // 有效=active 且未过 expiresAt；过期按 expiresAt<=now 事实计算（库里可能还没有
-        // expired 落账行——落账收敛见 MaintenanceService.run）
+        // Valide = active et non passé expiresAt ; expiré calculé sur le fait expiresAt<=now (la base peut ne pas encore contenir
+        // de ligne expired comptabilisée — la convergence de la comptabilisation relève de MaintenanceService.run)
         permitActive: permits.filter((permit) => permit.status === 'active' && (!permit.expiresAt || permit.expiresAt > now)).length,
         permitExpired: permits.filter((permit) => permit.expiresAt !== '' && permit.expiresAt <= now).length,
         invocationCount: allInvocations.length,
@@ -509,8 +509,8 @@ export function registerWorkforceRoutes(ctx: Context): void {
 
   gate.guarded('GET', '/api/workforce/admin/invocations', 'workforce.admin', (exchange) => {
     const svc = services(ctx)
-    // 跨组织调用账本穿透查询（admin 运维面，权限点即边界；工作面 GET /invocations 只按 runId
-    // 且过归属校验——本端点是运维对账口，createdAt 倒序）
+    // Requête traversante inter-organisations du registre des appels (face opérationnelle admin, le point de permission est la frontière ; la face de travail GET /invocations ne fait que par runId
+    // et passe le contrôle d'appartenance — ce endpoint est l'entrée de réconciliation d'exploitation, tri inverse sur createdAt)
     const query = exchange.query
     const employeeId = query.get('employeeId') ?? ''
     const runId = query.get('runId') ?? ''
@@ -523,7 +523,7 @@ export function registerWorkforceRoutes(ctx: Context): void {
   })
 
   gate.guarded('POST', '/api/workforce/admin/maintenance/run', 'workforce.admin', (exchange) => {
-    // 定时器跑 + admin 手动跑同一函数（POST /api/exec/tick、POST /api/usage/retention/purge 同款先例）
+    // Le minuteur et le déclenchement manuel admin exécutent la même fonction (mêmes précédents que POST /api/exec/tick, POST /api/usage/retention/purge)
     const maintenance = (ctx as unknown as { workforceMaintenance?: { run(): MaintenanceRunResult } }).workforceMaintenance
     if (!maintenance || typeof maintenance.run !== 'function') {
       throw new WorkforceError('WORKFORCE_NOT_READY', t('台账维护服务未就绪'), 503)

@@ -1,9 +1,9 @@
 /**
- * open-connector 侧错误模型：统一信封 { success:false, errorCode } → 平台错误的唯一映射处。
- * client.ts 是全仓唯一感知 open-connector v1.4.0 契约的适配层（版本锁定隔离），其余代码只见本文件语义。
+ * Modèle d'erreurs côté open-connector : enveloppe unifiée { success:false, errorCode } → unique lieu de mise en correspondance vers les erreurs de la plateforme.
+ * client.ts est la seule couche d'adaptation du dépôt conscient du contrat open-connector v1.4.0 (verrouillage de version isolé), le reste du code ne voit que la sémantique du présent fichier.
  */
 
-/** 错误码 → HTTP 状态与平台提示文案（v1.4.0 文档载明的错误码子集 + 上游文档未载项按默认处理）。 */
+/** Code d'erreur → statut HTTP et libellé de message plateforme (sous-ensemble des codes documentés v1.4.0 + points non documentés en amont traités par défaut). */
 import { t } from '../../platform-i18n/src/index.ts'
 
 const OC_ERROR_STATUS: Record<string, number> = {
@@ -17,9 +17,9 @@ const OC_ERROR_STATUS: Record<string, number> = {
 
 export class OcError extends Error {
   readonly code: string
-  /** 建议 HTTP 状态码（console 路由层透传给调用方）。 */
+  /** Code de statut HTTP conseillé (transmis à l'appelant par la couche de routage console). */
   readonly status: number
-  /** 面向连接向导的修复指引（如 OAuth 自备 App 注册链接说明）。 */
+  /** Guide de correction destiné à l'assistant de connexion (ex. lien d'enregistrement OAuth d'une App apportée par le client). */
   readonly guidance?: string
 
   constructor(code: string, message?: string, guidance?: string, status?: number) {
@@ -31,7 +31,7 @@ export class OcError extends Error {
   }
 }
 
-/** sidecar 不可达 / 响应非契约形态——fail-closed 判定的输入。 */
+/** Sidecar injoignable / réponse hors forme contractuelle — entrée du jugement fail-closed. */
 export class OcUnavailableError extends OcError {
   constructor(message: string) {
     super('gateway_unreachable', message)
