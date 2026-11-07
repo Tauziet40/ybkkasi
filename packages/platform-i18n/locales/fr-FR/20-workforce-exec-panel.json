@@ -451,7 +451,7 @@
   "验收决定必须由真人作出（模型输出「成功」与 HTTP 200 都不能关闭业务任务）": "Les décisions d'acceptation doivent être prises par un humain (ni une sortie de modèle disant « succès » ni un HTTP 200 ne peuvent clôturer une tâche métier)",
   "验收通过": "accepté",
   "验收通过但任务状态回写失败：{message}": "Acceptation passée mais échec de la réécriture du statut de la tâche : {message}",
-  "👉 [到元冰可控制台处理]({url})": "👉 [Traiter dans la console method]({url})",
+  "👉 [到元冰可控制台处理]({url})": "👉 [Traiter dans la console YuanBingKe]({url})",
   "🗺 {pack}场景卡：{scene}": "🗺 Carte de scène {pack} : {scene}",
   "（允许：{allowed}）": " (autorisé : {allowed})",
   "（无）": "(aucun)",

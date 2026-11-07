@@ -451,7 +451,7 @@
   "验收决定必须由真人作出（模型输出「成功」与 HTTP 200 都不能关闭业务任务）": "Acceptance decisions must be made by a human (neither a model outputting \"success\" nor an HTTP 200 can close a business issue)",
   "验收通过": "accepted",
   "验收通过但任务状态回写失败：{message}": "Acceptance passed but the issue status write-back failed: {message}",
-  "👉 [到元冰可控制台处理]({url})": "👉 [Handle it in the method console]({url})",
+  "👉 [到元冰可控制台处理]({url})": "👉 [Handle it in the YuanBingKe console]({url})",
   "🗺 {pack}场景卡：{scene}": "🗺 {pack} scenario card: {scene}",
   "（允许：{allowed}）": " (allowed: {allowed})",
   "（无）": "(none)",
