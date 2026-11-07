@@ -79,13 +79,13 @@ import { mountUpdateBadge, openUpdateDrawer } from './update.js'
 // 的一条主线，混在资源台账里会被误读成又一类可盘点资产；资源组只留被管理对象本身。
 // 资产登记（#/register）已下线：登记入口分别落在各资源页自身的新建动作上，不再有独立的登记看板。
 const NAV = [
-  { section: '总览', items: [
+  { section: rqI18n.t('总览'), items: [
     { path: '#/dashboard', label: '工作台', icon: 'dashboard', perm: 'console.login' },
     // 部门面板（2026-10-22）：不再是硬编码外链，改为「宿主连接 × 部门」登记清单页（#/panels）。
     // 只有登记过的面板才有一键入口——把「从哪个宿主进哪个部门」变成可管理的事实，而不是靠目标宿主记忆。
     { path: '#/panels', label: '部门面板', icon: 'users', perm: 'panel.read' },
   ] },
-  { section: '资源', items: [
+  { section: rqI18n.t('资源'), items: [
     { path: '#/assets', label: '资产台账', icon: 'boxes', perm: 'usage.read' },
     { path: '#/skills', label: 'Skill 市场', icon: 'store', perm: 'skill.read', badge: 'skills' },
     { path: '#/gateway', label: '模型网关', icon: 'route', perm: 'usage.read' },
@@ -97,7 +97,7 @@ const NAV = [
     { path: '#/nas', label: 'NAS 存储', icon: 'server', perm: 'nas.read' },
     { path: '#/connectors', label: '连接器', icon: 'plug', perm: 'connector.catalog.read' },
   ] },
-  { section: '协作与执行', items: [
+  { section: rqI18n.t('协作与执行'), items: [
     // 执行中枢：目标/项目/任务/调度四位一体（#/exec），工作台「目标与价值/行动项目」tab 的下钻落点
     { path: '#/exec', label: '执行中枢', icon: 'target', perm: 'exec.read' },
     // A2A 协作：数字员工跨运行时协作面（目录发现 / 任务追踪 / 履约与巡检），读权限随目录
@@ -105,7 +105,7 @@ const NAV = [
     // UHP 执行：harnesses 注册表 + 执行记录（A2A 页的 UHP tab 的一级入口；同一页面不同落点）
     { path: '#/a2a?tab=uhp', label: 'UHP 执行', icon: 'cpu', perm: 'uhp.read' },
   ] },
-  { section: '治理', items: [
+  { section: rqI18n.t('治理'), items: [
     { path: '#/usage', label: '用量与成本', icon: 'barChart3', perm: 'usage.read' },
     { path: '#/finops', label: '财务视图', icon: 'coins', perm: 'usage.read' },
     { path: '#/nas-authz', label: '数据权限', icon: 'shield', perm: 'nas.authz.read' },
@@ -113,7 +113,7 @@ const NAV = [
     { path: '#/audit', label: '审计与告警', icon: 'shieldAlert', perm: 'audit.read', badge: 'alerts' },
     { path: '#/authn', label: '认证与令牌', icon: 'key', perm: 'authn.principal.read' },
   ] },
-  { section: '企业', items: [
+  { section: rqI18n.t('企业'), items: [
     { path: '#/iam', label: '组织与账号', icon: 'building2', perm: 'iam.user.read' },
     { path: '#/iam?tab=roles', label: '角色权限', icon: 'shield', perm: 'iam.org.read' },
     { path: '#/iam?tab=connectors', label: '三方集成', icon: 'link', perm: 'iam.org.read' },
